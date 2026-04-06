@@ -51,6 +51,7 @@ I regularly publish my own `pi-mono` work sessions here:
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Pire Profile](#pire-profile)
 - [Providers & Models](#providers--models)
 - [Interactive Mode](#interactive-mode)
   - [Editor](#editor)
@@ -97,6 +98,40 @@ pi
 Then just talk to pi. By default, pi gives the model four tools: `read`, `write`, `edit`, and `bash`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [pi packages](#pi-packages).
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
+
+---
+
+## Pire Profile
+
+`pire` is a project-local reverse-engineering and security-research profile layered on top of pi. It is activated by placing a `.pire/` directory in your repo. Pi auto-discovers `.pire/SYSTEM.md`, `.pire/APPEND_SYSTEM.md`, `.pire/prompts/`, `.pire/skills/`, and `.pire/extensions/`.
+
+The starter `pire` profile in this repo provides:
+- A research-first base prompt via `.pire/SYSTEM.md`
+- Supplemental engagement and opsec guidance via `.pire/APPEND_SYSTEM.md`
+- Read-only-first workflow modes: `/recon`, `/dynamic`, `/proofing`, `/report`, and `/mode`
+- Investigation helpers: `/env-inventory` and `/artifacts`
+- Prompt templates for binary, pcap, firmware, crash repro, build diffing, surface audit, tracing, summary, and report workflows
+- Skills for binary triage, crash analysis, fuzzing setup, pcap analysis, firmware unpacking, web recon, malware sandbox notes, exploit repro, and write-ups
+
+Typical setup:
+
+```text
+.pire/
+  SYSTEM.md
+  APPEND_SYSTEM.md
+  TARGET.md
+  NOTES.md
+  prompts/
+  skills/
+  extensions/
+```
+
+Typical session flow:
+- Start in `/recon` to inventory artifacts and verify tooling
+- Run `/env-inventory` early to see available analysis tools and writable locations
+- Switch to `/dynamic` for runtime observation, tracing, and debugger work
+- Switch to `/proofing` only when mutation or a controlled reproduction is intentional
+- Use `/artifacts` to inspect the current `.pire/artifacts.json` manifest
 
 ---
 
@@ -286,7 +321,7 @@ Use for project instructions, conventions, common commands. All matching files a
 
 ### System Prompt
 
-Replace the default system prompt with `.pi/SYSTEM.md` (project) or `~/.pi/agent/SYSTEM.md` (global). Append without replacing via `APPEND_SYSTEM.md`.
+Replace the default system prompt with `.pi/SYSTEM.md` (project), `.pire/SYSTEM.md` (project research profile), or `~/.pi/agent/SYSTEM.md` (global). Append without replacing via `APPEND_SYSTEM.md`, including `.pire/APPEND_SYSTEM.md`.
 
 ---
 
@@ -302,7 +337,7 @@ Review this code for bugs, security issues, and performance problems.
 Focus on: {{focus}}
 ```
 
-Place in `~/.pi/agent/prompts/`, `.pi/prompts/`, or a [pi package](#pi-packages) to share with others. See [docs/prompt-templates.md](docs/prompt-templates.md).
+Place in `~/.pi/agent/prompts/`, `.pi/prompts/`, `.pire/prompts/`, or a [pi package](#pi-packages) to share with others. See [docs/prompt-templates.md](docs/prompt-templates.md).
 
 ### Skills
 
@@ -318,7 +353,7 @@ Use this skill when the user asks about X.
 2. Then that
 ```
 
-Place in `~/.pi/agent/skills/`, `~/.agents/skills/`, `.pi/skills/`, or `.agents/skills/` (from `cwd` up through parent directories) or a [pi package](#pi-packages) to share with others. See [docs/skills.md](docs/skills.md).
+Place in `~/.pi/agent/skills/`, `~/.agents/skills/`, `.pi/skills/`, `.pire/skills/`, or `.agents/skills/` (from `cwd` up through parent directories) or a [pi package](#pi-packages) to share with others. See [docs/skills.md](docs/skills.md).
 
 ### Extensions
 
@@ -348,7 +383,7 @@ export default function (pi: ExtensionAPI) {
 - Games while waiting (yes, Doom runs)
 - ...anything you can dream up
 
-Place in `~/.pi/agent/extensions/`, `.pi/extensions/`, or a [pi package](#pi-packages) to share with others. See [docs/extensions.md](docs/extensions.md) and [examples/extensions/](examples/extensions/).
+Place in `~/.pi/agent/extensions/`, `.pi/extensions/`, `.pire/extensions/`, or a [pi package](#pi-packages) to share with others. See [docs/extensions.md](docs/extensions.md) and [examples/extensions/](examples/extensions/).
 
 ### Themes
 
