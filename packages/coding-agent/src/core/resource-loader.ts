@@ -140,6 +140,44 @@ function loadPireContextFiles(cwd: string, seenPaths: Set<string>): Array<{ path
 	return contextFiles;
 }
 
+function discoverExtensionEntriesInDir(dir: string): string[] {
+	if (!existsSync(dir)) {
+		return [];
+	}
+
+	const entries: string[] = [];
+
+	try {
+		for (const entry of readdirSync(dir, { withFileTypes: true })) {
+			const entryPath = join(dir, entry.name);
+
+			if ((entry.isFile() || entry.isSymbolicLink()) && (entry.name.endsWith(".ts") || entry.name.endsWith(".js"))) {
+				entries.push(entryPath);
+				continue;
+			}
+
+			if (!entry.isDirectory() && !entry.isSymbolicLink()) {
+				continue;
+			}
+
+			const indexTs = join(entryPath, "index.ts");
+			if (existsSync(indexTs)) {
+				entries.push(indexTs);
+				continue;
+			}
+
+			const indexJs = join(entryPath, "index.js");
+			if (existsSync(indexJs)) {
+				entries.push(indexJs);
+			}
+		}
+	} catch {
+		return [];
+	}
+
+	return entries;
+}
+
 export interface DefaultResourceLoaderOptions {
 	cwd?: string;
 	agentDir?: string;
@@ -416,9 +454,10 @@ export class DefaultResourceLoader implements ResourceLoader {
 		const cliEnabledPrompts = getEnabledPaths(cliExtensionPaths.prompts);
 		const cliEnabledThemes = getEnabledPaths(cliExtensionPaths.themes);
 
+		const pireExtensionPaths = this.getPireResourcePaths("extensions");
 		const extensionPaths = this.noExtensions
-			? cliEnabledExtensions
-			: this.mergePaths(cliEnabledExtensions, enabledExtensions);
+			? this.mergePaths(cliEnabledExtensions, pireExtensionPaths)
+			: this.mergePaths([...cliEnabledExtensions, ...enabledExtensions, ...pireExtensionPaths], []);
 
 		const extensionsResult = await loadExtensions(extensionPaths, this.cwd, this.eventBus);
 		const inlineExtensions = await this.loadExtensionFactories(extensionsResult.runtime);
@@ -661,6 +700,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 			join(this.cwd, CONFIG_DIR_NAME, "extensions"),
 			join(this.cwd, PIRE_DIR_NAME, "skills"),
 			join(this.cwd, PIRE_DIR_NAME, "prompts"),
+			join(this.cwd, PIRE_DIR_NAME, "extensions"),
 		];
 
 		for (const root of agentRoots) {
@@ -904,9 +944,17 @@ export class DefaultResourceLoader implements ResourceLoader {
 		return undefined;
 	}
 
-	private getPireResourcePaths(resourceType: "skills" | "prompts"): string[] {
+	private getPireResourcePaths(resourceType: "skills" | "prompts" | "extensions"): string[] {
 		const resourcePath = join(this.cwd, PIRE_DIR_NAME, resourceType);
-		return existsSync(resourcePath) ? [resourcePath] : [];
+		if (!existsSync(resourcePath)) {
+			return [];
+		}
+
+		if (resourceType === "extensions") {
+			return discoverExtensionEntriesInDir(resourcePath);
+		}
+
+		return [resourcePath];
 	}
 
 	private isUnderPath(target: string, root: string): boolean {

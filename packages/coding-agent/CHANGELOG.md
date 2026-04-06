@@ -5,6 +5,7 @@
 ### Added
 
 - Added repo-local `.pire/` profile discovery for coding-agent forks, including `.pire/APPEND_SYSTEM.md`, `.pire/TARGET.md`, `.pire/NOTES.md`, `.pire/prompts/`, and `.pire/skills/` so research-oriented projects can layer reverse-engineering context and workflows on top of the standard pi runtime.
+- Added `.pire/extensions/` discovery plus a starter `pire` extension that provides persistent `recon`, `dynamic`, `proofing`, and `report` modes and an `environment_inventory` tool for analysis environment introspection.
 
 ## [0.65.2] - 2026-04-06
 

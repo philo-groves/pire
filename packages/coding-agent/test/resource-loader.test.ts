@@ -350,6 +350,27 @@ Skill body.`,
 			expect(skill?.filePath).toBe(join(pireSkillDir, "SKILL.md"));
 			expect(skill?.sourceInfo.scope).toBe("project");
 		});
+
+		it("should discover extensions from .pire", async () => {
+			const pireExtensionDir = join(cwd, ".pire", "extensions");
+			mkdirSync(pireExtensionDir, { recursive: true });
+			writeFileSync(
+				join(pireExtensionDir, "pire-test.ts"),
+				`export default function(pi) {
+	pi.registerCommand("pire-test", {
+		description: "pire extension command",
+		handler: async () => {},
+	});
+}`,
+			);
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const extension = loader.getExtensions().extensions.find((entry) => entry.path.endsWith("pire-test.ts"));
+			expect(extension).toBeDefined();
+			expect(extension?.sourceInfo.scope).toBe("project");
+		});
 	});
 
 	describe("extendResources", () => {
