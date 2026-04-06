@@ -281,6 +281,13 @@ The first milestone should be small enough to ship quickly but opinionated enoug
 - Add an environment/tool-inventory command
 - Add an artifact manifest file for session persistence
 
+Current coding-agent progress:
+
+- `pire` now ships a dedicated base prompt via `.pire/SYSTEM.md` instead of relying only on appended instructions.
+- The `.pire/prompts` set now covers the full initial workflow list: binary, pcap, firmware, crash repro, build diffing, surface audit, runtime tracing, finding summaries, and report writing.
+- The `.pire/skills` set now covers the full initial workflow list: binary triage, crash analysis, fuzzing setup, pcap analysis, firmware unpacking, web recon, malware sandbox notes, exploit repro, and write-up support.
+- Extension tests cover default mode/tool gating and proofing-mode escalation.
+
 If this milestone works, the harness will already feel different from Pi even before deeper runtime work lands.
 
 ## Non-Goals

@@ -298,10 +298,11 @@ Content`,
 			expect(loader.getAppendSystemPrompt()).toContain("Additional instructions.");
 		});
 
-		it("should discover .pire context files and append prompt", async () => {
+		it("should discover .pire context files, system prompt, and append prompt", async () => {
 			const pireDir = join(cwd, ".pire");
 			mkdirSync(pireDir, { recursive: true });
 			writeFileSync(join(cwd, "AGENTS.md"), "# Project Rules\n\nBase guidance.");
+			writeFileSync(join(pireDir, "SYSTEM.md"), "You are the pire base prompt.");
 			writeFileSync(join(pireDir, "TARGET.md"), "# Target\n\nFirmware sample A.");
 			writeFileSync(join(pireDir, "NOTES.md"), "# Notes\n\nCrash reproduces on startup.");
 			writeFileSync(join(pireDir, "APPEND_SYSTEM.md"), "Research-first instructions.");
@@ -315,6 +316,7 @@ Content`,
 				join(pireDir, "TARGET.md"),
 				join(pireDir, "NOTES.md"),
 			]);
+			expect(loader.getSystemPrompt()).toBe("You are the pire base prompt.");
 			expect(loader.getAppendSystemPrompt()).toContain("Research-first instructions.");
 		});
 

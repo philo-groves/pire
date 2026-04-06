@@ -1,5 +1,14 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import {
+	loadArtifactManifest,
+	recordArtifact,
+	resolveArtifactPath,
+	saveArtifactManifest,
+	summarizeArtifactManifest,
+	type ArtifactManifest,
+	type ArtifactType,
+} from "./artifacts.js";
 import { collectEnvironmentInventory, formatInventorySummary, type EnvironmentInventory } from "./inventory.js";
 
 type PireMode = "recon" | "dynamic" | "proofing" | "report";
@@ -9,6 +18,7 @@ interface PersistedModeState {
 }
 
 const MODE_ENTRY_TYPE = "pire-mode";
+const ARTIFACT_ENTRY_TYPE = "pire-artifacts";
 const MODE_FLAG = "pire-mode";
 const MODE_TOOLS: Record<PireMode, string[]> = {
 	recon: ["read", "bash", "grep", "find", "ls", "environment_inventory"],
@@ -169,9 +179,20 @@ function updateStatus(ctx: ExtensionContext, mode: PireMode): void {
 
 export default function pireExtension(pi: ExtensionAPI): void {
 	let currentMode: PireMode = "recon";
+	let currentCwd = process.cwd();
+	let artifactManifest: ArtifactManifest = { version: 1, updatedAt: new Date().toISOString(), artifacts: [] };
 
 	const persistMode = (): void => {
 		pi.appendEntry<PersistedModeState>(MODE_ENTRY_TYPE, { mode: currentMode });
+	};
+
+	const persistArtifacts = async (): Promise<void> => {
+		const manifestPath = await saveArtifactManifest(currentCwd, artifactManifest);
+		pi.appendEntry(ARTIFACT_ENTRY_TYPE, {
+			updatedAt: artifactManifest.updatedAt,
+			count: artifactManifest.artifacts.length,
+			manifestPath,
+		});
 	};
 
 	const applyMode = (ctx: ExtensionContext, mode: PireMode, options?: { notify?: boolean }): void => {
@@ -195,6 +216,34 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			},
 			{ triggerTurn: false },
 		);
+	};
+
+	const showArtifacts = (): void => {
+		pi.sendMessage(
+			{
+				customType: "pire-artifact-manifest",
+				content: summarizeArtifactManifest(artifactManifest),
+				display: true,
+				details: artifactManifest,
+			},
+			{ triggerTurn: false },
+		);
+	};
+
+	const observeArtifact = async (
+		ctx: ExtensionContext,
+		path: string,
+		provenance: string,
+		options?: { type?: ArtifactType; command?: string; finding?: string },
+	): Promise<void> => {
+		artifactManifest = await recordArtifact(artifactManifest, {
+			path: resolveArtifactPath(ctx.cwd, path),
+			type: options?.type,
+			provenance,
+			command: options?.command,
+			finding: options?.finding,
+		});
+		await persistArtifacts();
 	};
 
 	pi.registerFlag(MODE_FLAG, {
@@ -257,7 +306,15 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("artifacts", {
+		description: "Show the current pire artifact manifest summary",
+		handler: async () => {
+			showArtifacts();
+		},
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
+		currentCwd = ctx.cwd;
 		const flagValue = pi.getFlag(MODE_FLAG);
 		const entries = ctx.sessionManager.getEntries();
 		const persisted = entries
@@ -266,6 +323,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 
 		const persistedMode = persisted?.data?.mode;
 		const flagMode = typeof flagValue === "string" && isPireMode(flagValue) ? flagValue : undefined;
+		artifactManifest = await loadArtifactManifest(ctx.cwd);
 		applyMode(ctx, flagMode ?? persistedMode ?? "recon", { notify: false });
 	});
 
@@ -297,6 +355,39 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					reason: `pire ${currentMode} mode blocked this command as destructive or outside the current posture.\nCommand: ${command}`,
 				};
 			}
+		}
+	});
+
+	pi.on("tool_result", async (event, ctx) => {
+		if (event.isError) {
+			return;
+		}
+
+		if (event.toolName === "read" || event.toolName === "write" || event.toolName === "edit") {
+			const rawPath = typeof event.input.path === "string" ? event.input.path : undefined;
+			if (rawPath) {
+				await observeArtifact(ctx, rawPath, `tool:${event.toolName}`);
+			}
+			return;
+		}
+
+		if (event.toolName === "bash") {
+			const fullOutputPath =
+				event.details && typeof event.details === "object" && "fullOutputPath" in event.details
+					? (event.details.fullOutputPath as string | undefined)
+					: undefined;
+			const command = typeof event.input.command === "string" ? event.input.command : undefined;
+			if (fullOutputPath) {
+				await observeArtifact(ctx, fullOutputPath, "tool:bash", {
+					type: "log",
+					command,
+				});
+			}
+			return;
+		}
+
+		if (event.toolName === "environment_inventory") {
+			await persistArtifacts();
 		}
 	});
 }
