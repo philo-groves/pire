@@ -297,6 +297,59 @@ Content`,
 
 			expect(loader.getAppendSystemPrompt()).toContain("Additional instructions.");
 		});
+
+		it("should discover .pire context files and append prompt", async () => {
+			const pireDir = join(cwd, ".pire");
+			mkdirSync(pireDir, { recursive: true });
+			writeFileSync(join(cwd, "AGENTS.md"), "# Project Rules\n\nBase guidance.");
+			writeFileSync(join(pireDir, "TARGET.md"), "# Target\n\nFirmware sample A.");
+			writeFileSync(join(pireDir, "NOTES.md"), "# Notes\n\nCrash reproduces on startup.");
+			writeFileSync(join(pireDir, "APPEND_SYSTEM.md"), "Research-first instructions.");
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const { agentsFiles } = loader.getAgentsFiles();
+			expect(agentsFiles.map((file) => file.path)).toEqual([
+				join(cwd, "AGENTS.md"),
+				join(pireDir, "TARGET.md"),
+				join(pireDir, "NOTES.md"),
+			]);
+			expect(loader.getAppendSystemPrompt()).toContain("Research-first instructions.");
+		});
+
+		it("should discover skills and prompts from .pire", async () => {
+			const pirePromptDir = join(cwd, ".pire", "prompts");
+			const pireSkillDir = join(cwd, ".pire", "skills", "binary-triage");
+			mkdirSync(pirePromptDir, { recursive: true });
+			mkdirSync(pireSkillDir, { recursive: true });
+			writeFileSync(
+				join(pirePromptDir, "triage-binary.md"),
+				`---
+description: Binary triage
+---
+Prompt body.`,
+			);
+			writeFileSync(
+				join(pireSkillDir, "SKILL.md"),
+				`---
+name: binary-triage
+description: Analyze a binary sample.
+---
+Skill body.`,
+			);
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir });
+			await loader.reload();
+
+			const prompt = loader.getPrompts().prompts.find((entry) => entry.name === "triage-binary");
+			expect(prompt?.filePath).toBe(join(pirePromptDir, "triage-binary.md"));
+			expect(prompt?.sourceInfo.scope).toBe("project");
+
+			const skill = loader.getSkills().skills.find((entry) => entry.name === "binary-triage");
+			expect(skill?.filePath).toBe(join(pireSkillDir, "SKILL.md"));
+			expect(skill?.sourceInfo.scope).toBe("project");
+		});
 	});
 
 	describe("extendResources", () => {

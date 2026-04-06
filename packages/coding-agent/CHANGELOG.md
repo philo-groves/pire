@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added repo-local `.pire/` profile discovery for coding-agent forks, including `.pire/APPEND_SYSTEM.md`, `.pire/TARGET.md`, `.pire/NOTES.md`, `.pire/prompts/`, and `.pire/skills/` so research-oriented projects can layer reverse-engineering context and workflows on top of the standard pi runtime.
+
 ## [0.65.2] - 2026-04-06
 
 ## [0.65.1] - 2026-04-05

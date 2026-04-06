@@ -20,6 +20,9 @@ import type { Skill } from "./skills.js";
 import { loadSkills } from "./skills.js";
 import { createSourceInfo, type SourceInfo } from "./source-info.js";
 
+const PIRE_DIR_NAME = ".pire";
+const PIRE_CONTEXT_FILENAMES = ["TARGET.md", "NOTES.md"] as const;
+
 export interface ResourceExtensionPaths {
 	skillPaths?: Array<{ path: string; metadata: PathMetadata }>;
 	promptPaths?: Array<{ path: string; metadata: PathMetadata }>;
@@ -108,6 +111,31 @@ function loadProjectContextFiles(
 	}
 
 	contextFiles.push(...ancestorContextFiles);
+	contextFiles.push(...loadPireContextFiles(resolvedCwd, seenPaths));
+
+	return contextFiles;
+}
+
+function loadPireContextFiles(cwd: string, seenPaths: Set<string>): Array<{ path: string; content: string }> {
+	const pireDir = join(cwd, PIRE_DIR_NAME);
+	const contextFiles: Array<{ path: string; content: string }> = [];
+
+	for (const filename of PIRE_CONTEXT_FILENAMES) {
+		const filePath = join(pireDir, filename);
+		if (!existsSync(filePath) || seenPaths.has(filePath)) {
+			continue;
+		}
+
+		try {
+			contextFiles.push({
+				path: filePath,
+				content: readFileSync(filePath, "utf-8"),
+			});
+			seenPaths.add(filePath);
+		} catch (error) {
+			console.error(chalk.yellow(`Warning: Could not read ${filePath}: ${error}`));
+		}
+	}
 
 	return contextFiles;
 }
@@ -412,9 +440,10 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.extensionsResult = this.extensionsOverride ? this.extensionsOverride(extensionsResult) : extensionsResult;
 		this.applyExtensionSourceInfo(this.extensionsResult.extensions, metadataByPath);
 
+		const pireSkillPaths = this.getPireResourcePaths("skills");
 		const skillPaths = this.noSkills
-			? this.mergePaths(cliEnabledSkills, this.additionalSkillPaths)
-			: this.mergePaths([...cliEnabledSkills, ...enabledSkills], this.additionalSkillPaths);
+			? this.mergePaths([...cliEnabledSkills, ...pireSkillPaths], this.additionalSkillPaths)
+			: this.mergePaths([...cliEnabledSkills, ...enabledSkills, ...pireSkillPaths], this.additionalSkillPaths);
 
 		this.lastSkillPaths = skillPaths;
 		this.updateSkillsFromPaths(skillPaths, metadataByPath);
@@ -424,9 +453,13 @@ export class DefaultResourceLoader implements ResourceLoader {
 			}
 		}
 
+		const pirePromptPaths = this.getPireResourcePaths("prompts");
 		const promptPaths = this.noPromptTemplates
-			? this.mergePaths(cliEnabledPrompts, this.additionalPromptTemplatePaths)
-			: this.mergePaths([...cliEnabledPrompts, ...enabledPrompts], this.additionalPromptTemplatePaths);
+			? this.mergePaths([...cliEnabledPrompts, ...pirePromptPaths], this.additionalPromptTemplatePaths)
+			: this.mergePaths(
+					[...cliEnabledPrompts, ...enabledPrompts, ...pirePromptPaths],
+					this.additionalPromptTemplatePaths,
+				);
 
 		this.lastPromptPaths = promptPaths;
 		this.updatePromptsFromPaths(promptPaths, metadataByPath);
@@ -626,6 +659,8 @@ export class DefaultResourceLoader implements ResourceLoader {
 			join(this.cwd, CONFIG_DIR_NAME, "prompts"),
 			join(this.cwd, CONFIG_DIR_NAME, "themes"),
 			join(this.cwd, CONFIG_DIR_NAME, "extensions"),
+			join(this.cwd, PIRE_DIR_NAME, "skills"),
+			join(this.cwd, PIRE_DIR_NAME, "prompts"),
 		];
 
 		for (const root of agentRoots) {
@@ -832,6 +867,11 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	private discoverSystemPromptFile(): string | undefined {
+		const pirePath = join(this.cwd, PIRE_DIR_NAME, "SYSTEM.md");
+		if (existsSync(pirePath)) {
+			return pirePath;
+		}
+
 		const projectPath = join(this.cwd, CONFIG_DIR_NAME, "SYSTEM.md");
 		if (existsSync(projectPath)) {
 			return projectPath;
@@ -846,6 +886,11 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	private discoverAppendSystemPromptFile(): string | undefined {
+		const pirePath = join(this.cwd, PIRE_DIR_NAME, "APPEND_SYSTEM.md");
+		if (existsSync(pirePath)) {
+			return pirePath;
+		}
+
 		const projectPath = join(this.cwd, CONFIG_DIR_NAME, "APPEND_SYSTEM.md");
 		if (existsSync(projectPath)) {
 			return projectPath;
@@ -857,6 +902,11 @@ export class DefaultResourceLoader implements ResourceLoader {
 		}
 
 		return undefined;
+	}
+
+	private getPireResourcePaths(resourceType: "skills" | "prompts"): string[] {
+		const resourcePath = join(this.cwd, PIRE_DIR_NAME, resourceType);
+		return existsSync(resourcePath) ? [resourcePath] : [];
 	}
 
 	private isUnderPath(target: string, root: string): boolean {

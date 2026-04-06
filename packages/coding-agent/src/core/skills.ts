@@ -7,6 +7,8 @@ import { parseFrontmatter } from "../utils/frontmatter.js";
 import type { ResourceDiagnostic } from "./diagnostics.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
 
+const PIRE_DIR_NAME = ".pire";
+
 /** Max name length per spec */
 const MAX_NAME_LENGTH = 64;
 
@@ -455,6 +457,7 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
 
 	const userSkillsDir = join(resolvedAgentDir, "skills");
 	const projectSkillsDir = resolve(cwd, CONFIG_DIR_NAME, "skills");
+	const pireSkillsDir = resolve(cwd, PIRE_DIR_NAME, "skills");
 
 	const isUnderPath = (target: string, root: string): boolean => {
 		const normalizedRoot = resolve(root);
@@ -469,6 +472,7 @@ export function loadSkills(options: LoadSkillsOptions = {}): LoadSkillsResult {
 		if (!includeDefaults) {
 			if (isUnderPath(resolvedPath, userSkillsDir)) return "user";
 			if (isUnderPath(resolvedPath, projectSkillsDir)) return "project";
+			if (isUnderPath(resolvedPath, pireSkillsDir)) return "project";
 		}
 		return "path";
 	};

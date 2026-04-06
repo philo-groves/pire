@@ -5,6 +5,8 @@ import { CONFIG_DIR_NAME, getPromptsDir } from "../config.js";
 import { parseFrontmatter } from "../utils/frontmatter.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
 
+const PIRE_DIR_NAME = ".pire";
+
 /**
  * Represents a prompt template loaded from a markdown file
  */
@@ -212,6 +214,7 @@ export function loadPromptTemplates(options: LoadPromptTemplatesOptions = {}): P
 
 	const globalPromptsDir = options.agentDir ? join(options.agentDir, "prompts") : resolvedAgentDir;
 	const projectPromptsDir = resolve(resolvedCwd, CONFIG_DIR_NAME, "prompts");
+	const pirePromptsDir = resolve(resolvedCwd, PIRE_DIR_NAME, "prompts");
 
 	const isUnderPath = (target: string, root: string): boolean => {
 		const normalizedRoot = resolve(root);
@@ -235,6 +238,13 @@ export function loadPromptTemplates(options: LoadPromptTemplatesOptions = {}): P
 				source: "local",
 				scope: "project",
 				baseDir: projectPromptsDir,
+			});
+		}
+		if (isUnderPath(resolvedPath, pirePromptsDir)) {
+			return createSyntheticSourceInfo(resolvedPath, {
+				source: "local",
+				scope: "project",
+				baseDir: pirePromptsDir,
 			});
 		}
 		return createSyntheticSourceInfo(resolvedPath, {
