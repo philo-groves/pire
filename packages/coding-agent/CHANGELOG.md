@@ -28,6 +28,7 @@
 - Added lane- and focus-aware default severity policies for `pire-evals`, so disassembly/surface-mapping cases and exploitability-focused cases start with different baseline-drift sensitivity even before any explicit overrides are added.
 - Added conventional `.pire/session/evals/` storage support for `pire-evals`, including named baseline saves/loads and named report sets so runs can update `last-good`, `main`, or other eval artifacts without ad hoc paths.
 - Added `pire-evals --promote-baseline <name>` so clean runs can atomically update named stored baselines like `last-good`, while regressed runs are refused instead of overwriting the reference.
+- Added `pire-evals --promote-report <name>` so clean runs can atomically update named stored report aliases like `main` or `nightly`, while regressed runs are refused instead of overwriting the reference report set.
 
 ### Changed
 

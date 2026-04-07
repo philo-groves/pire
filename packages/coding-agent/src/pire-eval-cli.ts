@@ -16,6 +16,7 @@ interface PireEvalCliArgs {
 	json?: boolean;
 	reportPath?: string;
 	promoteBaselineNames: string[];
+	promoteReportNames: string[];
 	saveBaselineNames: string[];
 	saveReportNames: string[];
 }
@@ -209,6 +210,7 @@ Options:
   --cases-dir <path>  Directory containing case subdirectories with bindings.json and .pire state
   --baseline <arg>    Prior JSON report from pire-evals for score deltas; use @name or name=@name for stored baselines
   --promote-baseline <name> Promote current JSON result to .pire/session/evals/baselines/<name>.json only if regressions=0
+  --promote-report <name> Promote current report set to .pire/session/evals/reports/<name>.{json,md} only if regressions=0
   --save-baseline <name> Save current JSON result to .pire/session/evals/baselines/<name>.json
   --save-report <name>   Save current report set to .pire/session/evals/reports/<name>.json and .md
   --enforce           Exit non-zero when a case misses its expectation metadata
@@ -222,6 +224,7 @@ function parseArgs(argv: string[]): PireEvalCliArgs {
 	const args: PireEvalCliArgs = {
 		baselines: [],
 		promoteBaselineNames: [],
+		promoteReportNames: [],
 		saveBaselineNames: [],
 		saveReportNames: [],
 	};
@@ -248,6 +251,8 @@ function parseArgs(argv: string[]): PireEvalCliArgs {
 			}
 		} else if (arg === "--promote-baseline" && index + 1 < argv.length) {
 			args.promoteBaselineNames.push(argv[++index]);
+		} else if (arg === "--promote-report" && index + 1 < argv.length) {
+			args.promoteReportNames.push(argv[++index]);
 		} else if (arg === "--save-baseline" && index + 1 < argv.length) {
 			args.saveBaselineNames.push(argv[++index]);
 		} else if (arg === "--save-report" && index + 1 < argv.length) {
@@ -878,10 +883,16 @@ async function main(argv: string[]): Promise<void> {
 	for (const name of args.saveReportNames) {
 		await writeStoredReportSet(process.cwd(), name, withBaselines);
 	}
-	if (args.promoteBaselineNames.length > 0 && withBaselines.suite.regressions.length > 0) {
+	if (
+		(args.promoteBaselineNames.length > 0 || args.promoteReportNames.length > 0) &&
+		withBaselines.suite.regressions.length > 0
+	) {
 		throw new Error(
-			`cannot promote baseline while regressions are present\n${withBaselines.suite.regressions.map((entry) => `- ${entry}`).join("\n")}`,
+			`cannot promote eval artifacts while regressions are present\n${withBaselines.suite.regressions.map((entry) => `- ${entry}`).join("\n")}`,
 		);
+	}
+	for (const name of args.promoteReportNames) {
+		await writeStoredReportSet(process.cwd(), name, withBaselines);
 	}
 	for (const name of args.promoteBaselineNames) {
 		await writeStoredBaseline(process.cwd(), name, withBaselines);

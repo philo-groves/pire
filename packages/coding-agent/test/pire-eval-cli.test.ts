@@ -755,6 +755,36 @@ describe("pire eval cli", () => {
 		).toContain('"scores"');
 	});
 
+	test("promotes a named report alias only when the run has no regressions", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-promote-report-clean-"));
+		const suitePath = join(FIXTURE_DIR, "binary-re-starter-suite.json");
+		const casesPath = join(FIXTURE_DIR, "session-cases");
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				join(PACKAGE_ROOT, "src/pire-eval-cli.ts"),
+				"--suite",
+				suitePath,
+				"--cases-dir",
+				casesPath,
+				"--promote-report",
+				"main",
+			],
+			{
+				cwd: tempDir,
+			},
+		);
+
+		expect(await readFile(join(tempDir, ".pire", "session", "evals", "reports", "main.json"), "utf-8")).toContain(
+			'"suite"',
+		);
+		expect(await readFile(join(tempDir, ".pire", "session", "evals", "reports", "main.md"), "utf-8")).toContain(
+			"# Pire Eval Report",
+		);
+	});
+
 	test("refuses to promote a named baseline when regressions are present", async () => {
 		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-promote-regression-"));
 		const suitePath = join(FIXTURE_DIR, "binary-re-starter-suite.json");
@@ -799,9 +829,62 @@ describe("pire eval cli", () => {
 				},
 			),
 		).rejects.toMatchObject({
-			stderr: expect.stringContaining("cannot promote baseline while regressions are present"),
+			stderr: expect.stringContaining("cannot promote eval artifacts while regressions are present"),
 		});
 
 		expect(await readFile(baselinePath, "utf-8")).toBe(originalBaseline);
+	});
+
+	test("refuses to promote a named report alias when regressions are present", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-promote-report-regression-"));
+		const suitePath = join(FIXTURE_DIR, "binary-re-starter-suite.json");
+		const cleanCasesPath = join(FIXTURE_DIR, "session-cases");
+		const regressionCasesPath = join(FIXTURE_DIR, "session-cases-suite-regression");
+		const reportJsonPath = join(tempDir, ".pire", "session", "evals", "reports", "main.json");
+		const reportMarkdownPath = join(tempDir, ".pire", "session", "evals", "reports", "main.md");
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				join(PACKAGE_ROOT, "src/pire-eval-cli.ts"),
+				"--suite",
+				suitePath,
+				"--cases-dir",
+				cleanCasesPath,
+				"--promote-report",
+				"main",
+			],
+			{
+				cwd: tempDir,
+			},
+		);
+
+		const originalJsonReport = await readFile(reportJsonPath, "utf-8");
+		const originalMarkdownReport = await readFile(reportMarkdownPath, "utf-8");
+
+		await expect(
+			execFileAsync(
+				"npx",
+				[
+					"tsx",
+					join(PACKAGE_ROOT, "src/pire-eval-cli.ts"),
+					"--suite",
+					suitePath,
+					"--cases-dir",
+					regressionCasesPath,
+					"--promote-report",
+					"main",
+				],
+				{
+					cwd: tempDir,
+				},
+			),
+		).rejects.toMatchObject({
+			stderr: expect.stringContaining("cannot promote eval artifacts while regressions are present"),
+		});
+
+		expect(await readFile(reportJsonPath, "utf-8")).toBe(originalJsonReport);
+		expect(await readFile(reportMarkdownPath, "utf-8")).toBe(originalMarkdownReport);
 	});
 });
