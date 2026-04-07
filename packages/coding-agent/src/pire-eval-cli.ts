@@ -19,9 +19,22 @@ interface PireEvalCaseExpectation {
 	maxRank?: number;
 }
 
+interface PireEvalSuiteExpectation {
+	minAverageNormalized?: number;
+	maxAverageIssues?: number;
+	maxRegressions?: number;
+	minCases?: number;
+	maxCases?: number;
+}
+
 interface PireEvalCaseDefinition {
 	title?: string;
 	expectation?: PireEvalCaseExpectation;
+}
+
+interface PireEvalSuiteDefinition {
+	title?: string;
+	expectation?: PireEvalSuiteExpectation;
 }
 
 interface PireEvalCaseScore {
@@ -35,6 +48,19 @@ interface PireEvalCaseScore {
 	issues: string[];
 	expectation?: PireEvalCaseExpectation;
 	regressions: string[];
+}
+
+interface PireEvalSuiteSummary {
+	cases: number;
+	averageNormalized: number;
+	averageIssues: number;
+	regressions: string[];
+	expectation?: PireEvalSuiteExpectation;
+}
+
+interface PireEvalCollectedScores {
+	scores: PireEvalCaseScore[];
+	suite: PireEvalSuiteSummary;
 }
 
 function printHelp(): void {
@@ -80,9 +106,25 @@ function parseCaseDefinition(text: string): PireEvalCaseDefinition {
 	return JSON.parse(text) as PireEvalCaseDefinition;
 }
 
+function parseSuiteDefinition(text: string): PireEvalSuiteDefinition {
+	return JSON.parse(text) as PireEvalSuiteDefinition;
+}
+
 async function loadCaseDefinition(path: string): Promise<PireEvalCaseDefinition | undefined> {
 	try {
 		return parseCaseDefinition(await readFile(path, "utf-8"));
+	} catch (error) {
+		const readError = error as NodeJS.ErrnoException;
+		if (readError.code === "ENOENT") {
+			return undefined;
+		}
+		throw error;
+	}
+}
+
+async function loadSuiteDefinition(path: string): Promise<PireEvalSuiteDefinition | undefined> {
+	try {
+		return parseSuiteDefinition(await readFile(path, "utf-8"));
 	} catch (error) {
 		const readError = error as NodeJS.ErrnoException;
 		if (readError.code === "ENOENT") {
@@ -116,12 +158,56 @@ function collectRegressions(score: PireEvalCaseScore, rank: number): string[] {
 	return regressions;
 }
 
-function formatLeaderboard(scores: PireEvalCaseScore[]): string {
-	const lines = ["Pire Eval Session Leaderboard", `- cases: ${scores.length}`];
+function collectSuiteRegressions(
+	scores: PireEvalCaseScore[],
+	expectation?: PireEvalSuiteExpectation,
+): PireEvalSuiteSummary {
+	const cases = scores.length;
+	const totalNormalized = scores.reduce((sum, score) => sum + score.normalized, 0);
+	const totalIssues = scores.reduce((sum, score) => sum + score.issues.length, 0);
+	const averageNormalized = cases === 0 ? 0 : totalNormalized / cases;
+	const averageIssues = cases === 0 ? 0 : totalIssues / cases;
 	const regressions = scores.flatMap((score) => score.regressions.map((entry) => `${score.caseName}: ${entry}`));
-	lines.push(`- regressions: ${regressions.length}`);
 
-	for (const score of scores) {
+	if (expectation?.minAverageNormalized !== undefined && averageNormalized < expectation.minAverageNormalized) {
+		regressions.push(
+			`suite average normalized score ${averageNormalized.toFixed(2)} fell below minimum ${expectation.minAverageNormalized.toFixed(2)}`,
+		);
+	}
+	if (expectation?.maxAverageIssues !== undefined && averageIssues > expectation.maxAverageIssues) {
+		regressions.push(
+			`suite average issues ${averageIssues.toFixed(2)} exceeded maximum ${expectation.maxAverageIssues.toFixed(2)}`,
+		);
+	}
+	if (expectation?.maxRegressions !== undefined && regressions.length > expectation.maxRegressions) {
+		regressions.push(`suite regressions ${regressions.length} exceeded maximum ${expectation.maxRegressions}`);
+	}
+	if (expectation?.minCases !== undefined && cases < expectation.minCases) {
+		regressions.push(`suite cases ${cases} fell below minimum ${expectation.minCases}`);
+	}
+	if (expectation?.maxCases !== undefined && cases > expectation.maxCases) {
+		regressions.push(`suite cases ${cases} exceeded maximum ${expectation.maxCases}`);
+	}
+
+	return {
+		cases,
+		averageNormalized,
+		averageIssues,
+		regressions,
+		expectation,
+	};
+}
+
+function formatLeaderboard(result: PireEvalCollectedScores): string {
+	const lines = [
+		"Pire Eval Session Leaderboard",
+		`- cases: ${result.suite.cases}`,
+		`- average score: ${Math.round(result.suite.averageNormalized * 100)}%`,
+		`- average issues: ${result.suite.averageIssues.toFixed(2)}`,
+		`- regressions: ${result.suite.regressions.length}`,
+	];
+
+	for (const score of result.scores) {
 		const issueSuffix = score.issues.length > 0 ? `, issues=${score.issues.length}` : "";
 		const regressionSuffix = score.regressions.length > 0 ? `, regressions=${score.regressions.length}` : "";
 		lines.push(
@@ -129,9 +215,9 @@ function formatLeaderboard(scores: PireEvalCaseScore[]): string {
 		);
 	}
 
-	if (regressions.length > 0) {
+	if (result.suite.regressions.length > 0) {
 		lines.push("- regression details:");
-		for (const regression of regressions) {
+		for (const regression of result.suite.regressions) {
 			lines.push(`  - ${regression}`);
 		}
 	}
@@ -141,7 +227,7 @@ function formatLeaderboard(scores: PireEvalCaseScore[]): string {
 
 async function collectCaseScores(
 	args: Required<Pick<PireEvalCliArgs, "suitePath" | "casesDir">>,
-): Promise<PireEvalCaseScore[]> {
+): Promise<PireEvalCollectedScores> {
 	const suitePath = resolve(args.suitePath);
 	const casesDir = resolve(args.casesDir);
 	const entries = await readdir(casesDir, { withFileTypes: true });
@@ -150,6 +236,7 @@ async function collectCaseScores(
 		.map((entry) => entry.name)
 		.sort();
 	const scores: PireEvalCaseScore[] = [];
+	const suiteDefinition = await loadSuiteDefinition(join(casesDir, "cases.json"));
 
 	for (const caseName of caseDirs) {
 		const cwd = join(casesDir, caseName);
@@ -184,7 +271,10 @@ async function collectCaseScores(
 		score.regressions = collectRegressions(score, index + 1);
 	}
 
-	return rankedScores;
+	return {
+		scores: rankedScores,
+		suite: collectSuiteRegressions(rankedScores, suiteDefinition?.expectation),
+	};
 }
 
 async function main(argv: string[]): Promise<void> {
@@ -194,20 +284,21 @@ async function main(argv: string[]): Promise<void> {
 		throw new Error("both --suite and --cases-dir are required");
 	}
 
-	const scores = await collectCaseScores({
+	const result = await collectCaseScores({
 		suitePath: args.suitePath,
 		casesDir: args.casesDir,
 	});
-	const regressions = scores.flatMap((score) => score.regressions.map((entry) => `${score.caseName}: ${entry}`));
 
 	if (args.json) {
-		process.stdout.write(`${JSON.stringify({ scores, regressions }, null, 2)}\n`);
+		process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 	} else {
-		process.stdout.write(formatLeaderboard(scores));
+		process.stdout.write(formatLeaderboard(result));
 	}
 
-	if (args.enforce && regressions.length > 0) {
-		throw new Error(`regression expectations failed\n${regressions.map((entry) => `- ${entry}`).join("\n")}`);
+	if (args.enforce && result.suite.regressions.length > 0) {
+		throw new Error(
+			`regression expectations failed\n${result.suite.regressions.map((entry) => `- ${entry}`).join("\n")}`,
+		);
 	}
 }
 

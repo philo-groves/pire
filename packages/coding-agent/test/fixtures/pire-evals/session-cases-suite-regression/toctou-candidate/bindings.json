@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "suiteId": "pire-binary-re-starter-v1",
+  "runId": "toctou-case-001",
+  "notes": ["fixture session: candidate toctou case"],
+  "bindings": [
+    {
+      "taskId": "binre-toctou-001",
+      "findingTitleIncludes": "ownership check",
+      "exploitability": "limited",
+      "judgement": {
+        "dimensions": {
+          "exploitability": "partial"
+        }
+      },
+      "notes": ["race observed but exploit remains partial"]
+    }
+  ]
+}

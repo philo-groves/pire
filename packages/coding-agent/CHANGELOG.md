@@ -18,6 +18,7 @@
 - Added fixture-backed `pire` session eval extraction helpers plus starter binary-RE session cases so real `.pire` findings and artifact snapshots can be converted into scored benchmark runs with stable regression coverage.
 - Added a `pire-evals` CLI for scoring fixture or captured binary-RE session directories into a compact leaderboard or JSON summary for harness-driven regression tracking.
 - Added optional per-case `case.json` expectations for `pire-evals`, including score and rank thresholds plus an `--enforce` mode that fails CI when binary-RE session quality regresses.
+- Added optional suite-level `cases.json` expectations for `pire-evals`, so CI can gate aggregate binary-RE capability drift using average score, average issue count, regression count, and case-count thresholds.
 
 ### Changed
 
