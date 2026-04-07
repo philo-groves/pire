@@ -34,6 +34,7 @@ describe("pire eval cli", () => {
 		expect(result.stdout).toContain("toctou-candidate");
 		expect(result.stdout).toContain("run=heap-case-001");
 		expect(result.stdout).toContain("run=toctou-case-001");
+		expect(result.stdout).toContain("- chain outcomes: scored=0, pass=0, near-miss=0, fail=0");
 		expect(result.stdout).toContain("- scenario outcomes: scored=0, pass=0, near-miss=0, fail=0");
 		expect(result.stdout).toContain("- regressions: 0");
 	});
@@ -61,6 +62,7 @@ describe("pire eval cli", () => {
 				cases: number;
 				averageNormalized: number;
 				averageIssues: number;
+				chainSummary: { scored: number; passed: number; nearMiss: number; failed: number };
 				regressions: string[];
 			};
 		};
@@ -73,6 +75,12 @@ describe("pire eval cli", () => {
 		expect(parsed.scores[1]?.caseName).toBe("toctou-candidate");
 		expect(parsed.scores[0]?.normalized).toBeGreaterThanOrEqual(parsed.scores[1]?.normalized ?? 0);
 		expect(parsed.suite).toMatchObject({
+			chainSummary: {
+				scored: 0,
+				passed: 0,
+				nearMiss: 0,
+				failed: 0,
+			},
 			scenarioSummary: {
 				scored: 0,
 				passed: 0,
@@ -138,11 +146,17 @@ describe("pire eval cli", () => {
 		);
 
 		const parsed = JSON.parse(result.stdout) as {
-			scores: Array<{ caseName: string; normalized: number; issues: string[] }>;
+			scores: Array<{
+				caseName: string;
+				normalized: number;
+				issues: string[];
+				chainSummary: { scored: number; passed: number; nearMiss: number; failed: number };
+			}>;
 			suite: {
 				cases: number;
 				averageNormalized: number;
 				averageIssues: number;
+				chainSummary: { scored: number; passed: number; nearMiss: number; failed: number };
 				scenarioSummary: { scored: number; passed: number; nearMiss: number; failed: number };
 			};
 		};
@@ -166,6 +180,30 @@ describe("pire eval cli", () => {
 		]);
 		expect(parsed.scores[0]?.normalized).toBeGreaterThan(parsed.scores[1]?.normalized ?? 0);
 		expect(parsed.scores[1]?.normalized).toBeGreaterThan(parsed.scores[2]?.normalized ?? 0);
+		expect(parsed.suite.chainSummary).toEqual({
+			scored: 3,
+			passed: 1,
+			nearMiss: 1,
+			failed: 1,
+		});
+		expect(parsed.scores[0]?.chainSummary).toEqual({
+			scored: 1,
+			passed: 1,
+			nearMiss: 0,
+			failed: 0,
+		});
+		expect(parsed.scores[1]?.chainSummary).toEqual({
+			scored: 1,
+			passed: 0,
+			nearMiss: 1,
+			failed: 0,
+		});
+		expect(parsed.scores[2]?.chainSummary).toEqual({
+			scored: 1,
+			passed: 0,
+			nearMiss: 0,
+			failed: 1,
+		});
 		expect(parsed.suite.scenarioSummary).toEqual({
 			scored: 0,
 			passed: 0,
