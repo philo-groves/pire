@@ -217,9 +217,88 @@ describe("pire eval cli", () => {
 
 		const report = await readFile(reportPath, "utf-8");
 
-		expect(result.stdout).toContain("- vs baseline:");
-		expect(result.stdout).toContain("delta=");
-		expect(report).toContain("Vs baseline score delta");
-		expect(report).toContain("delta=");
+		expect(result.stdout).toContain("- vs baselines:");
+		expect(result.stdout).toContain("baseline: score");
+		expect(result.stdout).toContain("baseline delta=");
+		expect(report).toContain("Vs baseline:");
+		expect(report).toContain("baseline delta=");
+	});
+
+	test("supports multiple named baselines in json and markdown outputs", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-multi-baseline-"));
+		const mainBaselinePath = join(tempDir, "main.json");
+		const lastGoodBaselinePath = join(tempDir, "last-good.json");
+		const reportPath = join(tempDir, "multi-baseline.md");
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "session-cases"),
+				"--json",
+				"--report",
+				mainBaselinePath,
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "session-cases-regression"),
+				"--json",
+				"--report",
+				lastGoodBaselinePath,
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		const result = await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "session-cases-suite-regression"),
+				"--baseline",
+				`main=${mainBaselinePath}`,
+				"--baseline",
+				`last-good=${lastGoodBaselinePath}`,
+				"--json",
+				"--report",
+				reportPath,
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		const parsed = JSON.parse(result.stdout) as {
+			scores: Array<{ caseName: string; baselines?: Array<{ name: string }> }>;
+			suite: { baselines?: Array<{ name: string }> };
+		};
+		const report = await readFile(reportPath, "utf-8");
+
+		expect(parsed.suite.baselines?.map((entry) => entry.name)).toEqual(["main", "last-good"]);
+		expect(parsed.scores[0]?.baselines?.map((entry) => entry.name)).toEqual(["main", "last-good"]);
+		expect(report).toContain("Vs main:");
+		expect(report).toContain("Vs last-good:");
+		expect(report).toContain("main delta=");
+		expect(report).toContain("last-good delta=");
 	});
 });

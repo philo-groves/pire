@@ -9,9 +9,15 @@ interface PireEvalCliArgs {
 	suitePath?: string;
 	casesDir?: string;
 	baselinePath?: string;
+	baselines: PireEvalBaselineInput[];
 	enforce?: boolean;
 	json?: boolean;
 	reportPath?: string;
+}
+
+interface PireEvalBaselineInput {
+	name: string;
+	path: string;
 }
 
 interface PireEvalCaseExpectation {
@@ -50,7 +56,7 @@ interface PireEvalCaseScore {
 	issues: string[];
 	expectation?: PireEvalCaseExpectation;
 	regressions: string[];
-	baseline?: PireEvalCaseBaseline;
+	baselines?: PireEvalCaseBaseline[];
 }
 
 interface PireEvalSuiteSummary {
@@ -59,7 +65,7 @@ interface PireEvalSuiteSummary {
 	averageIssues: number;
 	regressions: string[];
 	expectation?: PireEvalSuiteExpectation;
-	baseline?: PireEvalSuiteBaseline;
+	baselines?: PireEvalSuiteBaseline[];
 }
 
 interface PireEvalCollectedScores {
@@ -68,12 +74,14 @@ interface PireEvalCollectedScores {
 }
 
 interface PireEvalCaseBaseline {
+	name: string;
 	normalizedDelta: number;
 	issuesDelta: number;
 	baselineRunId: string;
 }
 
 interface PireEvalSuiteBaseline {
+	name: string;
 	averageNormalizedDelta: number;
 	averageIssuesDelta: number;
 	baselineCases: number;
@@ -83,12 +91,12 @@ function printHelp(): void {
 	process.stdout.write(`pire-evals - score binary RE eval session directories
 
 Usage:
-  pire-evals --suite <suite.json> --cases-dir <dir> [--baseline <report.json>] [--enforce] [--json] [--report <path>]
+  pire-evals --suite <suite.json> --cases-dir <dir> [--baseline <report.json>|name=report.json>]... [--enforce] [--json] [--report <path>]
 
 Options:
   --suite <path>      Path to a Pire eval task suite JSON file
   --cases-dir <path>  Directory containing case subdirectories with bindings.json and .pire state
-  --baseline <path>   Prior JSON report from pire-evals for score delta comparisons
+  --baseline <arg>    Prior JSON report from pire-evals for score deltas; use name=path for multiple named baselines
   --enforce           Exit non-zero when a case misses its expectation metadata
   --json              Emit JSON instead of a text leaderboard
   --report <path>     Write a report artifact (.md, .json, or .jsonl)
@@ -97,7 +105,9 @@ Options:
 }
 
 function parseArgs(argv: string[]): PireEvalCliArgs {
-	const args: PireEvalCliArgs = {};
+	const args: PireEvalCliArgs = {
+		baselines: [],
+	};
 
 	for (let index = 0; index < argv.length; index++) {
 		const arg = argv[index];
@@ -106,7 +116,19 @@ function parseArgs(argv: string[]): PireEvalCliArgs {
 		} else if (arg === "--cases-dir" && index + 1 < argv.length) {
 			args.casesDir = argv[++index];
 		} else if (arg === "--baseline" && index + 1 < argv.length) {
-			args.baselinePath = argv[++index];
+			const value = argv[++index];
+			const separatorIndex = value.indexOf("=");
+			if (separatorIndex === -1) {
+				args.baselinePath = value;
+				args.baselines.push({ name: "baseline", path: value });
+			} else {
+				const name = value.slice(0, separatorIndex).trim();
+				const path = value.slice(separatorIndex + 1).trim();
+				if (!name || !path) {
+					throw new Error(`invalid baseline spec: ${value}`);
+				}
+				args.baselines.push({ name, path });
+			}
 		} else if (arg === "--enforce") {
 			args.enforce = true;
 		} else if (arg === "--json") {
@@ -127,6 +149,24 @@ function parseArgs(argv: string[]): PireEvalCliArgs {
 function formatSignedDelta(value: number, digits = 2): string {
 	const rounded = value.toFixed(digits);
 	return value > 0 ? `+${rounded}` : rounded;
+}
+
+function formatBaselineSummary(baselines: PireEvalSuiteBaseline[]): string {
+	return baselines
+		.map(
+			(baseline) =>
+				`${baseline.name}: score ${formatSignedDelta(baseline.averageNormalizedDelta)}, issues ${formatSignedDelta(baseline.averageIssuesDelta)}`,
+		)
+		.join(" | ");
+}
+
+function formatCaseBaselineSummary(baselines: PireEvalCaseBaseline[]): string {
+	return baselines
+		.map(
+			(baseline) =>
+				`${baseline.name} delta=${formatSignedDelta(baseline.normalizedDelta)}, issue-delta=${formatSignedDelta(baseline.issuesDelta)}`,
+		)
+		.join(" | ");
 }
 
 function parseCaseDefinition(text: string): PireEvalCaseDefinition {
@@ -233,18 +273,15 @@ function formatLeaderboard(result: PireEvalCollectedScores): string {
 		`- average issues: ${result.suite.averageIssues.toFixed(2)}`,
 		`- regressions: ${result.suite.regressions.length}`,
 	];
-	if (result.suite.baseline) {
-		lines.push(
-			`- vs baseline: score ${formatSignedDelta(result.suite.baseline.averageNormalizedDelta)}, issues ${formatSignedDelta(result.suite.baseline.averageIssuesDelta)}`,
-		);
+	if (result.suite.baselines && result.suite.baselines.length > 0) {
+		lines.push(`- vs baselines: ${formatBaselineSummary(result.suite.baselines)}`);
 	}
 
 	for (const score of result.scores) {
 		const issueSuffix = score.issues.length > 0 ? `, issues=${score.issues.length}` : "";
 		const regressionSuffix = score.regressions.length > 0 ? `, regressions=${score.regressions.length}` : "";
-		const baselineSuffix = score.baseline
-			? `, delta=${formatSignedDelta(score.baseline.normalizedDelta)}, issue-delta=${formatSignedDelta(score.baseline.issuesDelta)}`
-			: "";
+		const baselineSuffix =
+			score.baselines && score.baselines.length > 0 ? `, ${formatCaseBaselineSummary(score.baselines)}` : "";
 		lines.push(
 			`- ${score.caseName}: ${score.earned}/${score.max} (${Math.round(score.normalized * 100)}%), run=${score.runId}, tasks=${score.scoredTasks}, missing=${score.missingTasks}${issueSuffix}${regressionSuffix}${baselineSuffix}`,
 		);
@@ -272,19 +309,20 @@ function formatMarkdownReport(result: PireEvalCollectedScores): string {
 		"",
 		"## Cases",
 	];
-	if (result.suite.baseline) {
+	if (result.suite.baselines && result.suite.baselines.length > 0) {
 		lines.splice(
 			7,
 			0,
-			`- Vs baseline score delta: ${formatSignedDelta(result.suite.baseline.averageNormalizedDelta)}`,
-			`- Vs baseline issues delta: ${formatSignedDelta(result.suite.baseline.averageIssuesDelta)}`,
+			...result.suite.baselines.map(
+				(baseline) =>
+					`- Vs ${baseline.name}: score delta ${formatSignedDelta(baseline.averageNormalizedDelta)}, issues delta ${formatSignedDelta(baseline.averageIssuesDelta)}`,
+			),
 		);
 	}
 
 	for (const score of result.scores) {
-		const baselineSuffix = score.baseline
-			? `, delta=${formatSignedDelta(score.baseline.normalizedDelta)}, issue-delta=${formatSignedDelta(score.baseline.issuesDelta)}`
-			: "";
+		const baselineSuffix =
+			score.baselines && score.baselines.length > 0 ? `, ${formatCaseBaselineSummary(score.baselines)}` : "";
 		lines.push(
 			`- ${score.caseName}: ${score.earned}/${score.max} (${Math.round(score.normalized * 100)}%), run=${score.runId}, tasks=${score.scoredTasks}, missing=${score.missingTasks}, issues=${score.issues.length}, regressions=${score.regressions.length}${baselineSuffix}`,
 		);
@@ -309,6 +347,7 @@ function formatJsonlReport(result: PireEvalCollectedScores): string {
 			averageIssues: result.suite.averageIssues,
 			regressions: result.suite.regressions,
 			expectation: result.suite.expectation,
+			baselines: result.suite.baselines,
 		}),
 	];
 
@@ -326,6 +365,7 @@ function formatJsonlReport(result: PireEvalCollectedScores): string {
 				issues: score.issues,
 				regressions: score.regressions,
 				expectation: score.expectation,
+				baselines: score.baselines,
 			}),
 		);
 	}
@@ -349,19 +389,27 @@ async function writeReport(reportPath: string, result: PireEvalCollectedScores):
 	await writeFile(targetPath, formatReport(result, targetPath), "utf-8");
 }
 
-function applyBaseline(result: PireEvalCollectedScores, baseline: PireEvalCollectedScores): PireEvalCollectedScores {
+function applyBaseline(
+	result: PireEvalCollectedScores,
+	baselineInput: PireEvalBaselineInput,
+	baseline: PireEvalCollectedScores,
+): PireEvalCollectedScores {
 	const baselineScores = new Map(baseline.scores.map((score) => [score.caseName, score]));
 	const scores = result.scores.map((score) => {
 		const baselineScore = baselineScores.get(score.caseName);
 		return {
 			...score,
-			baseline: baselineScore
-				? {
-						normalizedDelta: score.normalized - baselineScore.normalized,
-						issuesDelta: score.issues.length - baselineScore.issues.length,
-						baselineRunId: baselineScore.runId,
-					}
-				: undefined,
+			baselines: baselineScore
+				? [
+						...(score.baselines ?? []),
+						{
+							name: baselineInput.name,
+							normalizedDelta: score.normalized - baselineScore.normalized,
+							issuesDelta: score.issues.length - baselineScore.issues.length,
+							baselineRunId: baselineScore.runId,
+						},
+					]
+				: score.baselines,
 		};
 	});
 
@@ -369,11 +417,15 @@ function applyBaseline(result: PireEvalCollectedScores, baseline: PireEvalCollec
 		scores,
 		suite: {
 			...result.suite,
-			baseline: {
-				averageNormalizedDelta: result.suite.averageNormalized - baseline.suite.averageNormalized,
-				averageIssuesDelta: result.suite.averageIssues - baseline.suite.averageIssues,
-				baselineCases: baseline.suite.cases,
-			},
+			baselines: [
+				...(result.suite.baselines ?? []),
+				{
+					name: baselineInput.name,
+					averageNormalizedDelta: result.suite.averageNormalized - baseline.suite.averageNormalized,
+					averageIssuesDelta: result.suite.averageIssues - baseline.suite.averageIssues,
+					baselineCases: baseline.suite.cases,
+				},
+			],
 		},
 	};
 }
@@ -445,21 +497,24 @@ async function main(argv: string[]): Promise<void> {
 		suitePath: args.suitePath,
 		casesDir: args.casesDir,
 	});
-	const withBaseline = args.baselinePath ? applyBaseline(result, await loadBaseline(args.baselinePath)) : result;
+	let withBaselines = result;
+	for (const baselineInput of args.baselines) {
+		withBaselines = applyBaseline(withBaselines, baselineInput, await loadBaseline(baselineInput.path));
+	}
 
 	if (args.json) {
-		process.stdout.write(`${JSON.stringify(withBaseline, null, 2)}\n`);
+		process.stdout.write(`${JSON.stringify(withBaselines, null, 2)}\n`);
 	} else {
-		process.stdout.write(formatLeaderboard(withBaseline));
+		process.stdout.write(formatLeaderboard(withBaselines));
 	}
 
 	if (args.reportPath) {
-		await writeReport(args.reportPath, withBaseline);
+		await writeReport(args.reportPath, withBaselines);
 	}
 
-	if (args.enforce && withBaseline.suite.regressions.length > 0) {
+	if (args.enforce && withBaselines.suite.regressions.length > 0) {
 		throw new Error(
-			`regression expectations failed\n${withBaseline.suite.regressions.map((entry) => `- ${entry}`).join("\n")}`,
+			`regression expectations failed\n${withBaselines.suite.regressions.map((entry) => `- ${entry}`).join("\n")}`,
 		);
 	}
 }
