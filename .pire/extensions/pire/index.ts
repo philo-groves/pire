@@ -19,6 +19,13 @@ import {
 	type DebugToolDetails,
 } from "./debug.js";
 import {
+	runDisasmRadare2Disassembly,
+	runDisasmRizinFunctions,
+	runDisasmRizinInfo,
+	type DisasmArtifactObservation,
+	type DisasmToolDetails,
+} from "./disasm.js";
+import {
 	runNetCurlHead,
 	runNetTsharkFollow,
 	runNetTsharkSummary,
@@ -76,6 +83,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"binary_objdump",
 		"binary_nm",
 		"binary_xxd",
+		"disasm_rizin_info",
+		"disasm_rizin_functions",
+		"disasm_radare2_disassembly",
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
@@ -95,6 +105,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"binary_objdump",
 		"binary_nm",
 		"binary_xxd",
+		"disasm_rizin_info",
+		"disasm_rizin_functions",
+		"disasm_radare2_disassembly",
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
@@ -121,6 +134,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"binary_objdump",
 		"binary_nm",
 		"binary_xxd",
+		"disasm_rizin_info",
+		"disasm_rizin_functions",
+		"disasm_radare2_disassembly",
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
@@ -147,6 +163,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"binary_objdump",
 		"binary_nm",
 		"binary_xxd",
+		"disasm_rizin_info",
+		"disasm_rizin_functions",
+		"disasm_radare2_disassembly",
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
@@ -337,6 +356,13 @@ function getDebugToolDetails(eventDetails: unknown): DebugToolDetails | undefine
 		return undefined;
 	}
 	return eventDetails as DebugToolDetails;
+}
+
+function getDisasmToolDetails(eventDetails: unknown): DisasmToolDetails | undefined {
+	if (!eventDetails || typeof eventDetails !== "object" || !("artifacts" in eventDetails)) {
+		return undefined;
+	}
+	return eventDetails as DisasmToolDetails;
 }
 
 function getNetToolDetails(eventDetails: unknown): NetToolDetails | undefined {
@@ -663,6 +689,84 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
 				path,
 				{ offset: params.offset ?? 0, length: params.length ?? 256 },
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "disasm_rizin_info",
+		label: "Disasm Rizin Info",
+		description: "Run a bounded rizin info summary and persist the analysis log as an artifact.",
+		promptSnippet: "Use disasm_rizin_info for structured binary metadata and section summaries.",
+		promptGuidelines: ["Use disasm_rizin_info to capture binary and section summaries without raw shell parsing."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary to inspect." }),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDisasmRizinInfo(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "disasm_rizin_functions",
+		label: "Disasm Rizin Functions",
+		description: "Run bounded rizin analysis to list discovered functions and persist the listing as an artifact.",
+		promptSnippet: "Use disasm_rizin_functions to inventory analyzed functions from a binary.",
+		promptGuidelines: ["Use disasm_rizin_functions when you need a function inventory before deeper reversing."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary to inspect." }),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDisasmRizinFunctions(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "disasm_radare2_disassembly",
+		label: "Disasm Radare2",
+		description: "Run bounded radare2 disassembly and persist the resulting disassembly log as an artifact.",
+		promptSnippet: "Use disasm_radare2_disassembly for bounded static disassembly previews.",
+		promptGuidelines: ["Use disasm_radare2_disassembly when you want a bounded function or entry-point disassembly preview."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary to inspect." }),
+			functionName: Type.Optional(Type.String({ description: "Optional function or symbol to seek before disassembly." })),
+			lineCount: Type.Optional(Type.Integer({ minimum: 1, maximum: 256, default: 64 })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDisasmRadare2Disassembly(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				{
+					functionName: params.functionName,
+					lineCount: params.lineCount ?? 64,
+				},
 				signal,
 			);
 			return {
@@ -1120,6 +1224,24 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				target: binaryDetails.targetPath,
 				summary: binaryDetails.summary.split("\n")[0] ?? event.toolName,
 				artifacts: binaryDetails.artifacts.map((artifact) => artifact.path),
+			});
+			return;
+		}
+
+		const disasmDetails = getDisasmToolDetails(event.details);
+		if (disasmDetails) {
+			for (const artifact of disasmDetails.artifacts as DisasmArtifactObservation[]) {
+				await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
+					type: artifact.type as ArtifactType | undefined,
+					command: artifact.command ?? disasmDetails.commandString,
+					finding: artifact.finding,
+				});
+			}
+			recordToolActivity(ctx, {
+				tool: event.toolName,
+				target: disasmDetails.targetPath,
+				summary: disasmDetails.summary.split("\n")[0] ?? event.toolName,
+				artifacts: disasmDetails.artifacts.map((artifact) => artifact.path),
 			});
 			return;
 		}
