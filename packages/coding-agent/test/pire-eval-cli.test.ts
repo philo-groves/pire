@@ -30,6 +30,7 @@ describe("pire eval cli", () => {
 		expect(result.stdout).toContain("toctou-candidate");
 		expect(result.stdout).toContain("run=heap-case-001");
 		expect(result.stdout).toContain("run=toctou-case-001");
+		expect(result.stdout).toContain("- regressions: 0");
 	});
 
 	test("emits JSON output for downstream harness processing", async () => {
@@ -50,12 +51,37 @@ describe("pire eval cli", () => {
 		);
 
 		const parsed = JSON.parse(result.stdout) as {
-			scores: Array<{ caseName: string; runId: string; normalized: number }>;
+			scores: Array<{ caseName: string; runId: string; normalized: number; regressions: string[] }>;
+			regressions: string[];
 		};
 
 		expect(parsed.scores).toHaveLength(2);
 		expect(parsed.scores[0]?.caseName).toBe("heap-disasm-confirmed");
 		expect(parsed.scores[1]?.caseName).toBe("toctou-candidate");
 		expect(parsed.scores[0]?.normalized).toBeGreaterThanOrEqual(parsed.scores[1]?.normalized ?? 0);
+		expect(parsed.regressions).toEqual([]);
+		expect(parsed.scores.every((score) => score.regressions.length === 0)).toBe(true);
+	});
+
+	test("fails in enforce mode when a case misses expectation metadata", async () => {
+		await expect(
+			execFileAsync(
+				"npx",
+				[
+					"tsx",
+					"./src/pire-eval-cli.ts",
+					"--suite",
+					join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+					"--cases-dir",
+					join(FIXTURE_DIR, "session-cases-regression"),
+					"--enforce",
+				],
+				{
+					cwd: PACKAGE_ROOT,
+				},
+			),
+		).rejects.toMatchObject({
+			stderr: expect.stringContaining("regression expectations failed"),
+		});
 	});
 });
