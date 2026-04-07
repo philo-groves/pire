@@ -290,11 +290,15 @@ describe("pire extension mode and tool gating", () => {
 		const trackerPath = join(harness.tempDir, ".pire", "session", "findings.json");
 		expect(existsSync(trackerPath)).toBe(true);
 		const tracker = JSON.parse(readFileSync(trackerPath, "utf-8")) as {
-			hypotheses: Array<{ id: string; title: string }>;
+			hypotheses: Array<{ id: string; title: string; relatedEvidenceIds: string[]; relatedArtifactIds: string[] }>;
 			evidence: Array<{ summary: string; commandId?: string; artifactIds: string[] }>;
 		};
 		expect(tracker.hypotheses).toHaveLength(1);
 		expect(tracker.hypotheses[0]?.title).toContain("Length field reaches parser copy loop");
+		expect(tracker.hypotheses[0]?.relatedEvidenceIds).toContain("ev-001");
+		expect(tracker.hypotheses[0]?.relatedArtifactIds.some((artifactId) => artifactId.includes(samplePath))).toBe(
+			true,
+		);
 		expect(tracker.evidence.some((record) => record.commandId?.startsWith("tool:binary_file:"))).toBe(true);
 		expect(
 			tracker.evidence.some((record) => record.artifactIds.some((artifactId) => artifactId.includes(samplePath))),

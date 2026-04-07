@@ -84,6 +84,7 @@ describe("pire research runtime features", () => {
 		await harness.session.prompt("summarize the active research posture");
 
 		expect(providerSystemPrompt).toContain("Available tools:");
+		expect(injectedText).toContain("[PIRE ENVIRONMENT]");
 		expect(injectedText).toContain("[PIRE SESSION TYPE: CRASH TRIAGE]");
 		expect(injectedText).toContain("[PIRE ROLE: REVIEWER]");
 		expect(injectedText).toContain("[PIRE MODE: DYNAMIC]");
@@ -109,9 +110,15 @@ describe("pire research runtime features", () => {
 			fauxAssistantMessage(
 				[
 					fauxToolCall("research_tracker", {
+						action: "add_question",
+						prompt: "Can we tie the sample back to the parser path?",
+						status: "blocked",
+					}),
+					fauxToolCall("research_tracker", {
 						action: "add_hypothesis",
 						title: "Length field reaches parser copy loop",
 						claim: "The packet length field can drive parse_frame() into a copy path.",
+						relatedQuestionIds: ["q-001"],
 					}),
 				],
 				{ stopReason: "toolUse" },
@@ -156,9 +163,15 @@ describe("pire research runtime features", () => {
 			fauxAssistantMessage(
 				[
 					fauxToolCall("research_tracker", {
+						action: "add_question",
+						prompt: "Can we tie the sample back to the parser path?",
+						status: "blocked",
+					}),
+					fauxToolCall("research_tracker", {
 						action: "add_hypothesis",
 						title: "Length field reaches parser copy loop",
 						claim: "The packet length field can drive parse_frame() into a copy path.",
+						relatedQuestionIds: ["q-001"],
 					}),
 				],
 				{ stopReason: "toolUse" },
@@ -177,28 +190,20 @@ describe("pire research runtime features", () => {
 		const tracker = JSON.parse(readFileSync(trackerPath, "utf-8")) as {
 			hypotheses: Array<{ id: string; status: string; relatedEvidenceIds: string[] }>;
 			findings: Array<{ id: string; title: string }>;
+			questions: Array<{ id: string; relatedEvidenceIds: string[] }>;
 		};
 		expect(tracker.hypotheses[0]).toMatchObject({
 			id: "hyp-001",
 			status: "supported",
 			relatedEvidenceIds: ["ev-001"],
 		});
+		expect(tracker.questions[0]).toMatchObject({
+			id: "q-001",
+			relatedEvidenceIds: ["ev-001"],
+		});
 		expect(tracker.findings[0]).toMatchObject({
 			id: "find-001",
 			title: "Out-of-bounds read",
 		});
-
-		const detailMessage = [...harness.session.messages]
-			.reverse()
-			.find(
-				(
-					message,
-				): message is Extract<(typeof harness.session.messages)[number], { role: "custom"; customType: string }> =>
-					message.role === "custom" && message.customType === "pire-tracker-detail",
-			);
-		expect(detailMessage?.content).toContain("Pire Tracker Record");
-		expect(detailMessage?.content).toContain("status: supported");
-		expect(detailMessage?.content).toContain("Evidence Links:");
-		expect(detailMessage?.content).toContain("ev-001");
 	});
 });

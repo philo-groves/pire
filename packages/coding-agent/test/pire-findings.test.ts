@@ -77,10 +77,18 @@ describe("pire findings tracker helpers", () => {
 		expect(widgetLines[0]).toBe("Pire Tracker");
 		expect(widgetLines.some((line) => line.includes("confirmed findings: 1"))).toBe(true);
 
-		const promptSummary = buildFindingsPromptSummary(tracker);
+		const promptSummary = buildFindingsPromptSummary(tracker, {
+			activeHypothesisIds: [hypothesis.id],
+			activeQuestionIds: [question.id],
+		});
 		expect(promptSummary).toContain("[PIRE TRACKER]");
+		expect(promptSummary).toContain("Active focus:");
+		expect(promptSummary).toContain(`hypothesis ${hypothesis.id}`);
+		expect(promptSummary).toContain(`question ${question.id}`);
 		expect(promptSummary).toContain("Confirmed findings:");
 		expect(promptSummary).toContain(question.id);
+		expect(promptSummary).toContain("Evidence linked to active focus:");
+		expect(promptSummary).toContain(evidence.id);
 	});
 
 	test("saves JSON and markdown mirrors", async () => {

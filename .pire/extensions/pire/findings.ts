@@ -43,6 +43,7 @@ export interface QuestionRecord {
 	prompt: string;
 	status: QuestionStatus;
 	owner?: string;
+	relatedEvidenceIds: string[];
 	blockedOn: string[];
 	createdAt: string;
 	updatedAt: string;
@@ -155,6 +156,7 @@ export interface AddQuestionInput {
 	prompt: string;
 	status?: QuestionStatus;
 	owner?: string;
+	relatedEvidenceIds?: string[];
 	blockedOn?: string[];
 	timestamp?: string;
 }
@@ -164,6 +166,7 @@ export interface UpdateQuestionInput {
 	prompt?: string;
 	status?: QuestionStatus;
 	owner?: string;
+	addEvidenceIds?: string[];
 	addBlockedOn?: string[];
 	timestamp?: string;
 }
@@ -176,6 +179,12 @@ export interface AddEvidenceInput {
 	supports?: string[];
 	refutes?: string[];
 	timestamp?: string;
+}
+
+export interface FindingsPromptSummaryOptions {
+	activeHypothesisIds?: string[];
+	activeFindingIds?: string[];
+	activeQuestionIds?: string[];
 }
 
 export interface AddDeadEndInput {
@@ -288,6 +297,7 @@ function normalizeQuestion(value: unknown): QuestionRecord | undefined {
 		prompt: value.prompt,
 		status: value.status === "answered" || value.status === "blocked" ? value.status : "open",
 		owner: typeof value.owner === "string" ? value.owner : undefined,
+		relatedEvidenceIds: dedupe(toStringArray(value.relatedEvidenceIds)),
 		blockedOn: dedupe(toStringArray(value.blockedOn)),
 		createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date().toISOString(),
 		updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
@@ -501,6 +511,7 @@ export function addQuestion(tracker: FindingsTracker, input: AddQuestionInput): 
 		prompt: input.prompt.trim(),
 		status: input.status ?? "open",
 		owner: input.owner?.trim() || undefined,
+		relatedEvidenceIds: dedupe(input.relatedEvidenceIds ?? []),
 		blockedOn: dedupe(input.blockedOn ?? []),
 		createdAt: timestamp,
 		updatedAt: timestamp,
@@ -520,6 +531,7 @@ export function updateQuestion(tracker: FindingsTracker, input: UpdateQuestionIn
 	if (input.prompt !== undefined) question.prompt = input.prompt.trim();
 	if (input.status !== undefined) question.status = input.status;
 	if (input.owner !== undefined) question.owner = input.owner.trim() || undefined;
+	question.relatedEvidenceIds = dedupe([...question.relatedEvidenceIds, ...(input.addEvidenceIds ?? [])]);
 	question.blockedOn = dedupe([...question.blockedOn, ...(input.addBlockedOn ?? [])]);
 	question.updatedAt = timestamp;
 	touchTracker(tracker, timestamp);
@@ -694,12 +706,44 @@ export function buildFindingsWidgetLines(tracker: FindingsTracker): string[] {
 	return lines;
 }
 
-export function buildFindingsPromptSummary(tracker: FindingsTracker): string {
+export function buildFindingsPromptSummary(
+	tracker: FindingsTracker,
+	options: FindingsPromptSummaryOptions = {},
+): string {
 	const summary = buildFindingsTrackerSummary(tracker);
 	const lines = [
 		"[PIRE TRACKER]",
 		`Open hypotheses: ${summary.openHypotheses}; confirmed findings: ${summary.confirmedFindings}; blocked questions: ${summary.blockedQuestions}; evidence records: ${summary.totalEvidence}.`,
 	];
+	const activeHypotheses = tracker.hypotheses.filter((record) => (options.activeHypothesisIds ?? []).includes(record.id));
+	const activeFindings = tracker.findings.filter((record) => (options.activeFindingIds ?? []).includes(record.id));
+	const activeQuestions = tracker.questions.filter((record) => (options.activeQuestionIds ?? []).includes(record.id));
+	const focusEvidenceIds = new Set([
+		...activeHypotheses.flatMap((record) => record.relatedEvidenceIds),
+		...activeFindings.flatMap((record) => record.relatedEvidenceIds),
+		...activeQuestions.flatMap((record) => record.relatedEvidenceIds),
+	]);
+	const focusEvidence = tracker.evidence
+		.filter((record) => focusEvidenceIds.has(record.id))
+		.slice(-3)
+		.reverse();
+	const contradictoryEvidence = tracker.evidence
+		.filter((record) => record.refutes.length > 0)
+		.slice(-2)
+		.reverse();
+
+	if (activeHypotheses.length > 0 || activeFindings.length > 0 || activeQuestions.length > 0) {
+		lines.push("Active focus:");
+		for (const record of activeHypotheses) {
+			lines.push(`- hypothesis ${record.id}: ${record.title}`);
+		}
+		for (const record of activeFindings) {
+			lines.push(`- finding ${record.id}: ${record.title}`);
+		}
+		for (const record of activeQuestions) {
+			lines.push(`- question ${record.id}: ${record.prompt}`);
+		}
+	}
 
 	const openHypotheses = tracker.hypotheses
 		.filter((record) => record.status === "open" || record.status === "needs-more-evidence")
@@ -725,6 +769,20 @@ export function buildFindingsPromptSummary(tracker: FindingsTracker): string {
 		lines.push("Blocked questions:");
 		for (const record of blockedQuestions) {
 			lines.push(`- ${record.id}: ${record.prompt}`);
+		}
+	}
+
+	if (focusEvidence.length > 0) {
+		lines.push("Evidence linked to active focus:");
+		for (const record of focusEvidence) {
+			lines.push(`- ${record.id}: ${record.summary}`);
+		}
+	}
+
+	if (contradictoryEvidence.length > 0) {
+		lines.push("Contradictory evidence:");
+		for (const record of contradictoryEvidence) {
+			lines.push(`- ${record.id}: ${record.summary}`);
 		}
 	}
 

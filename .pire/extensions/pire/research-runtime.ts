@@ -429,6 +429,7 @@ export function renderTrackerRecordDetail(tracker: FindingsTracker, id: string):
 			if (record.owner) {
 				lines.push(`- owner: ${record.owner}`);
 			}
+			lines.push(...renderLinks("Evidence Links", record.relatedEvidenceIds));
 			lines.push(...renderLinks("Blocked On", record.blockedOn));
 			break;
 		}

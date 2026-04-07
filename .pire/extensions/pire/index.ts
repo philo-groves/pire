@@ -109,12 +109,27 @@ interface PersistedSessionTypeState {
 	sessionType: PireSessionType;
 }
 
+interface FocusState {
+	hypothesisIds: string[];
+	findingIds: string[];
+	questionIds: string[];
+	updatedAt: string;
+}
+
+interface PersistedInventoryState {
+	capturedAt: string;
+	source: "auto" | "command" | "tool";
+	inventory: EnvironmentInventory;
+}
+
 const MODE_ENTRY_TYPE = "pire-mode";
 const ROLE_ENTRY_TYPE = "pire-role";
 const SESSION_TYPE_ENTRY_TYPE = "pire-session-type";
 const ARTIFACT_ENTRY_TYPE = "pire-artifacts";
 const TRACKER_ENTRY_TYPE = "pire-findings-tracker";
 const TOOL_ACTIVITY_ENTRY_TYPE = "pire-tool-activity";
+const INVENTORY_ENTRY_TYPE = "pire-env-inventory-state";
+const FOCUS_ENTRY_TYPE = "pire-focus";
 const MODE_FLAG = "pire-mode";
 const ROLE_FLAG = "pire-role";
 const SESSION_TYPE_FLAG = "pire-session";
@@ -382,6 +397,37 @@ function formatModePrompt(mode: PireMode): string {
 	return lines.join("\n");
 }
 
+function dedupeIds(values: string[]): string[] {
+	return Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)));
+}
+
+function createEmptyFocusState(): FocusState {
+	return {
+		hypothesisIds: [],
+		findingIds: [],
+		questionIds: [],
+		updatedAt: new Date().toISOString(),
+	};
+}
+
+function buildInventoryPromptSummary(inventory?: EnvironmentInventory): string | undefined {
+	if (!inventory) {
+		return undefined;
+	}
+	const availableTools = inventory.tools
+		.filter((tool) => tool.available)
+		.map((tool) => tool.name)
+		.sort()
+		.slice(0, 12);
+	return [
+		"[PIRE ENVIRONMENT]",
+		`Platform: ${inventory.platform}/${inventory.arch}; shell: ${inventory.shell ?? "unknown"}; writable dirs: ${inventory.writableDirs.join(", ") || "none"}.`,
+		`Network posture: ${inventory.networkPosture}`,
+		`Sandbox posture: ${inventory.sandboxPosture}`,
+		`Available tools: ${availableTools.join(", ") || "none detected"}.`,
+	].join("\n");
+}
+
 function updateStatus(ctx: ExtensionContext, mode: PireMode): void {
 	ctx.ui.setStatus("pire-mode", ctx.ui.theme.fg("accent", `mode:${mode}`));
 }
@@ -411,6 +457,15 @@ function updateActivityStatus(ctx: ExtensionContext, activity?: PireToolActivity
 		return;
 	}
 	ctx.ui.setStatus("pire-activity", ctx.ui.theme.fg("accent", `last:${activity.tool}`));
+}
+
+function updateFocusStatus(ctx: ExtensionContext, focus: FocusState): void {
+	const parts = [
+		focus.hypothesisIds[0] ? `h:${focus.hypothesisIds[0]}` : undefined,
+		focus.findingIds[0] ? `f:${focus.findingIds[0]}` : undefined,
+		focus.questionIds[0] ? `q:${focus.questionIds[0]}` : undefined,
+	].filter((value): value is string => value !== undefined);
+	ctx.ui.setStatus("pire-focus", parts.length > 0 ? ctx.ui.theme.fg("accent", `focus:${parts.join("/")}`) : undefined);
 }
 
 function updateTrackerStatus(ctx: ExtensionContext, tracker: FindingsTracker): void {
@@ -513,6 +568,8 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	};
 	let lastActivity: PireToolActivity | undefined;
+	let currentInventory: EnvironmentInventory | undefined;
+	let currentFocus: FocusState = createEmptyFocusState();
 
 	const persistMode = (): void => {
 		pi.appendEntry<PersistedModeState>(MODE_ENTRY_TYPE, { mode: currentMode });
@@ -554,6 +611,19 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		});
 	};
 
+	const persistInventory = (inventory: EnvironmentInventory, source: "auto" | "command" | "tool"): void => {
+		currentInventory = inventory;
+		pi.appendEntry<PersistedInventoryState>(INVENTORY_ENTRY_TYPE, {
+			capturedAt: new Date().toISOString(),
+			source,
+			inventory,
+		});
+	};
+
+	const persistFocus = (): void => {
+		pi.appendEntry<FocusState>(FOCUS_ENTRY_TYPE, currentFocus);
+	};
+
 	const applyMode = (ctx: ExtensionContext, mode: PireMode, options?: { notify?: boolean }): void => {
 		currentMode = mode;
 		pi.setActiveTools(MODE_TOOLS[mode]);
@@ -563,6 +633,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		updateArtifactStatus(ctx, artifactManifest);
 		updateTrackerStatus(ctx, findingsTracker);
 		updateActivityStatus(ctx, lastActivity);
+		updateFocusStatus(ctx, currentFocus);
 		persistMode();
 		if (options?.notify !== false) {
 			ctx.ui.notify(`pire mode: ${mode}`, "info");
@@ -618,16 +689,23 @@ export default function pireExtension(pi: ExtensionAPI): void {
 
 	const showInventory = async (ctx: ExtensionContext): Promise<void> => {
 		const inventory = await collectEnvironmentInventory(ctx.cwd, (command, args) => pi.exec(command, args, { cwd: ctx.cwd }));
+		persistInventory(inventory, "command");
+		recordToolActivity(ctx, {
+			tool: "environment_inventory",
+			target: ctx.cwd,
+			summary: "Captured environment inventory",
+			artifacts: [],
+		});
 		pi.sendMessage<EnvironmentInventory>(
 			{
 				customType: "pire-env-inventory",
 				content: formatInventorySummary(inventory),
 				display: true,
 				details: inventory,
-				},
-				{ triggerTurn: false },
-			);
-		};
+			},
+			{ triggerTurn: false },
+		);
+	};
 
 	const showTracker = (filterText?: string): void => {
 		pi.sendMessage(
@@ -675,6 +753,75 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			finding: options?.finding,
 		});
 		await persistArtifacts();
+	};
+
+	const applyFocus = (
+		ctx: ExtensionContext,
+		focus: Partial<Omit<FocusState, "updatedAt">>,
+		options?: { notify?: boolean; persist?: boolean },
+	): void => {
+		currentFocus = {
+			hypothesisIds: dedupeIds(focus.hypothesisIds ?? currentFocus.hypothesisIds),
+			findingIds: dedupeIds(focus.findingIds ?? currentFocus.findingIds),
+			questionIds: dedupeIds(focus.questionIds ?? currentFocus.questionIds),
+			updatedAt: new Date().toISOString(),
+		};
+		updateFocusStatus(ctx, currentFocus);
+		if (options?.persist !== false) {
+			persistFocus();
+		}
+		if (options?.notify !== false) {
+			const summary = [
+				currentFocus.hypothesisIds[0],
+				currentFocus.findingIds[0],
+				currentFocus.questionIds[0],
+			]
+				.filter((value): value is string => value !== undefined)
+				.join(", ");
+			if (summary.length > 0) {
+				ctx.ui.notify(`pire focus: ${summary}`, "info");
+			}
+		}
+	};
+
+	const getEvidenceLinkFocus = (): FocusState => {
+		if (
+			currentFocus.hypothesisIds.length > 0 ||
+			currentFocus.findingIds.length > 0 ||
+			currentFocus.questionIds.length > 0
+		) {
+			return currentFocus;
+		}
+		return {
+			hypothesisIds: findingsTracker.hypotheses.slice(-1).map((record) => record.id),
+			findingIds: findingsTracker.findings.slice(-1).map((record) => record.id),
+			questionIds: findingsTracker.questions
+				.filter((record) => record.status === "open" || record.status === "blocked")
+				.slice(-1)
+				.map((record) => record.id),
+			updatedAt: new Date().toISOString(),
+		};
+	};
+
+	const linkEvidenceToActiveFocus = (evidenceId: string, artifactIds: string[]): boolean => {
+		const focus = getEvidenceLinkFocus();
+		let changed = false;
+		for (const id of focus.hypothesisIds) {
+			if (updateHypothesis(findingsTracker, { id, addEvidenceIds: [evidenceId], addArtifactIds: artifactIds })) {
+				changed = true;
+			}
+		}
+		for (const id of focus.findingIds) {
+			if (updateFinding(findingsTracker, { id, addEvidenceIds: [evidenceId], addArtifactIds: artifactIds, addBasis: [evidenceId] })) {
+				changed = true;
+			}
+		}
+		for (const id of focus.questionIds) {
+			if (updateQuestion(findingsTracker, { id, addEvidenceIds: [evidenceId] })) {
+				changed = true;
+			}
+		}
+		return changed;
 	};
 
 	const recordToolActivity = (
@@ -866,6 +1013,11 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					});
 					await persistTracker();
 					syncTrackerUI(ctx);
+					applyFocus(
+						ctx,
+						{ hypothesisIds: [record.id], findingIds: [], questionIds: record.relatedQuestionIds },
+						{ notify: false },
+					);
 					resultText = `Added hypothesis ${record.id}: ${record.title}`;
 					break;
 				}
@@ -895,6 +1047,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					}
 					await persistTracker();
 					syncTrackerUI(ctx);
+					applyFocus(ctx, { hypothesisIds: [record.id] }, { notify: false });
 					resultText = `Updated hypothesis ${record.id}: ${record.status}`;
 					break;
 				}
@@ -919,6 +1072,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					});
 					await persistTracker();
 					syncTrackerUI(ctx);
+					applyFocus(ctx, { findingIds: [record.id] }, { notify: false });
 					resultText = `Added finding ${record.id}: ${record.title}`;
 					break;
 				}
@@ -948,6 +1102,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					}
 					await persistTracker();
 					syncTrackerUI(ctx);
+					applyFocus(ctx, { findingIds: [record.id] }, { notify: false });
 					resultText = `Updated finding ${record.id}: ${record.status}`;
 					break;
 				}
@@ -964,10 +1119,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						prompt: params.prompt,
 						status,
 						owner: params.owner,
+						relatedEvidenceIds: params.relatedEvidenceIds,
 						blockedOn: params.blockedOn,
 					});
 					await persistTracker();
 					syncTrackerUI(ctx);
+					applyFocus(ctx, { questionIds: [record.id] }, { notify: false });
 					resultText = `Added question ${record.id}: ${record.prompt}`;
 					break;
 				}
@@ -985,6 +1142,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						prompt: params.prompt,
 						status,
 						owner: params.owner,
+						addEvidenceIds: params.addEvidenceIds,
 						addBlockedOn: params.addBlockedOn,
 					});
 					if (!record) {
@@ -993,6 +1151,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					}
 					await persistTracker();
 					syncTrackerUI(ctx);
+					applyFocus(ctx, { questionIds: [record.id] }, { notify: false });
 					resultText = `Updated question ${record.id}: ${record.status}`;
 					break;
 				}
@@ -1009,6 +1168,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						supports: params.supports,
 						refutes: params.refutes,
 					});
+					linkEvidenceToActiveFocus(record.id, params.artifactIds ?? []);
 					await persistTracker();
 					syncTrackerUI(ctx);
 					resultText = `Added evidence ${record.id}: ${record.summary}`;
@@ -1714,11 +1874,21 @@ export default function pireExtension(pi: ExtensionAPI): void {
 
 	pi.registerCommand("tracker-detail", {
 		description: "Show one tracker record with linked evidence, artifacts, and questions",
-		handler: async (args) => {
+		handler: async (args, ctx) => {
 			const id = args.trim();
 			if (!id) {
 				pi.sendMessage({ customType: "pire-tracker-detail", content: "Usage: /tracker-detail <record-id>", display: true }, { triggerTurn: false });
 				return;
+			}
+			const hypothesis = findingsTracker.hypotheses.find((record) => record.id === id);
+			const finding = findingsTracker.findings.find((record) => record.id === id);
+			const question = findingsTracker.questions.find((record) => record.id === id);
+			if (hypothesis) {
+				applyFocus(ctx, { hypothesisIds: [hypothesis.id] }, { notify: false });
+			} else if (finding) {
+				applyFocus(ctx, { findingIds: [finding.id] }, { notify: false });
+			} else if (question) {
+				applyFocus(ctx, { questionIds: [question.id] }, { notify: false });
 			}
 			pi.sendMessage(
 				{
@@ -1747,6 +1917,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			}
 			await persistTracker();
 			syncTrackerUI(ctx);
+			applyFocus(ctx, { hypothesisIds: [record.id] }, { notify: false });
 			ctx.ui.notify(`Supported ${record.id}`, "info");
 		},
 	});
@@ -1767,6 +1938,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			}
 			await persistTracker();
 			syncTrackerUI(ctx);
+			applyFocus(ctx, { hypothesisIds: [record.id] }, { notify: false });
 			ctx.ui.notify(`Refuted ${record.id}`, "info");
 		},
 	});
@@ -1810,6 +1982,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			});
 			await persistTracker();
 			syncTrackerUI(ctx);
+			applyFocus(ctx, { hypothesisIds: [hypothesis.id], findingIds: [finding.id] }, { notify: false });
 			ctx.ui.notify(`Created finding ${finding.id}`, "info");
 		},
 	});
@@ -1914,6 +2087,14 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			.getBranch()
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === TRACKER_ENTRY_TYPE)
 			.pop() as { data?: { tracker?: FindingsTracker } } | undefined;
+		const latestInventoryEntry = ctx.sessionManager
+			.getBranch()
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === INVENTORY_ENTRY_TYPE)
+			.pop() as { data?: PersistedInventoryState } | undefined;
+		const latestFocusEntry = ctx.sessionManager
+			.getBranch()
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === FOCUS_ENTRY_TYPE)
+			.pop() as { data?: FocusState } | undefined;
 		const flagMode = typeof flagValue === "string" && isPireMode(flagValue) ? flagValue : undefined;
 		const flagRole = typeof roleFlagValue === "string" && isPireRole(roleFlagValue) ? roleFlagValue : undefined;
 		const flagSessionType =
@@ -1921,6 +2102,8 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		artifactManifest = await loadArtifactManifest(ctx.cwd);
 		findingsTracker = latestTrackerEntry?.data?.tracker ?? (await loadFindingsTracker(ctx.cwd));
 		lastActivity = latestActivityEntry?.data;
+		currentInventory = latestInventoryEntry?.data?.inventory;
+		currentFocus = latestFocusEntry?.data ?? createEmptyFocusState();
 		currentRole = flagRole ?? persistedRole?.data?.role;
 		currentSessionType = flagSessionType ?? persistedSessionType?.data?.sessionType;
 		applyMode(ctx, flagMode ?? persistedMode ?? "recon", { notify: false });
@@ -1929,6 +2112,17 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		}
 		if (currentRole) {
 			applyRole(ctx, currentRole, { notify: false });
+		}
+		updateFocusStatus(ctx, currentFocus);
+		if (!currentInventory || currentInventory.cwd !== ctx.cwd) {
+			const inventory = await collectEnvironmentInventory(ctx.cwd, (command, args) => pi.exec(command, args, { cwd: ctx.cwd }));
+			persistInventory(inventory, "auto");
+			recordToolActivity(ctx, {
+				tool: "environment_inventory",
+				target: ctx.cwd,
+				summary: "Captured environment inventory",
+				artifacts: [],
+			});
 		}
 	});
 
@@ -1945,28 +2139,50 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			.getBranch()
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === SESSION_TYPE_ENTRY_TYPE)
 			.pop() as { data?: PersistedSessionTypeState } | undefined;
+		const latestInventoryEntry = ctx.sessionManager
+			.getBranch()
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === INVENTORY_ENTRY_TYPE)
+			.pop() as { data?: PersistedInventoryState } | undefined;
+		const latestFocusEntry = ctx.sessionManager
+			.getBranch()
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === FOCUS_ENTRY_TYPE)
+			.pop() as { data?: FocusState } | undefined;
 		findingsTracker = latestTrackerEntry?.data?.tracker ?? findingsTracker;
 		currentRole = latestRoleEntry?.data?.role ?? currentRole;
 		currentSessionType = latestSessionTypeEntry?.data?.sessionType ?? currentSessionType;
+		currentInventory = latestInventoryEntry?.data?.inventory ?? currentInventory;
+		currentFocus = latestFocusEntry?.data ?? createEmptyFocusState();
 		syncTrackerUI(ctx);
 		updateRoleStatus(ctx, currentRole);
 		updateSessionTypeStatus(ctx, currentSessionType);
+		updateFocusStatus(ctx, currentFocus);
 	});
 
-	pi.on("before_agent_start", async () => ({
-		message: {
-			customType: "pire-mode-context",
-			content: [
-				formatModePrompt(currentMode),
-				currentSessionType ? formatSessionTypePrompt(currentSessionType) : undefined,
-				currentRole ? formatRolePrompt(currentRole) : undefined,
-				buildFindingsPromptSummary(findingsTracker),
-			]
-				.filter((value): value is string => value !== undefined)
-				.join("\n\n"),
-			display: false,
-		},
-	}));
+	pi.on("before_agent_start", async (_event, ctx) => {
+		if (!currentInventory || currentInventory.cwd !== ctx.cwd) {
+			const inventory = await collectEnvironmentInventory(ctx.cwd, (command, args) => pi.exec(command, args, { cwd: ctx.cwd }));
+			persistInventory(inventory, "auto");
+		}
+		return {
+			message: {
+				customType: "pire-mode-context",
+				content: [
+					formatModePrompt(currentMode),
+					currentSessionType ? formatSessionTypePrompt(currentSessionType) : undefined,
+					currentRole ? formatRolePrompt(currentRole) : undefined,
+					buildInventoryPromptSummary(currentInventory),
+					buildFindingsPromptSummary(findingsTracker, {
+						activeHypothesisIds: currentFocus.hypothesisIds,
+						activeFindingIds: currentFocus.findingIds,
+						activeQuestionIds: currentFocus.questionIds,
+					}),
+				]
+					.filter((value): value is string => value !== undefined)
+					.join("\n\n"),
+				display: false,
+			},
+		};
+	});
 
 	pi.on("session_before_compact", async (event) => {
 		const recentActivity = collectRecentActivityFromEntries(event.branchEntries);
@@ -2055,12 +2271,13 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				}
 			}
 
-			addEvidence(findingsTracker, {
+			const evidence = addEvidence(findingsTracker, {
 				kind: event.toolName === "debug_strace" || event.toolName === "debug_ltrace" ? "trace" : "tool-result",
 				summary: `${event.toolName}: ${firstLine}`,
 				commandId: `tool:${event.toolName}:${event.toolCallId}`,
 				artifactIds,
 			});
+			linkEvidenceToActiveFocus(evidence.id, artifactIds);
 			await persistTracker();
 			syncTrackerUI(ctx);
 			if (event.toolName !== "read" && event.toolName !== "write" && event.toolName !== "edit" && event.toolName !== "bash") {
@@ -2106,13 +2323,20 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		}
 
 		if (event.toolName === "environment_inventory") {
+			if (
+				event.details &&
+				typeof event.details === "object" &&
+				"cwd" in event.details &&
+				typeof event.details.cwd === "string"
+			) {
+				persistInventory(event.details as EnvironmentInventory, "tool");
+			}
 			recordToolActivity(ctx, {
 				tool: event.toolName,
 				target: ctx.cwd,
 				summary: "Captured environment inventory",
 				artifacts: [],
 			});
-			await persistArtifacts();
 			return;
 		}
 
