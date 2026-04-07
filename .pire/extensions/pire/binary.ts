@@ -16,12 +16,11 @@ export interface BinaryToolDetails {
 	killed: boolean;
 	stdoutPreview: string;
 	stderrPreview: string;
+	summary: string;
 	artifacts: BinaryArtifactObservation[];
 }
 
-interface ToolExecResult extends BinaryToolDetails {
-	summary: string;
-}
+interface ToolExecResult extends BinaryToolDetails {}
 
 type ExecFn = (command: string, args: string[], options?: { signal?: AbortSignal; cwd?: string }) => Promise<ExecResult>;
 

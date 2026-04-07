@@ -74,17 +74,26 @@ describe("pire extension mode and tool gating", () => {
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
+		"unpack_binwalk_scan",
+		"unpack_archive_list",
 	];
 	const expectedDynamicOnlyTools = ["debug_gdb", "debug_lldb", "debug_strace", "debug_ltrace"];
-	const expectedDynamicTools = [...expectedReconTools, ...expectedDynamicOnlyTools];
+	const expectedDynamicTools = [...expectedReconTools, "unpack_binwalk_extract", ...expectedDynamicOnlyTools];
 	const expectedProofingTools = [
 		...expectedReconTools.slice(0, 2),
 		"edit",
 		"write",
 		...expectedReconTools.slice(2),
+		"unpack_binwalk_extract",
 		...expectedDynamicOnlyTools,
 	];
-	const expectedReportTools = [...expectedReconTools.slice(0, 2), "edit", "write", ...expectedReconTools.slice(2)];
+	const expectedReportTools = [
+		...expectedReconTools.slice(0, 2),
+		"edit",
+		"write",
+		...expectedReconTools.slice(2),
+		"unpack_binwalk_extract",
+	];
 
 	const getToolResultText = (messages: Message[]): string => {
 		const toolResult = [...messages]
@@ -240,5 +249,21 @@ describe("pire extension mode and tool gating", () => {
 		expect(latestArtifactEntry?.data?.count).toBe(1);
 		expect(latestArtifactEntry?.data?.byType?.binary).toBe(1);
 		expect(latestArtifactEntry?.data?.recentPaths).toContain(samplePath);
+
+		const activityEntries = harness.sessionManager
+			.getEntries()
+			.filter((entry) => entry.type === "custom" && entry.customType === "pire-tool-activity");
+		const latestActivityEntry = activityEntries.at(-1) as
+			| {
+					data?: {
+						tool?: string;
+						target?: string;
+						artifacts?: string[];
+					};
+			  }
+			| undefined;
+		expect(latestActivityEntry?.data?.tool).toBe("binary_file");
+		expect(latestActivityEntry?.data?.target).toBe(samplePath);
+		expect(latestActivityEntry?.data?.artifacts).toContain(samplePath);
 	});
 });

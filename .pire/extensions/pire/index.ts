@@ -26,6 +26,13 @@ import {
 	type NetToolDetails,
 } from "./net.js";
 import {
+	runUnpackArchiveList,
+	runUnpackBinwalkExtract,
+	runUnpackBinwalkScan,
+	type UnpackArtifactObservation,
+	type UnpackToolDetails,
+} from "./unpack.js";
+import {
 	buildArtifactManifestSummary,
 	loadArtifactManifest,
 	recordArtifact,
@@ -43,8 +50,17 @@ interface PersistedModeState {
 	mode: PireMode;
 }
 
+interface PireToolActivity {
+	tool: string;
+	target: string;
+	summary: string;
+	artifacts: string[];
+	recordedAt: string;
+}
+
 const MODE_ENTRY_TYPE = "pire-mode";
 const ARTIFACT_ENTRY_TYPE = "pire-artifacts";
+const TOOL_ACTIVITY_ENTRY_TYPE = "pire-tool-activity";
 const MODE_FLAG = "pire-mode";
 const MODE_TOOLS: Record<PireMode, string[]> = {
 	recon: [
@@ -63,6 +79,8 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
+		"unpack_binwalk_scan",
+		"unpack_archive_list",
 	],
 	dynamic: [
 		"read",
@@ -80,6 +98,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
+		"unpack_binwalk_scan",
+		"unpack_archive_list",
+		"unpack_binwalk_extract",
 		"debug_gdb",
 		"debug_lldb",
 		"debug_strace",
@@ -103,6 +124,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
+		"unpack_binwalk_scan",
+		"unpack_archive_list",
+		"unpack_binwalk_extract",
 		"debug_gdb",
 		"debug_lldb",
 		"debug_strace",
@@ -126,6 +150,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
+		"unpack_binwalk_scan",
+		"unpack_archive_list",
+		"unpack_binwalk_extract",
 	],
 };
 
@@ -279,6 +306,25 @@ function updateStatus(ctx: ExtensionContext, mode: PireMode): void {
 	ctx.ui.setStatus("pire-mode", ctx.ui.theme.fg("accent", `mode:${mode}`));
 }
 
+function updateArtifactStatus(ctx: ExtensionContext, manifest: ArtifactManifest): void {
+	const summary = buildArtifactManifestSummary(manifest);
+	const typeParts = Object.entries(summary.byType)
+		.sort((left, right) => (right[1] ?? 0) - (left[1] ?? 0))
+		.slice(0, 2)
+		.map(([type, count]) => `${type}:${count}`)
+		.join(",");
+	const text = summary.total === 0 ? "artifacts:0" : typeParts.length > 0 ? `artifacts:${summary.total} ${typeParts}` : `artifacts:${summary.total}`;
+	ctx.ui.setStatus("pire-artifacts", ctx.ui.theme.fg("accent", text));
+}
+
+function updateActivityStatus(ctx: ExtensionContext, activity?: PireToolActivity): void {
+	if (!activity) {
+		ctx.ui.setStatus("pire-activity", undefined);
+		return;
+	}
+	ctx.ui.setStatus("pire-activity", ctx.ui.theme.fg("accent", `last:${activity.tool}`));
+}
+
 function getBinaryToolDetails(eventDetails: unknown): BinaryToolDetails | undefined {
 	if (!eventDetails || typeof eventDetails !== "object" || !("artifacts" in eventDetails)) {
 		return undefined;
@@ -300,10 +346,18 @@ function getNetToolDetails(eventDetails: unknown): NetToolDetails | undefined {
 	return eventDetails as NetToolDetails;
 }
 
+function getUnpackToolDetails(eventDetails: unknown): UnpackToolDetails | undefined {
+	if (!eventDetails || typeof eventDetails !== "object" || !("artifacts" in eventDetails)) {
+		return undefined;
+	}
+	return eventDetails as UnpackToolDetails;
+}
+
 export default function pireExtension(pi: ExtensionAPI): void {
 	let currentMode: PireMode = "recon";
 	let currentCwd = process.cwd();
 	let artifactManifest: ArtifactManifest = { version: 1, updatedAt: new Date().toISOString(), artifacts: [] };
+	let lastActivity: PireToolActivity | undefined;
 
 	const persistMode = (): void => {
 		pi.appendEntry<PersistedModeState>(MODE_ENTRY_TYPE, { mode: currentMode });
@@ -325,6 +379,8 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		currentMode = mode;
 		pi.setActiveTools(MODE_TOOLS[mode]);
 		updateStatus(ctx, mode);
+		updateArtifactStatus(ctx, artifactManifest);
+		updateActivityStatus(ctx, lastActivity);
 		persistMode();
 		if (options?.notify !== false) {
 			ctx.ui.notify(`pire mode: ${mode}`, "info");
@@ -374,6 +430,64 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			finding: options?.finding,
 		});
 		await persistArtifacts();
+	};
+
+	const recordToolActivity = (
+		ctx: ExtensionContext,
+		activity: Omit<PireToolActivity, "recordedAt"> & { recordedAt?: string },
+	): void => {
+		lastActivity = {
+			...activity,
+			recordedAt: activity.recordedAt ?? new Date().toISOString(),
+		};
+		pi.appendEntry<PireToolActivity>(TOOL_ACTIVITY_ENTRY_TYPE, lastActivity);
+		updateActivityStatus(ctx, lastActivity);
+	};
+
+	const showActivity = (ctx: ExtensionContext, filterText?: string): void => {
+		const normalizedFilter = filterText?.trim().toLowerCase() ?? "";
+		const activities = ctx.sessionManager
+			.getEntries()
+			.flatMap((entry) => {
+				if (entry.type !== "custom" || entry.customType !== TOOL_ACTIVITY_ENTRY_TYPE || entry.data === undefined) {
+					return [];
+				}
+				return [entry.data as PireToolActivity];
+			})
+			.filter((entry) => {
+				if (normalizedFilter.length === 0) {
+					return true;
+				}
+				return (
+					entry.tool.toLowerCase().includes(normalizedFilter) ||
+					entry.target.toLowerCase().includes(normalizedFilter) ||
+					entry.summary.toLowerCase().includes(normalizedFilter)
+				);
+			})
+			.slice(-8)
+			.reverse();
+
+		const lines =
+			activities.length === 0
+				? [`Pire Activity`, normalizedFilter.length > 0 ? `- filter: ${normalizedFilter}` : "- no recorded tool activity yet"]
+				: [
+						"Pire Activity",
+						...(normalizedFilter.length > 0 ? [`- filter: ${normalizedFilter}`] : []),
+						...activities.map((entry) => `- ${entry.tool} ${entry.target} (${entry.artifacts.length} artifacts)`),
+				  ];
+
+		pi.sendMessage(
+			{
+				customType: "pire-tool-activity",
+				content: lines.join("\n"),
+				display: true,
+				details: {
+					filter: normalizedFilter.length > 0 ? normalizedFilter : undefined,
+					activities,
+				},
+			},
+			{ triggerTurn: false },
+		);
 	};
 
 	pi.registerFlag(MODE_FLAG, {
@@ -775,6 +889,80 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerTool({
+		name: "unpack_binwalk_scan",
+		label: "Unpack Binwalk Scan",
+		description: "Run binwalk in scan mode and persist the scan log as an artifact.",
+		promptSnippet: "Use unpack_binwalk_scan to triage firmware images before extraction.",
+		promptGuidelines: ["Use unpack_binwalk_scan before extraction to capture offsets and signatures."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the firmware image or blob to inspect." }),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runUnpackBinwalkScan(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "unpack_binwalk_extract",
+		label: "Unpack Binwalk Extract",
+		description: "Run binwalk extraction into a controlled artifact directory and register the results.",
+		promptSnippet: "Use unpack_binwalk_extract when controlled firmware extraction is explicitly desired.",
+		promptGuidelines: ["Use unpack_binwalk_extract in dynamic or proofing contexts when extraction is intentional."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the firmware image or blob to extract." }),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runUnpackBinwalkExtract(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "unpack_archive_list",
+		label: "Unpack Archive List",
+		description: "List the contents of a firmware-related tar or zip archive and persist the listing as an artifact.",
+		promptSnippet: "Use unpack_archive_list for bounded archive inventory before extraction.",
+		promptGuidelines: ["Use unpack_archive_list to inventory tar or zip archives before mutating or expanding them."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the archive to inspect." }),
+			format: Type.Optional(Type.Union([Type.Literal("tar"), Type.Literal("zip")])),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runUnpackArchiveList(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				params.format ?? "tar",
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
 	pi.registerCommand("mode", {
 		description: "Show or change pire mode: /mode [recon|dynamic|proofing|report]",
 		handler: async (args, ctx) => {
@@ -822,6 +1010,14 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("activity", {
+		description: "Show recent pire tool-pack activity, optionally filtered by tool or target substring",
+		handler: async (args, ctx) => {
+			const filterText = args.trim();
+			showActivity(ctx, filterText.length > 0 ? filterText : undefined);
+		},
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		currentCwd = ctx.cwd;
 		const flagValue = pi.getFlag(MODE_FLAG);
@@ -831,8 +1027,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			.pop() as { data?: PersistedModeState } | undefined;
 
 		const persistedMode = persisted?.data?.mode;
+		const latestActivityEntry = entries
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === TOOL_ACTIVITY_ENTRY_TYPE)
+			.pop() as { data?: PireToolActivity } | undefined;
 		const flagMode = typeof flagValue === "string" && isPireMode(flagValue) ? flagValue : undefined;
 		artifactManifest = await loadArtifactManifest(ctx.cwd);
+		lastActivity = latestActivityEntry?.data;
 		applyMode(ctx, flagMode ?? persistedMode ?? "recon", { notify: false });
 	});
 
@@ -896,6 +1096,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		}
 
 		if (event.toolName === "environment_inventory") {
+			recordToolActivity(ctx, {
+				tool: event.toolName,
+				target: ctx.cwd,
+				summary: "Captured environment inventory",
+				artifacts: [],
+			});
 			await persistArtifacts();
 			return;
 		}
@@ -909,6 +1115,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					finding: artifact.finding,
 				});
 			}
+			recordToolActivity(ctx, {
+				tool: event.toolName,
+				target: binaryDetails.targetPath,
+				summary: binaryDetails.summary.split("\n")[0] ?? event.toolName,
+				artifacts: binaryDetails.artifacts.map((artifact) => artifact.path),
+			});
 			return;
 		}
 
@@ -921,6 +1133,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					finding: artifact.finding,
 				});
 			}
+			recordToolActivity(ctx, {
+				tool: event.toolName,
+				target: debugDetails.targetPath,
+				summary: debugDetails.summary.split("\n")[0] ?? event.toolName,
+				artifacts: debugDetails.artifacts.map((artifact) => artifact.path),
+			});
 			return;
 		}
 
@@ -933,6 +1151,30 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					finding: artifact.finding,
 				});
 			}
+			recordToolActivity(ctx, {
+				tool: event.toolName,
+				target: netDetails.target,
+				summary: netDetails.summary.split("\n")[0] ?? event.toolName,
+				artifacts: netDetails.artifacts.map((artifact) => artifact.path),
+			});
+			return;
+		}
+
+		const unpackDetails = getUnpackToolDetails(event.details);
+		if (unpackDetails) {
+			for (const artifact of unpackDetails.artifacts as UnpackArtifactObservation[]) {
+				await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
+					type: artifact.type as ArtifactType | undefined,
+					command: artifact.command ?? unpackDetails.commandString,
+					finding: artifact.finding,
+				});
+			}
+			recordToolActivity(ctx, {
+				tool: event.toolName,
+				target: unpackDetails.targetPath,
+				summary: unpackDetails.summary.split("\n")[0] ?? event.toolName,
+				artifacts: unpackDetails.artifacts.map((artifact) => artifact.path),
+			});
 		}
 	});
 }

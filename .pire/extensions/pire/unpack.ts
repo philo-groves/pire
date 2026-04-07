@@ -2,16 +2,16 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { ExecResult } from "@mariozechner/pi-coding-agent";
 
-export interface NetArtifactObservation {
+export interface UnpackArtifactObservation {
 	path: string;
-	type?: "pcap" | "log" | "text" | "json" | "other";
+	type?: "firmware" | "log" | "other";
 	command?: string;
 	finding?: string;
 }
 
-export interface NetToolDetails {
+export interface UnpackToolDetails {
 	tool: string;
-	target: string;
+	targetPath: string;
 	command: string[];
 	commandString: string;
 	exitCode: number;
@@ -19,10 +19,10 @@ export interface NetToolDetails {
 	stdoutPreview: string;
 	stderrPreview: string;
 	summary: string;
-	artifacts: NetArtifactObservation[];
+	artifacts: UnpackArtifactObservation[];
 }
 
-interface ToolExecResult extends NetToolDetails {}
+interface ToolExecResult extends UnpackToolDetails {}
 
 type ExecFn = (command: string, args: string[], options?: { signal?: AbortSignal; cwd?: string }) => Promise<ExecResult>;
 
@@ -30,7 +30,7 @@ const PREVIEW_LINE_LIMIT = 80;
 const PREVIEW_CHAR_LIMIT = 8000;
 
 function quoteShellArg(value: string): string {
-	if (/^[A-Za-z0-9_./:@?&=%:+,-]+$/.test(value)) {
+	if (/^[A-Za-z0-9_./:@=-]+$/.test(value)) {
 		return value;
 	}
 	return `'${value.replace(/'/g, `'\"'\"'`)}'`;
@@ -55,35 +55,30 @@ function truncateOutput(text: string, maxLines = PREVIEW_LINE_LIMIT): string {
 	return `${lines.slice(0, maxLines).join("\n")}\n... ${lines.length - maxLines} more lines`;
 }
 
-function slugify(value: string): string {
-	const slug = value
-		.toLowerCase()
-		.replace(/^[a-z]+:\/\//, "")
-		.replace(/[^a-z0-9._-]+/g, "-")
-		.replace(/^-+|-+$/g, "");
-	return slug.length > 0 ? slug.slice(0, 80) : "artifact";
+function getArtifactStem(targetPath: string): string {
+	return basename(targetPath).replace(/[^A-Za-z0-9._-]+/g, "_");
 }
 
-async function makeArtifactDir(cwd: string): Promise<string> {
+async function ensureArtifactDir(cwd: string): Promise<string> {
 	const artifactDir = join(cwd, ".pire", "artifacts");
 	await mkdir(artifactDir, { recursive: true });
 	return artifactDir;
 }
 
-async function persistOutputLog(cwd: string, filename: string, contents: string): Promise<string> {
-	const artifactDir = await makeArtifactDir(cwd);
-	const logPath = join(artifactDir, filename);
-	await writeFile(logPath, contents, "utf-8");
-	return logPath;
+async function persistLog(cwd: string, filename: string, contents: string): Promise<string> {
+	const artifactDir = await ensureArtifactDir(cwd);
+	const path = join(artifactDir, filename);
+	await writeFile(path, contents, "utf-8");
+	return path;
 }
 
 async function runTool(
 	exec: ExecFn,
 	command: string,
 	args: string[],
-	target: string,
+	targetPath: string,
 	toolName: string,
-	artifacts: NetArtifactObservation[],
+	artifacts: UnpackArtifactObservation[],
 	signal?: AbortSignal,
 ): Promise<ToolExecResult> {
 	const result = await exec(command, args, { signal });
@@ -96,7 +91,7 @@ async function runTool(
 
 	return {
 		tool: toolName,
-		target,
+		targetPath,
 		command: [command, ...args],
 		commandString,
 		exitCode: result.code,
@@ -111,115 +106,117 @@ async function runTool(
 	};
 }
 
-export async function runNetCurlHead(
+export async function runUnpackBinwalkScan(
 	exec: ExecFn,
 	cwd: string,
-	url: string,
-	options: { followRedirects: boolean; maxTimeSeconds: number },
+	targetPath: string,
 	signal?: AbortSignal,
 ): Promise<ToolExecResult> {
-	const args = ["-I", "-sS", "--max-time", String(options.maxTimeSeconds)];
-	if (options.followRedirects) {
-		args.push("-L");
-	}
-	args.push(url);
-	const result = await exec("curl", args, { signal });
-	const logPath = await persistOutputLog(
+	const result = await exec("binwalk", [targetPath], { signal });
+	const logPath = await persistLog(
 		cwd,
-		`curl-head-${slugify(url)}.log`,
+		`binwalk-scan-${getArtifactStem(targetPath)}.log`,
 		`${result.stdout}${result.stderr}`.trimEnd() + "\n",
 	);
 
 	return runTool(
 		async () => result,
-		"curl",
-		args,
-		url,
-		"net_curl_head",
+		"binwalk",
+		[targetPath],
+		targetPath,
+		"unpack_binwalk_scan",
 		[
+			{
+				path: targetPath,
+				type: "firmware",
+				finding: `binwalk scan for ${targetPath}`,
+			},
 			{
 				path: logPath,
 				type: "log",
-				finding: `HTTP header capture for ${url}`,
+				finding: `binwalk scan output for ${targetPath}`,
 			},
 		],
 		signal,
 	);
 }
 
-export async function runNetTsharkSummary(
+export async function runUnpackBinwalkExtract(
 	exec: ExecFn,
 	cwd: string,
-	pcapPath: string,
-	options: { view: "protocol-hierarchy" | "endpoints-ip" | "conversations-ip" },
+	targetPath: string,
 	signal?: AbortSignal,
 ): Promise<ToolExecResult> {
-	const viewArgs: Record<typeof options.view, string[]> = {
-		"protocol-hierarchy": ["-q", "-z", "io,phs"],
-		"endpoints-ip": ["-q", "-z", "endpoints,ip"],
-		"conversations-ip": ["-q", "-z", "conv,ip"],
-	};
-	const args = ["-r", pcapPath, ...viewArgs[options.view]];
-	const result = await exec("tshark", args, { signal });
-	const logPath = await persistOutputLog(
+	const artifactDir = await ensureArtifactDir(cwd);
+	const extractDir = join(artifactDir, `binwalk-extract-${getArtifactStem(targetPath)}`);
+	await mkdir(extractDir, { recursive: true });
+	const result = await exec("binwalk", ["-e", "--directory", extractDir, targetPath], { signal });
+	const logPath = await persistLog(
 		cwd,
-		`tshark-${options.view}-${basename(pcapPath)}.log`,
+		`binwalk-extract-${getArtifactStem(targetPath)}.log`,
 		`${result.stdout}${result.stderr}`.trimEnd() + "\n",
 	);
 
 	return runTool(
 		async () => result,
-		"tshark",
-		args,
-		pcapPath,
-		"net_tshark_summary",
+		"binwalk",
+		["-e", "--directory", extractDir, targetPath],
+		targetPath,
+		"unpack_binwalk_extract",
 		[
 			{
-				path: pcapPath,
-				type: "pcap",
-				finding: `PCAP summarized with ${options.view}`,
+				path: targetPath,
+				type: "firmware",
+				finding: `binwalk extraction for ${targetPath}`,
+			},
+			{
+				path: extractDir,
+				type: "firmware",
+				finding: `binwalk extraction directory for ${targetPath}`,
 			},
 			{
 				path: logPath,
 				type: "log",
-				finding: `tshark ${options.view} output for ${pcapPath}`,
+				finding: `binwalk extraction log for ${targetPath}`,
 			},
 		],
 		signal,
 	);
 }
 
-export async function runNetTsharkFollow(
+export async function runUnpackArchiveList(
 	exec: ExecFn,
 	cwd: string,
-	pcapPath: string,
-	options: { streamIndex: number; protocol: "tcp" | "udp" | "http" },
+	targetPath: string,
+	format: "tar" | "zip",
 	signal?: AbortSignal,
 ): Promise<ToolExecResult> {
-	const args = ["-r", pcapPath, "-q", "-z", `follow,${options.protocol},ascii,${options.streamIndex}`];
-	const result = await exec("tshark", args, { signal });
-	const logPath = await persistOutputLog(
+	const result =
+		format === "tar"
+			? await exec("tar", ["-tf", targetPath], { signal })
+			: await exec("unzip", ["-l", targetPath], { signal });
+	const logPath = await persistLog(
 		cwd,
-		`tshark-follow-${options.protocol}-${options.streamIndex}-${basename(pcapPath)}.log`,
+		`${format}-list-${getArtifactStem(targetPath)}.log`,
 		`${result.stdout}${result.stderr}`.trimEnd() + "\n",
 	);
 
 	return runTool(
 		async () => result,
-		"tshark",
-		args,
-		pcapPath,
-		"net_tshark_follow",
+		format === "tar" ? "tar" : "unzip",
+		format === "tar" ? ["-tf", targetPath] : ["-l", targetPath],
+		targetPath,
+		"unpack_archive_list",
 		[
 			{
-				path: pcapPath,
-				type: "pcap",
-				finding: `PCAP stream follow for ${options.protocol} stream ${options.streamIndex}`,
+				path: targetPath,
+				type: "firmware",
+				finding: `${format} archive listing for ${targetPath}`,
 			},
 			{
 				path: logPath,
 				type: "log",
-				finding: `Follow output for ${options.protocol} stream ${options.streamIndex}`,
+				finding: `${format} listing log for ${targetPath}`,
 			},
 		],
 		signal,

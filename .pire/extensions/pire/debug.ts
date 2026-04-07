@@ -18,12 +18,11 @@ export interface DebugToolDetails {
 	killed: boolean;
 	stdoutPreview: string;
 	stderrPreview: string;
+	summary: string;
 	artifacts: DebugArtifactObservation[];
 }
 
-interface ToolExecResult extends DebugToolDetails {
-	summary: string;
-}
+interface ToolExecResult extends DebugToolDetails {}
 
 type ExecFn = (command: string, args: string[], options?: { signal?: AbortSignal; cwd?: string }) => Promise<ExecResult>;
 
