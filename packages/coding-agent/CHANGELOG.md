@@ -39,6 +39,7 @@
 - Added a persisted chain fixture suite with pass / near-miss / fail `.pire` session cases, and surfaced chain-task CTF gating issues in `pire-evals` case reports so multi-stage exploit-chain regressions are visible in the harness instead of staying buried in task definitions.
 - Extended `pire-evals` enforcement and baseline drift gating to scenario outcome counts as well, so CI can fail directly on scenario pass / near-miss / fail regressions instead of relying only on aggregate score movement.
 - Added real outcome expectations to the persisted chain and scenario fixture metadata, so the shipped eval corpus now carries baseline-ready pass / near-miss / fail gates in `case.json` and `cases.json` instead of relying only on synthetic regression tests.
+- Expanded the starter binary-RE corpus with three harder end-to-end scenarios targeting sandbox escape, updater trust bypass, and broker-mediated privileged actions, including new 5-stage and 6-stage paths intended to expose harness weaknesses in long-horizon planning, cross-boundary state tracking, and proof discipline.
 
 ### Changed
 
