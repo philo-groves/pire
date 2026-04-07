@@ -74,6 +74,8 @@ describe("pire extension mode and tool gating", () => {
 		"disasm_rizin_info",
 		"disasm_rizin_functions",
 		"disasm_radare2_disassembly",
+		"decomp_ghidra_functions",
+		"decomp_ghidra_decompile",
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",

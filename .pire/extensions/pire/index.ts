@@ -19,6 +19,12 @@ import {
 	type DebugToolDetails,
 } from "./debug.js";
 import {
+	runDecompGhidraDecompile,
+	runDecompGhidraFunctions,
+	type DecompArtifactObservation,
+	type DecompToolDetails,
+} from "./decomp.js";
+import {
 	runDisasmRadare2Disassembly,
 	runDisasmRizinFunctions,
 	runDisasmRizinInfo,
@@ -86,6 +92,8 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"disasm_rizin_info",
 		"disasm_rizin_functions",
 		"disasm_radare2_disassembly",
+		"decomp_ghidra_functions",
+		"decomp_ghidra_decompile",
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
@@ -108,6 +116,8 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"disasm_rizin_info",
 		"disasm_rizin_functions",
 		"disasm_radare2_disassembly",
+		"decomp_ghidra_functions",
+		"decomp_ghidra_decompile",
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
@@ -137,6 +147,8 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"disasm_rizin_info",
 		"disasm_rizin_functions",
 		"disasm_radare2_disassembly",
+		"decomp_ghidra_functions",
+		"decomp_ghidra_decompile",
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
@@ -166,6 +178,8 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"disasm_rizin_info",
 		"disasm_rizin_functions",
 		"disasm_radare2_disassembly",
+		"decomp_ghidra_functions",
+		"decomp_ghidra_decompile",
 		"net_curl_head",
 		"net_tshark_summary",
 		"net_tshark_follow",
@@ -356,6 +370,13 @@ function getDebugToolDetails(eventDetails: unknown): DebugToolDetails | undefine
 		return undefined;
 	}
 	return eventDetails as DebugToolDetails;
+}
+
+function getDecompToolDetails(eventDetails: unknown): DecompToolDetails | undefined {
+	if (!eventDetails || typeof eventDetails !== "object" || !("artifacts" in eventDetails)) {
+		return undefined;
+	}
+	return eventDetails as DecompToolDetails;
 }
 
 function getDisasmToolDetails(eventDetails: unknown): DisasmToolDetails | undefined {
@@ -766,6 +787,58 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				{
 					functionName: params.functionName,
 					lineCount: params.lineCount ?? 64,
+				},
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "decomp_ghidra_functions",
+		label: "Decomp Ghidra Functions",
+		description: "Run Ghidra headless analysis to export a function list into a durable artifact.",
+		promptSnippet: "Use decomp_ghidra_functions for Ghidra-based function inventory.",
+		promptGuidelines: ["Use decomp_ghidra_functions when you want a durable function inventory from Ghidra headless analysis."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary to analyze with Ghidra." }),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDecompGhidraFunctions(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "decomp_ghidra_decompile",
+		label: "Decomp Ghidra Decompile",
+		description: "Run Ghidra headless analysis to export bounded decompiled output into a durable artifact.",
+		promptSnippet: "Use decomp_ghidra_decompile for Ghidra-based decompilation output.",
+		promptGuidelines: ["Use decomp_ghidra_decompile when you want durable decompiled output for a target function or entry point."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary to analyze with Ghidra." }),
+			functionName: Type.Optional(Type.String({ description: "Optional function name to decompile." })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDecompGhidraDecompile(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				{
+					functionName: params.functionName,
 				},
 				signal,
 			);
@@ -1242,6 +1315,24 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				target: disasmDetails.targetPath,
 				summary: disasmDetails.summary.split("\n")[0] ?? event.toolName,
 				artifacts: disasmDetails.artifacts.map((artifact) => artifact.path),
+			});
+			return;
+		}
+
+		const decompDetails = getDecompToolDetails(event.details);
+		if (decompDetails) {
+			for (const artifact of decompDetails.artifacts as DecompArtifactObservation[]) {
+				await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
+					type: artifact.type as ArtifactType | undefined,
+					command: artifact.command ?? decompDetails.commandString,
+					finding: artifact.finding,
+				});
+			}
+			recordToolActivity(ctx, {
+				tool: event.toolName,
+				target: decompDetails.targetPath,
+				summary: decompDetails.summary.split("\n")[0] ?? event.toolName,
+				artifacts: decompDetails.artifacts.map((artifact) => artifact.path),
 			});
 			return;
 		}
