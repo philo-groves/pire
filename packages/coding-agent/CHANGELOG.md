@@ -19,6 +19,7 @@
 - Added a `pire-evals` CLI for scoring fixture or captured binary-RE session directories into a compact leaderboard or JSON summary for harness-driven regression tracking.
 - Added optional per-case `case.json` expectations for `pire-evals`, including score and rank thresholds plus an `--enforce` mode that fails CI when binary-RE session quality regresses.
 - Added optional suite-level `cases.json` expectations for `pire-evals`, so CI can gate aggregate binary-RE capability drift using average score, average issue count, regression count, and case-count thresholds.
+- Added `pire-evals --report` output for Markdown, JSON, and JSONL artifacts so CI runs can persist compact binary-RE eval summaries and regression details.
 
 ### Changed
 

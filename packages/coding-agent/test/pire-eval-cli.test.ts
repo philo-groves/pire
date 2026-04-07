@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
@@ -115,5 +117,59 @@ describe("pire eval cli", () => {
 		).rejects.toMatchObject({
 			stderr: expect.stringContaining("suite average normalized score"),
 		});
+	});
+
+	test("writes markdown and jsonl report artifacts for CI inspection", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-report-"));
+		const markdownPath = join(tempDir, "report.md");
+		const jsonlPath = join(tempDir, "report.jsonl");
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "session-cases"),
+				"--report",
+				markdownPath,
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "session-cases"),
+				"--report",
+				jsonlPath,
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		const markdown = await readFile(markdownPath, "utf-8");
+		const jsonl = await readFile(jsonlPath, "utf-8");
+
+		expect(markdown).toContain("# Pire Eval Report");
+		expect(markdown).toContain("## Suite Summary");
+		expect(markdown).toContain("heap-disasm-confirmed");
+		expect(markdown).toContain("toctou-candidate");
+
+		const jsonlLines = jsonl.trim().split("\n");
+		expect(jsonlLines).toHaveLength(3);
+		expect(JSON.parse(jsonlLines[0] ?? "{}")).toMatchObject({ type: "suite", cases: 2 });
+		expect(JSON.parse(jsonlLines[1] ?? "{}")).toMatchObject({ type: "case", caseName: "heap-disasm-confirmed" });
+		expect(JSON.parse(jsonlLines[2] ?? "{}")).toMatchObject({ type: "case", caseName: "toctou-candidate" });
 	});
 });

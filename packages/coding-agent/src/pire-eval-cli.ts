@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-import { readdir, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import { extname, join, resolve } from "node:path";
 import process from "node:process";
 import { scorePireEvalSessionFromFiles } from "./core/pire/eval-runner.js";
 
@@ -10,6 +10,7 @@ interface PireEvalCliArgs {
 	casesDir?: string;
 	enforce?: boolean;
 	json?: boolean;
+	reportPath?: string;
 }
 
 interface PireEvalCaseExpectation {
@@ -67,13 +68,14 @@ function printHelp(): void {
 	process.stdout.write(`pire-evals - score binary RE eval session directories
 
 Usage:
-  pire-evals --suite <suite.json> --cases-dir <dir> [--enforce] [--json]
+  pire-evals --suite <suite.json> --cases-dir <dir> [--enforce] [--json] [--report <path>]
 
 Options:
   --suite <path>      Path to a Pire eval task suite JSON file
   --cases-dir <path>  Directory containing case subdirectories with bindings.json and .pire state
   --enforce           Exit non-zero when a case misses its expectation metadata
   --json              Emit JSON instead of a text leaderboard
+  --report <path>     Write a report artifact (.md, .json, or .jsonl)
   --help              Show this help
 `);
 }
@@ -91,6 +93,8 @@ function parseArgs(argv: string[]): PireEvalCliArgs {
 			args.enforce = true;
 		} else if (arg === "--json") {
 			args.json = true;
+		} else if (arg === "--report" && index + 1 < argv.length) {
+			args.reportPath = argv[++index];
 		} else if (arg === "--help" || arg === "-h") {
 			printHelp();
 			process.exit(0);
@@ -225,6 +229,84 @@ function formatLeaderboard(result: PireEvalCollectedScores): string {
 	return `${lines.join("\n")}\n`;
 }
 
+function formatMarkdownReport(result: PireEvalCollectedScores): string {
+	const lines = [
+		"# Pire Eval Report",
+		"",
+		"## Suite Summary",
+		`- Cases: ${result.suite.cases}`,
+		`- Average score: ${Math.round(result.suite.averageNormalized * 100)}%`,
+		`- Average issues: ${result.suite.averageIssues.toFixed(2)}`,
+		`- Regressions: ${result.suite.regressions.length}`,
+		"",
+		"## Cases",
+	];
+
+	for (const score of result.scores) {
+		lines.push(
+			`- ${score.caseName}: ${score.earned}/${score.max} (${Math.round(score.normalized * 100)}%), run=${score.runId}, tasks=${score.scoredTasks}, missing=${score.missingTasks}, issues=${score.issues.length}, regressions=${score.regressions.length}`,
+		);
+	}
+
+	if (result.suite.regressions.length > 0) {
+		lines.push("", "## Regressions");
+		for (const regression of result.suite.regressions) {
+			lines.push(`- ${regression}`);
+		}
+	}
+
+	return `${lines.join("\n")}\n`;
+}
+
+function formatJsonlReport(result: PireEvalCollectedScores): string {
+	const lines = [
+		JSON.stringify({
+			type: "suite",
+			cases: result.suite.cases,
+			averageNormalized: result.suite.averageNormalized,
+			averageIssues: result.suite.averageIssues,
+			regressions: result.suite.regressions,
+			expectation: result.suite.expectation,
+		}),
+	];
+
+	for (const score of result.scores) {
+		lines.push(
+			JSON.stringify({
+				type: "case",
+				caseName: score.caseName,
+				runId: score.runId,
+				earned: score.earned,
+				max: score.max,
+				normalized: score.normalized,
+				scoredTasks: score.scoredTasks,
+				missingTasks: score.missingTasks,
+				issues: score.issues,
+				regressions: score.regressions,
+				expectation: score.expectation,
+			}),
+		);
+	}
+
+	return `${lines.join("\n")}\n`;
+}
+
+function formatReport(result: PireEvalCollectedScores, reportPath: string): string {
+	switch (extname(reportPath).toLowerCase()) {
+		case ".json":
+			return `${JSON.stringify(result, null, 2)}\n`;
+		case ".jsonl":
+			return formatJsonlReport(result);
+		default:
+			return formatMarkdownReport(result);
+	}
+}
+
+async function writeReport(reportPath: string, result: PireEvalCollectedScores): Promise<void> {
+	const targetPath = resolve(reportPath);
+	await writeFile(targetPath, formatReport(result, targetPath), "utf-8");
+}
+
 async function collectCaseScores(
 	args: Required<Pick<PireEvalCliArgs, "suitePath" | "casesDir">>,
 ): Promise<PireEvalCollectedScores> {
@@ -293,6 +375,10 @@ async function main(argv: string[]): Promise<void> {
 		process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 	} else {
 		process.stdout.write(formatLeaderboard(result));
+	}
+
+	if (args.reportPath) {
+		await writeReport(args.reportPath, result);
 	}
 
 	if (args.enforce && result.suite.regressions.length > 0) {
