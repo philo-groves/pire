@@ -176,6 +176,12 @@ export {
 	validateBinaryReEvalCorpus,
 } from "./core/pire/eval-corpus.js";
 export {
+	formatPireEvalRunScoreReport,
+	loadPireEvalRunBundle,
+	loadPireEvalTaskSuite,
+	scorePireEvalRunFromFiles,
+} from "./core/pire/eval-runner.js";
+export {
 	createDefaultPireEvalRubric,
 	type PireEvalDimension,
 	type PireEvalDimensionScore,
