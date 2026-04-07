@@ -9,6 +9,7 @@
       "taskId": "binre-scenario-002",
       "findingId": "find-network-001",
       "exploitability": "chain",
+      "completedObjectives": ["socket-entry", "allocator-corruption", "stale-pointer-reuse"],
       "judgement": {
         "dimensions": {
           "rootCause": "partial",
@@ -19,7 +20,7 @@
           "reporting": "partial"
         }
       },
-      "notes": ["network chain reached allocator primitive but final RCE remained partial"]
+      "notes": ["network chain reached allocator primitive but never captured the service flag"]
     }
   ]
 }

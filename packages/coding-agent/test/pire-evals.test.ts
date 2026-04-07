@@ -161,6 +161,10 @@ describe("pire eval helpers", () => {
 				exploitability: "chain",
 				requiresProof: true,
 			},
+			ctf: {
+				requiredObjectives: ["entry", "goal"],
+				flagId: "FLAG_SCENARIO",
+			},
 		};
 
 		const issues = validatePireEvalSubmission(task, {
@@ -178,6 +182,8 @@ describe("pire eval helpers", () => {
 
 		expect(issues).toContain("high-impact exploitability claims require proof to score credibly");
 		expect(issues).toContain("scenario tasks should record a chaining judgement");
+		expect(issues).toContain("missing required objectives: entry, goal");
+		expect(issues).toContain("ctf task requires captured flag evidence for FLAG_SCENARIO");
 
 		const score = scorePireEvalSubmission(task, {
 			taskId: task.id,
@@ -187,6 +193,8 @@ describe("pire eval helpers", () => {
 			],
 			findingOutcome: "reported",
 			exploitability: "chain",
+			completedObjectives: ["entry", "goal"],
+			capturedFlags: ["FLAG{scenario-owned}"],
 			judgement: {
 				dimensions: {
 					discovery: "hit",

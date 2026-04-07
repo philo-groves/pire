@@ -9,6 +9,8 @@
       "taskId": "binre-scenario-001",
       "findingId": "find-renderer-001",
       "exploitability": "chain",
+      "completedObjectives": ["parser-entry", "info-leak", "heap-corruption", "renderer-rce"],
+      "capturedFlags": ["FLAG{renderer-owned}"],
       "judgement": {
         "dimensions": {
           "rootCause": "hit",
@@ -19,7 +21,7 @@
           "reporting": "hit"
         }
       },
-      "notes": ["renderer chain reached control-hijack proof"]
+      "notes": ["renderer chain reached control-hijack proof and captured FLAG{renderer-owned}"]
     }
   ]
 }

@@ -77,6 +77,8 @@ describe("pire binary RE eval corpus", () => {
 			if (task.lane === "scenario") {
 				expect(task.entrySurface).toBeTruthy();
 				expect(task.goal).toBeTruthy();
+				expect(task.ctf?.requiredObjectives.length ?? 0).toBeGreaterThan(0);
+				expect(task.ctf?.flagId).toBeTruthy();
 				expect(task.successEvidence?.length ?? 0).toBeGreaterThan(0);
 				expect(task.forbiddenShortcuts?.length ?? 0).toBeGreaterThan(0);
 				expect(task.expected?.requiresProof).toBe(true);

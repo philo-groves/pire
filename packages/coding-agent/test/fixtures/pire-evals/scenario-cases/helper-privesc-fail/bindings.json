@@ -9,6 +9,7 @@
       "taskId": "binre-scenario-003",
       "findingId": "find-helper-001",
       "exploitability": "chain",
+      "completedObjectives": ["helper-entry"],
       "judgement": {
         "dimensions": {
           "classification": "partial",
@@ -20,7 +21,7 @@
           "reporting": "partial"
         }
       },
-      "notes": ["helper scenario never crossed the privilege boundary"]
+      "notes": ["helper scenario never crossed the privilege boundary or captured a flag"]
     }
   ]
 }

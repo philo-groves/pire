@@ -25,6 +25,7 @@
       ],
       "findingOutcome": "candidate",
       "exploitability": "chain",
+      "completedObjectives": ["helper-entry"],
       "judgement": {
         "dimensions": {
           "discovery": "hit",
@@ -41,7 +42,7 @@
       },
       "notes": [
         "extracted from finding find-helper-001",
-        "helper scenario never crossed the privilege boundary"
+        "helper scenario never crossed the privilege boundary or captured a flag"
       ]
     }
   ],

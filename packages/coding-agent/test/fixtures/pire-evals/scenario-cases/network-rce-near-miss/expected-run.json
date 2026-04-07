@@ -30,6 +30,7 @@
       ],
       "findingOutcome": "reported",
       "exploitability": "chain",
+      "completedObjectives": ["socket-entry", "allocator-corruption", "stale-pointer-reuse"],
       "judgement": {
         "dimensions": {
           "discovery": "hit",
@@ -46,7 +47,7 @@
       },
       "notes": [
         "extracted from finding find-network-001",
-        "network chain reached allocator primitive but final RCE remained partial"
+        "network chain reached allocator primitive but never captured the service flag"
       ]
     }
   ],

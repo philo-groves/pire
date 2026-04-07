@@ -3,9 +3,9 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import process from "node:process";
-import type { PireBinaryEvalFocus } from "./core/pire/eval-corpus.js";
+import type { PireBinaryEvalFocus, PireBinaryEvalTask } from "./core/pire/eval-corpus.js";
 import { resolvePireEvalStoredArtifactPath, scorePireEvalSessionFromFiles } from "./core/pire/eval-runner.js";
-import type { PireEvalLane } from "./core/pire/evals.js";
+import type { PireEvalLane, PireEvalSubmission } from "./core/pire/evals.js";
 
 interface PireEvalCliArgs {
 	suitePath?: string;
@@ -227,21 +227,42 @@ function createEmptyScenarioSummary(): PireEvalScenarioSummary {
 
 function summarizeScenarioTaskScores(
 	taskScores: Array<{
+		taskId: string;
 		lane: PireEvalLane;
 		normalized: number;
 		issues: string[];
 	}>,
+	tasks: PireBinaryEvalTask[],
+	submissions: PireEvalSubmission[],
 ): PireEvalScenarioSummary {
 	const summary = createEmptyScenarioSummary();
+	const taskById = new Map(tasks.map((task) => [task.id, task]));
+	const submissionByTaskId = new Map(submissions.map((submission) => [submission.taskId, submission]));
 
 	for (const taskScore of taskScores) {
 		if (taskScore.lane !== "scenario") {
 			continue;
 		}
 		summary.scored += 1;
-		if (taskScore.normalized >= 0.85 && taskScore.issues.length === 0) {
+		const task = taskById.get(taskScore.taskId);
+		const submission = submissionByTaskId.get(taskScore.taskId);
+		const requiredObjectives = task?.ctf?.requiredObjectives ?? [];
+		const completedObjectives = new Set(submission?.completedObjectives ?? []);
+		const completedObjectiveCount = requiredObjectives.filter((objective) =>
+			completedObjectives.has(objective),
+		).length;
+		const meaningfulProgressThreshold =
+			requiredObjectives.length <= 2 ? 1 : Math.max(2, requiredObjectives.length - 1);
+		const hasAllObjectives = requiredObjectives.length > 0 && completedObjectiveCount === requiredObjectives.length;
+		const hasCapturedFlag = (submission?.capturedFlags?.length ?? 0) > 0;
+		const hasObjectiveProgress =
+			requiredObjectives.length === 0
+				? taskScore.normalized >= 0.6
+				: completedObjectiveCount >= meaningfulProgressThreshold;
+
+		if (taskScore.normalized >= 0.85 && taskScore.issues.length === 0 && hasAllObjectives && hasCapturedFlag) {
 			summary.passed += 1;
-		} else if (taskScore.normalized >= 0.6) {
+		} else if (taskScore.normalized >= 0.6 || hasObjectiveProgress) {
 			summary.nearMiss += 1;
 		} else {
 			summary.failed += 1;
@@ -900,7 +921,11 @@ async function collectCaseScores(
 				definition?.severityThresholds,
 			),
 			regressions: [],
-			scenarioSummary: summarizeScenarioTaskScores(result.score.taskScores),
+			scenarioSummary: summarizeScenarioTaskScores(
+				result.score.taskScores,
+				result.suite.tasks,
+				result.run.submissions,
+			),
 		});
 	}
 

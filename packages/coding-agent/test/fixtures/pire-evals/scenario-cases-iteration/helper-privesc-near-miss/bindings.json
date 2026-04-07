@@ -9,6 +9,7 @@
       "taskId": "binre-scenario-003",
       "findingId": "find-helper-iteration-001",
       "exploitability": "chain",
+      "completedObjectives": ["helper-entry", "corruption-primitive", "privileged-race"],
       "judgement": {
         "dimensions": {
           "classification": "hit",
@@ -20,7 +21,7 @@
           "reporting": "partial"
         }
       },
-      "notes": ["helper iteration reaches the privileged race window with partial proof"]
+      "notes": ["helper iteration reaches the privileged race window but still misses the final system flag"]
     }
   ]
 }

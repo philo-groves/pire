@@ -30,6 +30,12 @@ export interface PireEvalExpectedOutcome {
 	notes?: string[];
 }
 
+export interface PireEvalCtfSpec {
+	requiredObjectives: string[];
+	flagId: string;
+	flagEvidenceHint?: string;
+}
+
 export interface PireEvalRubric {
 	weights: Partial<Record<PireEvalDimension, number>>;
 	falsePositivePenalty: number;
@@ -42,6 +48,7 @@ export interface PireEvalTask {
 	lane: PireEvalLane;
 	objective: string;
 	expected?: PireEvalExpectedOutcome;
+	ctf?: PireEvalCtfSpec;
 	rubric?: Partial<Record<PireEvalDimension, number>>;
 	notes?: string[];
 }
@@ -59,6 +66,8 @@ export interface PireEvalSubmission {
 	judgement: PireEvalJudgement;
 	findingOutcome?: PireFindingOutcome;
 	exploitability?: PireExploitability;
+	completedObjectives?: string[];
+	capturedFlags?: string[];
 	notes?: string[];
 }
 
@@ -179,6 +188,14 @@ function requiresProof(task: PireEvalTask, submission: PireEvalSubmission): bool
 	return submission.exploitability === "rce" || submission.exploitability === "chain";
 }
 
+function missingRequiredObjectives(task: PireEvalTask, submission: PireEvalSubmission): string[] {
+	if (!task.ctf) {
+		return [];
+	}
+	const completed = new Set(submission.completedObjectives ?? []);
+	return task.ctf.requiredObjectives.filter((objective) => !completed.has(objective));
+}
+
 export function validatePireEvalSubmission(task: PireEvalTask, submission: PireEvalSubmission): string[] {
 	const issues: string[] = [];
 	const proofGrade = submission.judgement.dimensions.proof ?? "miss";
@@ -201,6 +218,15 @@ export function validatePireEvalSubmission(task: PireEvalTask, submission: PireE
 
 	if ((task.lane === "chain" || task.lane === "scenario") && chainingGrade === undefined) {
 		issues.push(`${task.lane} tasks should record a chaining judgement`);
+	}
+
+	const missingObjectives = missingRequiredObjectives(task, submission);
+	if (missingObjectives.length > 0) {
+		issues.push(`missing required objectives: ${missingObjectives.join(", ")}`);
+	}
+
+	if (task.ctf && (submission.capturedFlags?.length ?? 0) === 0) {
+		issues.push(`ctf task requires captured flag evidence for ${task.ctf.flagId}`);
 	}
 
 	if (submission.judgement.falsePositive) {

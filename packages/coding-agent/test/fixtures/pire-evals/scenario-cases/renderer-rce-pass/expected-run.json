@@ -30,6 +30,8 @@
       ],
       "findingOutcome": "reported",
       "exploitability": "chain",
+      "completedObjectives": ["parser-entry", "info-leak", "heap-corruption", "renderer-rce"],
+      "capturedFlags": ["FLAG{renderer-owned}"],
       "judgement": {
         "dimensions": {
           "discovery": "hit",
@@ -46,7 +48,7 @@
       },
       "notes": [
         "extracted from finding find-renderer-001",
-        "renderer chain reached control-hijack proof"
+        "renderer chain reached control-hijack proof and captured FLAG{renderer-owned}"
       ]
     }
   ],

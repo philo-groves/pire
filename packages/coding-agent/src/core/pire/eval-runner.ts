@@ -50,6 +50,8 @@ export interface PireEvalSessionTaskBinding {
 	findingTitle?: string;
 	findingTitleIncludes?: string;
 	exploitability?: PireExploitability;
+	completedObjectives?: string[];
+	capturedFlags?: string[];
 	judgement?: Partial<PireEvalJudgement>;
 	notes?: string[];
 }
@@ -299,6 +301,8 @@ export async function createPireEvalRunBundleFromSession(
 				evidence,
 				findingOutcome: finding.status,
 				exploitability: binding.exploitability ?? "unknown",
+				completedObjectives: binding.completedObjectives,
+				capturedFlags: binding.capturedFlags,
 				judgement: normalizeJudgement(createHeuristicJudgement(finding, evidence.length), binding.judgement),
 				notes: [`extracted from finding ${finding.id}`, ...(binding.notes ?? [])],
 			},
