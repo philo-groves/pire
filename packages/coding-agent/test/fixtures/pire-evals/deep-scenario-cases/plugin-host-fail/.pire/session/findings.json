@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T20:30:00.000Z",
+  "findings": [
+    {
+      "id": "find-plugin-fail-001",
+      "title": "Plugin host chain stops after parser disclosure with no allocator pivot",
+      "status": "candidate",
+      "severity": "medium",
+      "statement": "The imported plugin archive reaches a parser disclosure stage, but allocator control and the sandbox escape remain unproven.",
+      "basis": ["ev-plugin-fail-001"],
+      "relatedEvidenceIds": ["ev-plugin-fail-001"],
+      "relatedArtifactIds": ["artifact:/tmp/plugin-fail.log"],
+      "reproStatus": "partial",
+      "createdAt": "2026-04-07T20:21:00.000Z",
+      "updatedAt": "2026-04-07T20:28:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-plugin-fail-001",
+      "kind": "tool-result",
+      "summary": "disassembly and gdb recover the parser disclosure but fail to prove allocator control",
+      "commandId": "tool:bash:plugin-fail-01",
+      "artifactIds": ["artifact:/tmp/plugin-fail.log"],
+      "supports": ["find-plugin-fail-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T20:23:00.000Z"
+    }
+  ]
+}

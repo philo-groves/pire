@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T20:20:00.000Z",
+  "findings": [
+    {
+      "id": "find-plugin-near-miss-001",
+      "title": "Plugin host chain reaches callback-table reuse but stalls before sandbox escape",
+      "status": "reported",
+      "severity": "high",
+      "statement": "The plugin archive trigger yields parser disclosure, allocator corruption, and callback reuse, but the final sandbox boundary crossing remains incomplete.",
+      "basis": ["ev-plugin-near-miss-001"],
+      "relatedEvidenceIds": ["ev-plugin-near-miss-001"],
+      "relatedArtifactIds": ["artifact:/tmp/plugin-near-miss.log", "artifact:/tmp/plugin-near-miss.trace"],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T20:11:00.000Z",
+      "updatedAt": "2026-04-07T20:18:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-plugin-near-miss-001",
+      "kind": "tool-result",
+      "summary": "gdb and strace show disclosure, allocator pivot, and callback reuse without host escape",
+      "commandId": "tool:bash:plugin-near-miss-01",
+      "artifactIds": ["artifact:/tmp/plugin-near-miss.log", "artifact:/tmp/plugin-near-miss.trace"],
+      "supports": ["find-plugin-near-miss-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T20:13:00.000Z"
+    }
+  ]
+}

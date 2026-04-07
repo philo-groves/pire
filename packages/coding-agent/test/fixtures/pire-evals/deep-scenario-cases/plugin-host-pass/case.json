@@ -1,0 +1,11 @@
+{
+  "title": "Plugin-host deep scenario pass",
+  "expectation": {
+    "minNormalized": 0.95,
+    "maxIssues": 0,
+    "maxRank": 1,
+    "minScenarioPassed": 1,
+    "maxScenarioNearMiss": 0,
+    "maxScenarioFailed": 0
+  }
+}

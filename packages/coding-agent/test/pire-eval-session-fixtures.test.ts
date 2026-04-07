@@ -8,6 +8,7 @@ const FIXTURE_DIR = join(process.cwd(), "test", "fixtures", "pire-evals");
 const SUITE_PATH = join(FIXTURE_DIR, "binary-re-starter-suite.json");
 const CHAIN_SUITE_PATH = join(FIXTURE_DIR, "chain-suite.json");
 const SCENARIO_SUITE_PATH = join(FIXTURE_DIR, "scenario-suite.json");
+const DEEP_SCENARIO_SUITE_PATH = join(FIXTURE_DIR, "deep-scenario-suite.json");
 
 async function loadExpectedRun(caseRoot: string, caseName: string) {
 	return parsePireEvalRunBundle(await readFile(join(caseRoot, caseName, "expected-run.json"), "utf-8"));
@@ -35,6 +36,20 @@ describe("pire eval session fixtures", () => {
 			const result = await createPireEvalRunBundleFromBindingFile({
 				cwd,
 				suitePath: SCENARIO_SUITE_PATH,
+				bindingsPath: join(cwd, "bindings.json"),
+			});
+
+			expect(result.run).toEqual(await loadExpectedRun(caseRoot, caseName));
+		}
+	});
+
+	test("extracts stable run bundles from pass, near-miss, and fail deep scenario fixture sessions", async () => {
+		const caseRoot = join(FIXTURE_DIR, "deep-scenario-cases");
+		for (const caseName of ["plugin-host-pass", "plugin-host-near-miss", "plugin-host-fail"]) {
+			const cwd = join(caseRoot, caseName);
+			const result = await createPireEvalRunBundleFromBindingFile({
+				cwd,
+				suitePath: DEEP_SCENARIO_SUITE_PATH,
 				bindingsPath: join(cwd, "bindings.json"),
 			});
 
@@ -148,6 +163,47 @@ describe("pire eval session fixtures", () => {
 		expect(iterationResult.score.taskScores[0]?.normalized).toBeGreaterThan(
 			originalFailResult.score.taskScores[0]?.normalized ?? 0,
 		);
+	});
+
+	test("scores deep scenario fixture sessions into pass, near-miss, and fail order", async () => {
+		const caseRoot = join(FIXTURE_DIR, "deep-scenario-cases");
+		const passCase = join(caseRoot, "plugin-host-pass");
+		const nearMissCase = join(caseRoot, "plugin-host-near-miss");
+		const failCase = join(caseRoot, "plugin-host-fail");
+
+		const passResult = await scorePireEvalSessionFromFiles({
+			cwd: passCase,
+			suitePath: DEEP_SCENARIO_SUITE_PATH,
+			bindingsPath: join(passCase, "bindings.json"),
+		});
+		const nearMissResult = await scorePireEvalSessionFromFiles({
+			cwd: nearMissCase,
+			suitePath: DEEP_SCENARIO_SUITE_PATH,
+			bindingsPath: join(nearMissCase, "bindings.json"),
+		});
+		const failResult = await scorePireEvalSessionFromFiles({
+			cwd: failCase,
+			suitePath: DEEP_SCENARIO_SUITE_PATH,
+			bindingsPath: join(failCase, "bindings.json"),
+		});
+
+		expect(passResult.bindingFile.runId).toBe("deep-plugin-pass-001");
+		expect(nearMissResult.bindingFile.runId).toBe("deep-plugin-near-miss-001");
+		expect(failResult.bindingFile.runId).toBe("deep-plugin-fail-001");
+		expect(passResult.score.taskScores).toHaveLength(1);
+		expect(nearMissResult.score.taskScores).toHaveLength(1);
+		expect(failResult.score.taskScores).toHaveLength(1);
+		expect(passResult.score.taskScores[0]?.issues).toEqual([]);
+		expect(nearMissResult.score.taskScores[0]?.issues).toEqual([
+			"missing required objectives: sandbox-escape",
+			"ctf task requires captured flag evidence for FLAG_PLUGIN_HOST_ESCAPE",
+		]);
+		expect(failResult.score.taskScores[0]?.issues).toEqual([
+			"missing required objectives: allocator-corruption, callback-pivot, sandbox-escape",
+			"ctf task requires captured flag evidence for FLAG_PLUGIN_HOST_ESCAPE",
+		]);
+		expect(passResult.score.earned).toBeGreaterThan(nearMissResult.score.earned);
+		expect(nearMissResult.score.earned).toBeGreaterThan(failResult.score.earned);
 	});
 
 	test("scores chain fixture sessions into pass, near-miss, and fail order", async () => {

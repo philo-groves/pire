@@ -212,6 +212,59 @@ describe("pire eval cli", () => {
 		});
 	});
 
+	test("scores persisted deep scenario fixture cases and surfaces long-horizon outcome ladders", async () => {
+		const result = await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "deep-scenario-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "deep-scenario-cases"),
+				"--json",
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		const parsed = JSON.parse(result.stdout) as {
+			scores: Array<{
+				caseName: string;
+				normalized: number;
+				issues: string[];
+				scenarioSummary: { scored: number; passed: number; nearMiss: number; failed: number };
+			}>;
+			suite: {
+				cases: number;
+				averageNormalized: number;
+				averageIssues: number;
+				scenarioSummary: { scored: number; passed: number; nearMiss: number; failed: number };
+			};
+		};
+
+		expect(parsed.suite.cases).toBe(3);
+		expect(parsed.suite.averageNormalized).toBeGreaterThan(0.7);
+		expect(parsed.suite.averageIssues).toBe(0);
+		expect(parsed.scores.map((score) => score.caseName)).toEqual([
+			"plugin-host-pass",
+			"plugin-host-near-miss",
+			"plugin-host-fail",
+		]);
+		expect(parsed.scores[0]?.issues).toEqual([]);
+		expect(parsed.scores[1]?.issues).toEqual([]);
+		expect(parsed.scores[2]?.issues).toEqual([]);
+		expect(parsed.scores[0]?.normalized).toBeGreaterThan(parsed.scores[1]?.normalized ?? 0);
+		expect(parsed.scores[1]?.normalized).toBeGreaterThan(parsed.scores[2]?.normalized ?? 0);
+		expect(parsed.suite.scenarioSummary).toEqual({
+			scored: 3,
+			passed: 1,
+			nearMiss: 1,
+			failed: 1,
+		});
+	});
+
 	test("enforces chain pass and near-miss drift against a named baseline", async () => {
 		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-chain-baseline-gate-"));
 		const baselinePath = join(tempDir, "last-good.json");
