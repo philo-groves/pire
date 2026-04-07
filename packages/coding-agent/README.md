@@ -109,7 +109,10 @@ The starter `pire` profile in this repo provides:
 - A research-first base prompt via `.pire/SYSTEM.md`
 - Supplemental engagement and opsec guidance via `.pire/APPEND_SYSTEM.md`
 - Read-only-first workflow modes: `/recon`, `/dynamic`, `/proofing`, `/report`, and `/mode`
+- Persistent safety posture controls via `/safety`
 - Investigation helpers: `/env-inventory` and `/artifacts`
+- Research notebook exports via `/notebook-export`
+- Repro bundle generation for mature findings via `/repro-bundle`
 - Prompt templates for binary, pcap, firmware, crash repro, build diffing, surface audit, tracing, summary, and report workflows
 - Skills for binary triage, crash analysis, fuzzing setup, pcap analysis, firmware unpacking, web recon, malware sandbox notes, exploit repro, and write-ups
 
@@ -128,10 +131,14 @@ Typical setup:
 
 Typical session flow:
 - Start in `/recon` to inventory artifacts and verify tooling
+- Check `/safety` and raise scope or intent explicitly before touching live targets
 - Run `/env-inventory` early to see available analysis tools and writable locations
 - Switch to `/dynamic` for runtime observation, tracing, and debugger work
 - Switch to `/proofing` only when mutation or a controlled reproduction is intentional
 - Use `/artifacts` to inspect the current `.pire/artifacts.json` manifest
+- Use `/notebook-export all` to emit Markdown, JSON, and HTML research notes from the current session
+- Notebook exports now include scope, methodology, findings with linked evidence/commands/artifacts, open questions, dead ends, and a remediation draft
+- Use `/repro-bundle <finding-id>` once a finding is confirmed and has linked evidence plus replay material; weak candidate findings are refused by default
 
 ---
 

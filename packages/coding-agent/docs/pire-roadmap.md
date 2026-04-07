@@ -384,6 +384,7 @@ Current coding-agent progress:
 - The `.pire/prompts` set now covers the full initial workflow list: binary, pcap, firmware, crash repro, build diffing, surface audit, runtime tracing, finding summaries, and report writing.
 - The `.pire/skills` set now covers the full initial workflow list: binary triage, crash analysis, fuzzing setup, pcap analysis, firmware unpacking, web recon, malware sandbox notes, exploit repro, and write-up support.
 - Extension tests cover default mode/tool gating and proofing-mode escalation.
+- `pire` now persists an explicit safety posture with confirmation-backed active probing gates, notebook export commands, and repro bundle generation for mature findings.
 
 If this milestone works, the harness will already feel different from Pi even before deeper runtime work lands.
 

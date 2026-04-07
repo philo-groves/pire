@@ -87,6 +87,7 @@ export function inferArtifactType(path: string): ArtifactType {
 	if (extension === ".dmp" || extension === ".core") return "dump";
 	if (extension === ".trace" || extension === ".strace" || extension === ".ltrace" || extension === ".perf") return "trace";
 	if (extension === ".log") return "log";
+	if (extension === ".html") return "report";
 	if (extension === ".md" || extension === ".adoc" || extension === ".rst") return normalized.includes("report") ? "report" : "note";
 	if (extension === ".json") return "json";
 	if (extension === ".png" || extension === ".jpg" || extension === ".jpeg" || extension === ".gif" || extension === ".webp")
@@ -98,13 +99,14 @@ export function inferArtifactType(path: string): ArtifactType {
 		extension === ".cpp" ||
 		extension === ".h" ||
 		extension === ".py" ||
-		extension === ".js" ||
-		extension === ".ts" ||
-		extension === ".rs" ||
-		extension === ".go"
-	) {
-		return "text";
-	}
+			extension === ".js" ||
+			extension === ".ts" ||
+			extension === ".rs" ||
+			extension === ".go" ||
+			extension === ".sh"
+		) {
+			return "text";
+		}
 
 	return "other";
 }

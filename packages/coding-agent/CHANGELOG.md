@@ -10,6 +10,9 @@
 - Added a dedicated `.pire/SYSTEM.md` base prompt, completed the initial `pire` prompt-template and skill sets, and documented the `pire` project profile workflow in the coding-agent README.
 - Added structured `pire` binary, disasm, debug, net, and unpack tool packs with artifact-aware wrappers for binary inspection, rizin/radare2 analysis, debugger/tracer inspection, HTTP header capture, PCAP summarization, firmware triage, and controlled extraction.
 - Added the remaining Phase 3 `pire` runtime features: research-aware compaction summaries, persistent research roles and session types, tracker detail/quick-action commands, and handoff summaries for RE workflows.
+- Added the Phase 4 `pire` runtime layer: persisted safety posture controls and active probing gates, notebook export commands (`/notebook-export`), and repro bundle generation for confirmed findings (`/repro-bundle`).
+- Tightened `pire` repro bundle generation so weak findings are refused by default unless they have confirmed/reported status plus linked evidence and replay material, and bundles now include an explicit readiness assessment.
+- Expanded `pire` notebook exports into richer research reports with structured scope/methodology sections, linked finding evidence and artifact details, open questions, dead ends, remediation drafts, and improved HTML evidence rendering.
 
 ## [0.65.2] - 2026-04-06
 

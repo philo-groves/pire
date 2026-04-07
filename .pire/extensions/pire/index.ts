@@ -81,6 +81,14 @@ import {
 } from "./findings.js";
 import { collectEnvironmentInventory, formatInventorySummary, type EnvironmentInventory } from "./inventory.js";
 import {
+	ReproBundleAssessmentError,
+	buildNotebookDocument,
+	generateReproBundle,
+	inferArtifactTypeFromExportPath,
+	writeNotebookExport,
+	type NotebookFormat,
+} from "./reporting.js";
+import {
 	buildResearchCompactionSummary,
 	formatRolePrompt,
 	formatSessionTypePrompt,
@@ -96,6 +104,19 @@ import {
 	type PireToolActivity,
 	renderTrackerRecordDetail,
 } from "./research-runtime.js";
+import {
+	ACTIVE_PROBING_PATTERNS,
+	PERSISTENCE_PATTERNS,
+	allowActiveProbe,
+	allowObservationTarget,
+	allowPersistence,
+	buildSafetyPrompt,
+	createDefaultSafetyPosture,
+	summarizeSafetyPosture,
+	type PireSafetyIntent,
+	type PireSafetyPosture,
+	type PireSafetyScope,
+} from "./safety.js";
 
 interface PersistedModeState {
 	mode: PireMode;
@@ -122,6 +143,10 @@ interface PersistedInventoryState {
 	inventory: EnvironmentInventory;
 }
 
+interface PersistedSafetyState {
+	posture: PireSafetyPosture;
+}
+
 const MODE_ENTRY_TYPE = "pire-mode";
 const ROLE_ENTRY_TYPE = "pire-role";
 const SESSION_TYPE_ENTRY_TYPE = "pire-session-type";
@@ -130,6 +155,7 @@ const TRACKER_ENTRY_TYPE = "pire-findings-tracker";
 const TOOL_ACTIVITY_ENTRY_TYPE = "pire-tool-activity";
 const INVENTORY_ENTRY_TYPE = "pire-env-inventory-state";
 const FOCUS_ENTRY_TYPE = "pire-focus";
+const SAFETY_ENTRY_TYPE = "pire-safety";
 const MODE_FLAG = "pire-mode";
 const ROLE_FLAG = "pire-role";
 const SESSION_TYPE_FLAG = "pire-session";
@@ -276,8 +302,6 @@ const DESTRUCTIVE_PATTERNS = [
 	/\bsystemctl\s+(start|stop|restart|enable|disable)/i,
 	/\bservice\s+\S+\s+(start|stop|restart)/i,
 ];
-
-const ACTIVE_PROBING_PATTERNS = [/\bnmap\b/i, /\bmasscan\b/i, /\bzmap\b/i, /\bgobuster\b/i, /\bffuf\b/i, /\bwfuzz\b/i, /\bnikto\b/i, /\bsqlmap\b/i];
 
 const SAFE_READ_ONLY_PATTERNS = [
 	/^\s*cat\b/,
@@ -468,6 +492,11 @@ function updateFocusStatus(ctx: ExtensionContext, focus: FocusState): void {
 	ctx.ui.setStatus("pire-focus", parts.length > 0 ? ctx.ui.theme.fg("accent", `focus:${parts.join("/")}`) : undefined);
 }
 
+function updateSafetyStatus(ctx: ExtensionContext, posture: PireSafetyPosture): void {
+	const suffix = posture.activeProbing.approved ? "+probe" : "";
+	ctx.ui.setStatus("pire-safety", ctx.ui.theme.fg("accent", `safety:${posture.scope}/${posture.intent}${suffix}`));
+}
+
 function updateTrackerStatus(ctx: ExtensionContext, tracker: FindingsTracker): void {
 	const summary = buildFindingsTrackerSummary(tracker);
 	ctx.ui.setStatus(
@@ -570,6 +599,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	let lastActivity: PireToolActivity | undefined;
 	let currentInventory: EnvironmentInventory | undefined;
 	let currentFocus: FocusState = createEmptyFocusState();
+	let currentSafety: PireSafetyPosture = createDefaultSafetyPosture();
 
 	const persistMode = (): void => {
 		pi.appendEntry<PersistedModeState>(MODE_ENTRY_TYPE, { mode: currentMode });
@@ -624,17 +654,22 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		pi.appendEntry<FocusState>(FOCUS_ENTRY_TYPE, currentFocus);
 	};
 
+	const persistSafety = (): void => {
+		pi.appendEntry<PersistedSafetyState>(SAFETY_ENTRY_TYPE, { posture: currentSafety });
+	};
+
 	const applyMode = (ctx: ExtensionContext, mode: PireMode, options?: { notify?: boolean }): void => {
 		currentMode = mode;
 		pi.setActiveTools(MODE_TOOLS[mode]);
 		updateStatus(ctx, mode);
 		updateRoleStatus(ctx, currentRole);
 		updateSessionTypeStatus(ctx, currentSessionType);
-		updateArtifactStatus(ctx, artifactManifest);
-		updateTrackerStatus(ctx, findingsTracker);
-		updateActivityStatus(ctx, lastActivity);
-		updateFocusStatus(ctx, currentFocus);
-		persistMode();
+			updateArtifactStatus(ctx, artifactManifest);
+			updateTrackerStatus(ctx, findingsTracker);
+			updateActivityStatus(ctx, lastActivity);
+			updateFocusStatus(ctx, currentFocus);
+			updateSafetyStatus(ctx, currentSafety);
+			persistMode();
 		if (options?.notify !== false) {
 			ctx.ui.notify(`pire mode: ${mode}`, "info");
 		}
@@ -739,6 +774,18 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		);
 	};
 
+	const showSafety = (): void => {
+		pi.sendMessage(
+			{
+				customType: "pire-safety",
+				content: summarizeSafetyPosture(currentSafety),
+				display: true,
+				details: currentSafety,
+			},
+			{ triggerTurn: false },
+		);
+	};
+
 	const observeArtifact = async (
 		ctx: ExtensionContext,
 		path: string,
@@ -753,6 +800,26 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			finding: options?.finding,
 		});
 		await persistArtifacts();
+	};
+
+	const applySafety = (
+		ctx: ExtensionContext,
+		input: Partial<Pick<PireSafetyPosture, "scope" | "intent">> & {
+			activeProbing?: PireSafetyPosture["activeProbing"];
+		},
+		options?: { notify?: boolean },
+	): void => {
+		currentSafety = {
+			...currentSafety,
+			...input,
+			activeProbing: input.activeProbing ?? currentSafety.activeProbing,
+			updatedAt: new Date().toISOString(),
+		};
+		updateSafetyStatus(ctx, currentSafety);
+		persistSafety();
+		if (options?.notify !== false) {
+			ctx.ui.notify(`pire safety: ${currentSafety.scope}/${currentSafety.intent}`, "info");
+		}
 	};
 
 	const applyFocus = (
@@ -905,6 +972,116 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					role: currentRole,
 					sessionType: currentSessionType,
 				},
+			},
+			{ triggerTurn: false },
+		);
+	};
+
+	const collectActivitiesForNotebook = (ctx: ExtensionContext): PireToolActivity[] =>
+		ctx.sessionManager
+			.getEntries()
+			.flatMap((entry) => {
+				if (entry.type !== "custom" || entry.customType !== TOOL_ACTIVITY_ENTRY_TYPE || entry.data === undefined) {
+					return [];
+				}
+				return [entry.data as PireToolActivity];
+			})
+			.slice(-64);
+
+	const exportNotebook = async (ctx: ExtensionContext, format: NotebookFormat | "all", outputPath?: string): Promise<void> => {
+		const doc = buildNotebookDocument({
+			cwd: ctx.cwd,
+			mode: currentMode,
+			role: currentRole,
+			sessionType: currentSessionType,
+			safety: currentSafety,
+			inventory: currentInventory,
+			tracker: findingsTracker,
+			trackerSummary: buildFindingsTrackerSummary(findingsTracker),
+			manifest: artifactManifest,
+			activities: collectActivitiesForNotebook(ctx),
+		});
+		const formats: NotebookFormat[] = format === "all" ? ["markdown", "json", "html"] : [format];
+		const exports = [];
+		for (const currentFormat of formats) {
+			const result = await writeNotebookExport(ctx.cwd, doc, currentFormat, format === "all" ? undefined : outputPath);
+			exports.push(result);
+			await observeArtifact(ctx, result.path, "command:notebook-export", {
+				type: inferArtifactTypeFromExportPath(result.path),
+			});
+		}
+		pi.sendMessage(
+			{
+				customType: "pire-notebook-export",
+				content: ["Pire Notebook Export", ...exports.map((entry) => `- ${entry.format}: ${entry.path}`)].join("\n"),
+				display: true,
+				details: { exports },
+			},
+			{ triggerTurn: false },
+		);
+	};
+
+	const createReproBundle = async (ctx: ExtensionContext, findingId: string, slug?: string): Promise<void> => {
+		const finding = findingsTracker.findings.find((record) => record.id === findingId);
+		if (!finding) {
+			ctx.ui.notify(`Unknown finding: ${findingId}`, "error");
+			return;
+		}
+		let bundle;
+		try {
+			bundle = await generateReproBundle({
+				cwd: ctx.cwd,
+				mode: currentMode,
+				role: currentRole,
+				sessionType: currentSessionType,
+				safety: currentSafety,
+				inventory: currentInventory,
+				tracker: findingsTracker,
+				manifest: artifactManifest,
+				finding,
+				slug,
+			});
+		} catch (error) {
+			if (error instanceof ReproBundleAssessmentError) {
+				pi.sendMessage(
+					{
+						customType: "pire-repro-bundle-assessment",
+						content: [
+							"Pire Repro Bundle Refused",
+							`- finding: ${finding.id}`,
+							`- readiness: ${error.assessment.readiness}`,
+							...error.assessment.issues.map((issue) => `- ${issue}`),
+						].join("\n"),
+						display: true,
+						details: error.assessment,
+					},
+					{ triggerTurn: false },
+				);
+				return;
+			}
+			throw error;
+		}
+		for (const path of [bundle.readmePath, bundle.manifestPath, bundle.commandsPath, bundle.environmentPath, bundle.artifactsPath]) {
+			await observeArtifact(ctx, path, "command:repro-bundle");
+		}
+		for (const file of bundle.files) {
+			if (file.bundledPath) {
+				await observeArtifact(ctx, file.bundledPath, "command:repro-bundle", { type: file.type });
+			}
+		}
+		pi.sendMessage(
+			{
+				customType: "pire-repro-bundle",
+				content: [
+					"Pire Repro Bundle",
+					`- directory: ${bundle.directory}`,
+					`- readiness: ${bundle.assessment.readiness}`,
+					`- readme: ${bundle.readmePath}`,
+					`- commands: ${bundle.commandsPath}`,
+					`- manifest: ${bundle.manifestPath}`,
+				].join("\n"),
+				display: true,
+				details: bundle,
 			},
 			{ triggerTurn: false },
 		);
@@ -1848,6 +2025,59 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("safety", {
+		description:
+			"Show or change pire safety posture: /safety, /safety scope <local|lab|external>, /safety intent <observe|probe|exploit|persistence>, /safety approve-probing <target> :: <why>",
+		handler: async (args, ctx) => {
+			const trimmed = args.trim();
+			if (!trimmed) {
+				showSafety();
+				return;
+			}
+			const [action, ...rest] = trimmed.split(/\s+/);
+			if (action === "scope") {
+				const value = rest[0];
+				if (value !== "local" && value !== "lab" && value !== "external") {
+					ctx.ui.notify("Usage: /safety scope <local|lab|external>", "warning");
+					return;
+				}
+				applySafety(ctx, { scope: value as PireSafetyScope });
+				return;
+			}
+			if (action === "intent") {
+				const value = rest[0];
+				if (value !== "observe" && value !== "probe" && value !== "exploit" && value !== "persistence") {
+					ctx.ui.notify("Usage: /safety intent <observe|probe|exploit|persistence>", "warning");
+					return;
+				}
+				applySafety(ctx, { intent: value as PireSafetyIntent });
+				return;
+			}
+			if (action === "approve-probing") {
+				const remainder = rest.join(" ").trim();
+				const [target, justification] = remainder.split(/\s*::\s*/, 2);
+				if (!target?.trim() || !justification?.trim()) {
+					ctx.ui.notify("Usage: /safety approve-probing <target> :: <justification>", "warning");
+					return;
+				}
+				applySafety(ctx, {
+					activeProbing: {
+						approved: true,
+						target: target.trim(),
+						justification: justification.trim(),
+						approvedAt: new Date().toISOString(),
+					},
+				});
+				return;
+			}
+			if (action === "revoke-probing") {
+				applySafety(ctx, { activeProbing: { approved: false } });
+				return;
+			}
+			ctx.ui.notify("Unknown safety action", "error");
+		},
+	});
+
 	pi.registerCommand("activity", {
 		description: "Show recent pire tool-pack activity, optionally filtered by tool or target substring",
 		handler: async (args, ctx) => {
@@ -2063,6 +2293,32 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("notebook-export", {
+		description: "Export the current pire research notebook: /notebook-export [markdown|json|html|all] [path]",
+		handler: async (args, ctx) => {
+			const parts = args.trim().split(/\s+/).filter((part) => part.length > 0);
+			const format = (parts[0] ?? "markdown").toLowerCase();
+			const outputPath = parts.length > 1 ? parts.slice(1).join(" ") : undefined;
+			if (format !== "markdown" && format !== "json" && format !== "html" && format !== "all") {
+				ctx.ui.notify("Usage: /notebook-export [markdown|json|html|all] [path]", "warning");
+				return;
+			}
+			await exportNotebook(ctx, format as NotebookFormat | "all", outputPath);
+		},
+	});
+
+	pi.registerCommand("repro-bundle", {
+		description: "Generate a repro bundle for a finding: /repro-bundle <finding-id> [slug]",
+		handler: async (args, ctx) => {
+			const [findingId, ...slugParts] = args.trim().split(/\s+/).filter((part) => part.length > 0);
+			if (!findingId) {
+				ctx.ui.notify("Usage: /repro-bundle <finding-id> [slug]", "warning");
+				return;
+			}
+			await createReproBundle(ctx, findingId, slugParts.join("-") || undefined);
+		},
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		currentCwd = ctx.cwd;
 		const flagValue = pi.getFlag(MODE_FLAG);
@@ -2091,30 +2347,36 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			.getBranch()
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === INVENTORY_ENTRY_TYPE)
 			.pop() as { data?: PersistedInventoryState } | undefined;
-		const latestFocusEntry = ctx.sessionManager
-			.getBranch()
-			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === FOCUS_ENTRY_TYPE)
-			.pop() as { data?: FocusState } | undefined;
-		const flagMode = typeof flagValue === "string" && isPireMode(flagValue) ? flagValue : undefined;
-		const flagRole = typeof roleFlagValue === "string" && isPireRole(roleFlagValue) ? roleFlagValue : undefined;
+			const latestFocusEntry = ctx.sessionManager
+				.getBranch()
+				.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === FOCUS_ENTRY_TYPE)
+				.pop() as { data?: FocusState } | undefined;
+			const latestSafetyEntry = ctx.sessionManager
+				.getBranch()
+				.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === SAFETY_ENTRY_TYPE)
+				.pop() as { data?: PersistedSafetyState } | undefined;
+			const flagMode = typeof flagValue === "string" && isPireMode(flagValue) ? flagValue : undefined;
+			const flagRole = typeof roleFlagValue === "string" && isPireRole(roleFlagValue) ? roleFlagValue : undefined;
 		const flagSessionType =
 			typeof sessionTypeFlagValue === "string" && isPireSessionType(sessionTypeFlagValue) ? sessionTypeFlagValue : undefined;
 		artifactManifest = await loadArtifactManifest(ctx.cwd);
-		findingsTracker = latestTrackerEntry?.data?.tracker ?? (await loadFindingsTracker(ctx.cwd));
-		lastActivity = latestActivityEntry?.data;
-		currentInventory = latestInventoryEntry?.data?.inventory;
-		currentFocus = latestFocusEntry?.data ?? createEmptyFocusState();
-		currentRole = flagRole ?? persistedRole?.data?.role;
-		currentSessionType = flagSessionType ?? persistedSessionType?.data?.sessionType;
+			findingsTracker = latestTrackerEntry?.data?.tracker ?? (await loadFindingsTracker(ctx.cwd));
+			lastActivity = latestActivityEntry?.data;
+			currentInventory = latestInventoryEntry?.data?.inventory;
+			currentFocus = latestFocusEntry?.data ?? createEmptyFocusState();
+			currentSafety = latestSafetyEntry?.data?.posture ?? createDefaultSafetyPosture();
+			currentRole = flagRole ?? persistedRole?.data?.role;
+			currentSessionType = flagSessionType ?? persistedSessionType?.data?.sessionType;
 		applyMode(ctx, flagMode ?? persistedMode ?? "recon", { notify: false });
 		if (currentSessionType) {
 			await applySessionType(ctx, currentSessionType, { notify: false, preserveRole: currentRole !== undefined });
 		}
 		if (currentRole) {
 			applyRole(ctx, currentRole, { notify: false });
-		}
-		updateFocusStatus(ctx, currentFocus);
-		if (!currentInventory || currentInventory.cwd !== ctx.cwd) {
+			}
+			updateFocusStatus(ctx, currentFocus);
+			updateSafetyStatus(ctx, currentSafety);
+			if (!currentInventory || currentInventory.cwd !== ctx.cwd) {
 			const inventory = await collectEnvironmentInventory(ctx.cwd, (command, args) => pi.exec(command, args, { cwd: ctx.cwd }));
 			persistInventory(inventory, "auto");
 			recordToolActivity(ctx, {
@@ -2143,20 +2405,26 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			.getBranch()
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === INVENTORY_ENTRY_TYPE)
 			.pop() as { data?: PersistedInventoryState } | undefined;
-		const latestFocusEntry = ctx.sessionManager
-			.getBranch()
-			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === FOCUS_ENTRY_TYPE)
-			.pop() as { data?: FocusState } | undefined;
-		findingsTracker = latestTrackerEntry?.data?.tracker ?? findingsTracker;
-		currentRole = latestRoleEntry?.data?.role ?? currentRole;
-		currentSessionType = latestSessionTypeEntry?.data?.sessionType ?? currentSessionType;
-		currentInventory = latestInventoryEntry?.data?.inventory ?? currentInventory;
-		currentFocus = latestFocusEntry?.data ?? createEmptyFocusState();
-		syncTrackerUI(ctx);
-		updateRoleStatus(ctx, currentRole);
-		updateSessionTypeStatus(ctx, currentSessionType);
-		updateFocusStatus(ctx, currentFocus);
-	});
+			const latestFocusEntry = ctx.sessionManager
+				.getBranch()
+				.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === FOCUS_ENTRY_TYPE)
+				.pop() as { data?: FocusState } | undefined;
+			const latestSafetyEntry = ctx.sessionManager
+				.getBranch()
+				.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === SAFETY_ENTRY_TYPE)
+				.pop() as { data?: PersistedSafetyState } | undefined;
+			findingsTracker = latestTrackerEntry?.data?.tracker ?? findingsTracker;
+			currentRole = latestRoleEntry?.data?.role ?? currentRole;
+			currentSessionType = latestSessionTypeEntry?.data?.sessionType ?? currentSessionType;
+			currentInventory = latestInventoryEntry?.data?.inventory ?? currentInventory;
+			currentFocus = latestFocusEntry?.data ?? createEmptyFocusState();
+			currentSafety = latestSafetyEntry?.data?.posture ?? currentSafety;
+			syncTrackerUI(ctx);
+			updateRoleStatus(ctx, currentRole);
+			updateSessionTypeStatus(ctx, currentSessionType);
+			updateFocusStatus(ctx, currentFocus);
+			updateSafetyStatus(ctx, currentSafety);
+		});
 
 	pi.on("before_agent_start", async (_event, ctx) => {
 		if (!currentInventory || currentInventory.cwd !== ctx.cwd) {
@@ -2167,11 +2435,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			message: {
 				customType: "pire-mode-context",
 				content: [
-					formatModePrompt(currentMode),
-					currentSessionType ? formatSessionTypePrompt(currentSessionType) : undefined,
-					currentRole ? formatRolePrompt(currentRole) : undefined,
-					buildInventoryPromptSummary(currentInventory),
-					buildFindingsPromptSummary(findingsTracker, {
+						formatModePrompt(currentMode),
+						currentSessionType ? formatSessionTypePrompt(currentSessionType) : undefined,
+						currentRole ? formatRolePrompt(currentRole) : undefined,
+						buildSafetyPrompt(currentSafety),
+						buildInventoryPromptSummary(currentInventory),
+						buildFindingsPromptSummary(findingsTracker, {
 						activeHypothesisIds: currentFocus.hypothesisIds,
 						activeFindingIds: currentFocus.findingIds,
 						activeQuestionIds: currentFocus.questionIds,
@@ -2228,6 +2497,18 @@ export default function pireExtension(pi: ExtensionAPI): void {
 
 		if (event.toolName === "bash") {
 			const command = typeof event.input.command === "string" ? event.input.command : "";
+			if (PERSISTENCE_PATTERNS.some((pattern) => pattern.test(command))) {
+				const decision = allowPersistence(currentSafety);
+				if (!decision.allowed) {
+					return { block: true, reason: decision.reason ?? "persistence blocked" };
+				}
+			}
+			if (ACTIVE_PROBING_PATTERNS.some((pattern) => pattern.test(command))) {
+				const decision = allowActiveProbe(currentSafety, currentSafety.activeProbing.target);
+				if (!decision.allowed) {
+					return { block: true, reason: decision.reason ?? "active probing blocked" };
+				}
+			}
 			if (!isAllowedResearchCommand(command, currentMode)) {
 				return {
 					block: true,
@@ -2235,9 +2516,20 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				};
 			}
 		}
+
+		if (event.toolName === "net_curl_head") {
+			const url = typeof event.input.url === "string" ? event.input.url : "";
+			const decision = allowObservationTarget(currentSafety, url);
+			if (!decision.allowed) {
+				return {
+					block: true,
+					reason: decision.reason ?? `safety posture blocked access to ${url}`,
+				};
+			}
+		}
 	});
 
-	pi.on("tool_result", async (event, ctx) => {
+	(pi as ExtensionAPI).on("tool_result", async (event, ctx) => {
 		if (event.isError) {
 			return;
 		}
