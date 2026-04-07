@@ -34,11 +34,17 @@ interface PireEvalCaseExpectation {
 	minChainPassed?: number;
 	maxChainNearMiss?: number;
 	maxChainFailed?: number;
+	minScenarioPassed?: number;
+	maxScenarioNearMiss?: number;
+	maxScenarioFailed?: number;
 	maxNormalizedDropByBaseline?: Record<string, number>;
 	maxIssuesIncreaseByBaseline?: Record<string, number>;
 	maxChainPassDropByBaseline?: Record<string, number>;
 	maxChainNearMissIncreaseByBaseline?: Record<string, number>;
 	maxChainFailedIncreaseByBaseline?: Record<string, number>;
+	maxScenarioPassDropByBaseline?: Record<string, number>;
+	maxScenarioNearMissIncreaseByBaseline?: Record<string, number>;
+	maxScenarioFailedIncreaseByBaseline?: Record<string, number>;
 }
 
 interface PireEvalSuiteExpectation {
@@ -50,11 +56,17 @@ interface PireEvalSuiteExpectation {
 	minChainPassed?: number;
 	maxChainNearMiss?: number;
 	maxChainFailed?: number;
+	minScenarioPassed?: number;
+	maxScenarioNearMiss?: number;
+	maxScenarioFailed?: number;
 	maxAverageNormalizedDropByBaseline?: Record<string, number>;
 	maxAverageIssuesIncreaseByBaseline?: Record<string, number>;
 	maxChainPassDropByBaseline?: Record<string, number>;
 	maxChainNearMissIncreaseByBaseline?: Record<string, number>;
 	maxChainFailedIncreaseByBaseline?: Record<string, number>;
+	maxScenarioPassDropByBaseline?: Record<string, number>;
+	maxScenarioNearMissIncreaseByBaseline?: Record<string, number>;
+	maxScenarioFailedIncreaseByBaseline?: Record<string, number>;
 }
 
 interface PireEvalCaseDefinition {
@@ -110,6 +122,9 @@ interface PireEvalCaseBaseline {
 	chainPassedDelta: number;
 	chainNearMissDelta: number;
 	chainFailedDelta: number;
+	scenarioPassedDelta: number;
+	scenarioNearMissDelta: number;
+	scenarioFailedDelta: number;
 	baselineRunId: string;
 	severity: PireEvalDeltaSeverity;
 }
@@ -122,6 +137,9 @@ interface PireEvalSuiteBaseline {
 	chainPassedDelta: number;
 	chainNearMissDelta: number;
 	chainFailedDelta: number;
+	scenarioPassedDelta: number;
+	scenarioNearMissDelta: number;
+	scenarioFailedDelta: number;
 	severity: PireEvalDeltaSeverity;
 }
 
@@ -507,7 +525,7 @@ function formatBaselineSummary(baselines: PireEvalSuiteBaseline[]): string {
 	return baselines
 		.map(
 			(baseline) =>
-				`${baseline.name}: score ${formatSignedDelta(baseline.averageNormalizedDelta)}, issues ${formatSignedDelta(baseline.averageIssuesDelta)}, chain-pass ${formatSignedDelta(baseline.chainPassedDelta, 0)}, chain-near-miss ${formatSignedDelta(baseline.chainNearMissDelta, 0)}, severity=${baseline.severity}`,
+				`${baseline.name}: score ${formatSignedDelta(baseline.averageNormalizedDelta)}, issues ${formatSignedDelta(baseline.averageIssuesDelta)}, chain-pass ${formatSignedDelta(baseline.chainPassedDelta, 0)}, chain-near-miss ${formatSignedDelta(baseline.chainNearMissDelta, 0)}, scenario-pass ${formatSignedDelta(baseline.scenarioPassedDelta, 0)}, scenario-near-miss ${formatSignedDelta(baseline.scenarioNearMissDelta, 0)}, severity=${baseline.severity}`,
 		)
 		.join(" | ");
 }
@@ -516,7 +534,7 @@ function formatCaseBaselineSummary(baselines: PireEvalCaseBaseline[]): string {
 	return baselines
 		.map(
 			(baseline) =>
-				`${baseline.name} delta=${formatSignedDelta(baseline.normalizedDelta)}, issue-delta=${formatSignedDelta(baseline.issuesDelta)}, chain-pass-delta=${formatSignedDelta(baseline.chainPassedDelta, 0)}, chain-near-miss-delta=${formatSignedDelta(baseline.chainNearMissDelta, 0)}, severity=${baseline.severity}`,
+				`${baseline.name} delta=${formatSignedDelta(baseline.normalizedDelta)}, issue-delta=${formatSignedDelta(baseline.issuesDelta)}, chain-pass-delta=${formatSignedDelta(baseline.chainPassedDelta, 0)}, chain-near-miss-delta=${formatSignedDelta(baseline.chainNearMissDelta, 0)}, scenario-pass-delta=${formatSignedDelta(baseline.scenarioPassedDelta, 0)}, scenario-near-miss-delta=${formatSignedDelta(baseline.scenarioNearMissDelta, 0)}, severity=${baseline.severity}`,
 		)
 		.join(" | ");
 }
@@ -585,6 +603,24 @@ function collectRegressions(score: PireEvalCaseScore, rank: number): string[] {
 	if (expectation.maxChainFailed !== undefined && score.chainSummary.failed > expectation.maxChainFailed) {
 		regressions.push(`chain fails ${score.chainSummary.failed} exceeded maximum ${expectation.maxChainFailed}`);
 	}
+	if (expectation.minScenarioPassed !== undefined && score.scenarioSummary.passed < expectation.minScenarioPassed) {
+		regressions.push(
+			`scenario passes ${score.scenarioSummary.passed} fell below minimum ${expectation.minScenarioPassed}`,
+		);
+	}
+	if (
+		expectation.maxScenarioNearMiss !== undefined &&
+		score.scenarioSummary.nearMiss > expectation.maxScenarioNearMiss
+	) {
+		regressions.push(
+			`scenario near-misses ${score.scenarioSummary.nearMiss} exceeded maximum ${expectation.maxScenarioNearMiss}`,
+		);
+	}
+	if (expectation.maxScenarioFailed !== undefined && score.scenarioSummary.failed > expectation.maxScenarioFailed) {
+		regressions.push(
+			`scenario fails ${score.scenarioSummary.failed} exceeded maximum ${expectation.maxScenarioFailed}`,
+		);
+	}
 	if (expectation.maxNormalizedDropByBaseline && score.baselines) {
 		for (const baseline of score.baselines) {
 			const maxDrop = expectation.maxNormalizedDropByBaseline[baseline.name];
@@ -631,6 +667,36 @@ function collectRegressions(score: PireEvalCaseScore, rank: number): string[] {
 			if (maxIncrease !== undefined && baseline.chainFailedDelta > maxIncrease) {
 				regressions.push(
 					`${baseline.name} chain fail delta ${formatSignedDelta(baseline.chainFailedDelta, 0)} exceeded allowed increase ${formatSignedDelta(maxIncrease, 0)}`,
+				);
+			}
+		}
+	}
+	if (expectation.maxScenarioPassDropByBaseline && score.baselines) {
+		for (const baseline of score.baselines) {
+			const maxDrop = expectation.maxScenarioPassDropByBaseline[baseline.name];
+			if (maxDrop !== undefined && baseline.scenarioPassedDelta < -maxDrop) {
+				regressions.push(
+					`${baseline.name} scenario pass delta ${formatSignedDelta(baseline.scenarioPassedDelta, 0)} exceeded allowed drop ${formatSignedDelta(-maxDrop, 0)}`,
+				);
+			}
+		}
+	}
+	if (expectation.maxScenarioNearMissIncreaseByBaseline && score.baselines) {
+		for (const baseline of score.baselines) {
+			const maxIncrease = expectation.maxScenarioNearMissIncreaseByBaseline[baseline.name];
+			if (maxIncrease !== undefined && baseline.scenarioNearMissDelta > maxIncrease) {
+				regressions.push(
+					`${baseline.name} scenario near-miss delta ${formatSignedDelta(baseline.scenarioNearMissDelta, 0)} exceeded allowed increase ${formatSignedDelta(maxIncrease, 0)}`,
+				);
+			}
+		}
+	}
+	if (expectation.maxScenarioFailedIncreaseByBaseline && score.baselines) {
+		for (const baseline of score.baselines) {
+			const maxIncrease = expectation.maxScenarioFailedIncreaseByBaseline[baseline.name];
+			if (maxIncrease !== undefined && baseline.scenarioFailedDelta > maxIncrease) {
+				regressions.push(
+					`${baseline.name} scenario fail delta ${formatSignedDelta(baseline.scenarioFailedDelta, 0)} exceeded allowed increase ${formatSignedDelta(maxIncrease, 0)}`,
 				);
 			}
 		}
@@ -688,6 +754,30 @@ function collectSuiteRegressions(
 	if (expectation?.maxChainFailed !== undefined && chainSummary.failed > expectation.maxChainFailed) {
 		regressions.push(`suite chain fails ${chainSummary.failed} exceeded maximum ${expectation.maxChainFailed}`);
 	}
+	const scenarioSummary = scores.reduce<PireEvalScenarioSummary>(
+		(acc, score) => ({
+			scored: acc.scored + score.scenarioSummary.scored,
+			passed: acc.passed + score.scenarioSummary.passed,
+			nearMiss: acc.nearMiss + score.scenarioSummary.nearMiss,
+			failed: acc.failed + score.scenarioSummary.failed,
+		}),
+		createEmptyScenarioSummary(),
+	);
+	if (expectation?.minScenarioPassed !== undefined && scenarioSummary.passed < expectation.minScenarioPassed) {
+		regressions.push(
+			`suite scenario passes ${scenarioSummary.passed} fell below minimum ${expectation.minScenarioPassed}`,
+		);
+	}
+	if (expectation?.maxScenarioNearMiss !== undefined && scenarioSummary.nearMiss > expectation.maxScenarioNearMiss) {
+		regressions.push(
+			`suite scenario near-misses ${scenarioSummary.nearMiss} exceeded maximum ${expectation.maxScenarioNearMiss}`,
+		);
+	}
+	if (expectation?.maxScenarioFailed !== undefined && scenarioSummary.failed > expectation.maxScenarioFailed) {
+		regressions.push(
+			`suite scenario fails ${scenarioSummary.failed} exceeded maximum ${expectation.maxScenarioFailed}`,
+		);
+	}
 	return {
 		cases,
 		averageNormalized,
@@ -696,15 +786,7 @@ function collectSuiteRegressions(
 		expectation,
 		severityThresholds: undefined,
 		chainSummary,
-		scenarioSummary: scores.reduce<PireEvalScenarioSummary>(
-			(acc, score) => ({
-				scored: acc.scored + score.scenarioSummary.scored,
-				passed: acc.passed + score.scenarioSummary.passed,
-				nearMiss: acc.nearMiss + score.scenarioSummary.nearMiss,
-				failed: acc.failed + score.scenarioSummary.failed,
-			}),
-			createEmptyScenarioSummary(),
-		),
+		scenarioSummary,
 	};
 }
 
@@ -898,6 +980,24 @@ function applySuiteBaselineExpectations(
 				`${baseline.name} chain fail delta ${formatSignedDelta(baseline.chainFailedDelta, 0)} exceeded allowed increase ${formatSignedDelta(maxChainFailedIncrease, 0)}`,
 			);
 		}
+		const maxScenarioPassDrop = expectation.maxScenarioPassDropByBaseline?.[baseline.name];
+		if (maxScenarioPassDrop !== undefined && baseline.scenarioPassedDelta < -maxScenarioPassDrop) {
+			regressions.push(
+				`${baseline.name} scenario pass delta ${formatSignedDelta(baseline.scenarioPassedDelta, 0)} exceeded allowed drop ${formatSignedDelta(-maxScenarioPassDrop, 0)}`,
+			);
+		}
+		const maxScenarioNearMissIncrease = expectation.maxScenarioNearMissIncreaseByBaseline?.[baseline.name];
+		if (maxScenarioNearMissIncrease !== undefined && baseline.scenarioNearMissDelta > maxScenarioNearMissIncrease) {
+			regressions.push(
+				`${baseline.name} scenario near-miss delta ${formatSignedDelta(baseline.scenarioNearMissDelta, 0)} exceeded allowed increase ${formatSignedDelta(maxScenarioNearMissIncrease, 0)}`,
+			);
+		}
+		const maxScenarioFailedIncrease = expectation.maxScenarioFailedIncreaseByBaseline?.[baseline.name];
+		if (maxScenarioFailedIncrease !== undefined && baseline.scenarioFailedDelta > maxScenarioFailedIncrease) {
+			regressions.push(
+				`${baseline.name} scenario fail delta ${formatSignedDelta(baseline.scenarioFailedDelta, 0)} exceeded allowed increase ${formatSignedDelta(maxScenarioFailedIncrease, 0)}`,
+			);
+		}
 	}
 
 	return {
@@ -953,6 +1053,9 @@ function applyBaseline(
 							chainPassedDelta: score.chainSummary.passed - baselineScore.chainSummary.passed,
 							chainNearMissDelta: score.chainSummary.nearMiss - baselineScore.chainSummary.nearMiss,
 							chainFailedDelta: score.chainSummary.failed - baselineScore.chainSummary.failed,
+							scenarioPassedDelta: score.scenarioSummary.passed - baselineScore.scenarioSummary.passed,
+							scenarioNearMissDelta: score.scenarioSummary.nearMiss - baselineScore.scenarioSummary.nearMiss,
+							scenarioFailedDelta: score.scenarioSummary.failed - baselineScore.scenarioSummary.failed,
 							baselineRunId: baselineScore.runId,
 							severity: classifyDeltaSeverity(
 								score.normalized - baselineScore.normalized,
@@ -979,6 +1082,9 @@ function applyBaseline(
 					chainPassedDelta: result.suite.chainSummary.passed - baseline.suite.chainSummary.passed,
 					chainNearMissDelta: result.suite.chainSummary.nearMiss - baseline.suite.chainSummary.nearMiss,
 					chainFailedDelta: result.suite.chainSummary.failed - baseline.suite.chainSummary.failed,
+					scenarioPassedDelta: result.suite.scenarioSummary.passed - baseline.suite.scenarioSummary.passed,
+					scenarioNearMissDelta: result.suite.scenarioSummary.nearMiss - baseline.suite.scenarioSummary.nearMiss,
+					scenarioFailedDelta: result.suite.scenarioSummary.failed - baseline.suite.scenarioSummary.failed,
 					severity: classifyDeltaSeverity(
 						result.suite.averageNormalized - baseline.suite.averageNormalized,
 						result.suite.averageIssues - baseline.suite.averageIssues,
