@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T16:40:00.000Z",
+  "findings": [
+    {
+      "id": "find-toctou-001",
+      "title": "Privileged helper races config file ownership check",
+      "status": "candidate",
+      "severity": "medium",
+      "statement": "The helper checks ownership and later reopens the same path for use.",
+      "basis": ["ev-toctou-001"],
+      "relatedEvidenceIds": ["ev-toctou-001"],
+      "relatedArtifactIds": ["artifact:/tmp/toctou-trace.log"],
+      "reproStatus": "partial",
+      "createdAt": "2026-04-07T16:05:00.000Z",
+      "updatedAt": "2026-04-07T16:12:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-toctou-001",
+      "kind": "trace",
+      "summary": "strace shows the ownership check and file open happen in separate syscalls",
+      "artifactIds": ["artifact:/tmp/toctou-trace.log"],
+      "supports": ["find-toctou-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T16:06:00.000Z"
+    }
+  ]
+}

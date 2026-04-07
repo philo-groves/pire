@@ -15,6 +15,7 @@
 - Expanded `pire` notebook exports into richer research reports with structured scope/methodology sections, linked finding evidence and artifact details, open questions, dead ends, remediation drafts, and improved HTML evidence rendering.
 - Added a first `pire` eval foundation for reverse-engineering work: typed scoring/rubric helpers plus a starter binary-RE corpus covering disassembly, decompilation, UAF, OOB read/write, heap overflow, double-free, and TOCTOU tasks.
 - Added file-backed `pire` eval suite/run bundle helpers so binary-RE benchmark tasks and scored runs can be stored, validated, serialized, and compared without ad hoc scripts.
+- Added fixture-backed `pire` session eval extraction helpers plus starter binary-RE session cases so real `.pire` findings and artifact snapshots can be converted into scored benchmark runs with stable regression coverage.
 
 ### Changed
 

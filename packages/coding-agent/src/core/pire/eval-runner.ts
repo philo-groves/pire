@@ -76,6 +76,17 @@ export interface PireEvalSessionBindingFile {
 	bindings: PireEvalSessionTaskBinding[];
 }
 
+export interface CreatePireEvalRunBundleFromBindingFileOptions {
+	cwd: string;
+	suitePath: string;
+	bindingsPath: string;
+	runId?: string;
+	model?: string;
+	startedAt?: string;
+	finishedAt?: string;
+	notes?: string[];
+}
+
 function parseJsonFile<T>(text: string, fallback: T): T {
 	try {
 		return JSON.parse(text) as T;
@@ -276,6 +287,36 @@ export async function createPireEvalRunBundleFromSession(
 	};
 }
 
+export async function createPireEvalRunBundleFromBindingFile(
+	options: CreatePireEvalRunBundleFromBindingFileOptions,
+): Promise<{
+	suite: PireEvalTaskSuite;
+	bindingFile: PireEvalSessionBindingFile;
+	run: PireEvalRunBundle;
+}> {
+	const [suite, bindingFile] = await Promise.all([
+		loadPireEvalTaskSuite(options.suitePath),
+		loadPireEvalSessionBindingFile(options.bindingsPath),
+	]);
+
+	if (bindingFile.suiteId && bindingFile.suiteId !== suite.suiteId) {
+		throw new Error(`binding suiteId ${bindingFile.suiteId} does not match task suite ${suite.suiteId}`);
+	}
+
+	const run = await createPireEvalRunBundleFromSession({
+		cwd: options.cwd,
+		suite,
+		runId: options.runId ?? bindingFile.runId ?? "pire-eval-run",
+		bindings: bindingFile.bindings,
+		model: options.model ?? bindingFile.model,
+		startedAt: options.startedAt ?? bindingFile.startedAt,
+		finishedAt: options.finishedAt ?? bindingFile.finishedAt,
+		notes: [...(bindingFile.notes ?? []), ...(options.notes ?? [])],
+	});
+
+	return { suite, bindingFile, run };
+}
+
 export async function savePireEvalRunBundle(cwd: string, run: PireEvalRunBundle, outputPath?: string): Promise<string> {
 	const targetPath = outputPath ?? join(cwd, ".pire", "session", "evals", `${run.runId}.json`);
 	await mkdir(dirname(targetPath), { recursive: true });
@@ -296,6 +337,19 @@ export async function scorePireEvalRunFromFiles(paths: { suitePath: string; runP
 		suite,
 		run,
 		score: scorePireEvalRunBundle(suite, run),
+	};
+}
+
+export async function scorePireEvalSessionFromFiles(options: CreatePireEvalRunBundleFromBindingFileOptions): Promise<{
+	suite: PireEvalTaskSuite;
+	bindingFile: PireEvalSessionBindingFile;
+	run: PireEvalRunBundle;
+	score: PireEvalRunScore;
+}> {
+	const result = await createPireEvalRunBundleFromBindingFile(options);
+	return {
+		...result,
+		score: scorePireEvalRunBundle(result.suite, result.run),
 	};
 }
 
