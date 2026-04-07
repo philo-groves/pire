@@ -73,12 +73,12 @@ describe("pire binary RE eval corpus", () => {
 				expect(task.requiredBugChainLength).toBeGreaterThanOrEqual(3);
 				expect(task.requiredBugClasses?.length).toBeGreaterThanOrEqual(task.requiredBugChainLength ?? 0);
 				expect(task.expected?.exploitability).toBe("chain");
+				expect(task.ctf?.requiredObjectives.length ?? 0).toBeGreaterThan(0);
+				expect(task.ctf?.flagId).toBeTruthy();
 			}
 			if (task.lane === "scenario") {
 				expect(task.entrySurface).toBeTruthy();
 				expect(task.goal).toBeTruthy();
-				expect(task.ctf?.requiredObjectives.length ?? 0).toBeGreaterThan(0);
-				expect(task.ctf?.flagId).toBeTruthy();
 				expect(task.successEvidence?.length ?? 0).toBeGreaterThan(0);
 				expect(task.forbiddenShortcuts?.length ?? 0).toBeGreaterThan(0);
 				expect(task.expected?.requiresProof).toBe(true);

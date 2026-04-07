@@ -35,6 +35,7 @@
 - Added a persisted scenario fixture suite plus pass / near-miss / fail `.pire` session cases so end-to-end scenario extraction, scoring, and CLI reporting can be exercised from disk instead of only through temporary test data.
 - Added an improved helper privilege-escalation iteration fixture alongside the original failing scenario, so evals can track fail -> near-miss movement on the same end-to-end path.
 - Tightened complex scenario evals into CTF-style objectives with required stage completion and captured-flag evidence, so scenario passes require explicit end-to-end exploitation artifacts instead of only high partial-credit scores.
+- Extended the same CTF-style objective and captured-flag contract to complex `chain` tasks, so all multi-stage exploit chains require explicit stage completion and proof artifacts instead of scoring well on partial reasoning alone.
 
 ### Changed
 
