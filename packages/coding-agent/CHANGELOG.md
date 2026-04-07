@@ -38,6 +38,7 @@
 - Extended the same CTF-style objective and captured-flag contract to complex `chain` tasks, so all multi-stage exploit chains require explicit stage completion and proof artifacts instead of scoring well on partial reasoning alone.
 - Added a persisted chain fixture suite with pass / near-miss / fail `.pire` session cases, and surfaced chain-task CTF gating issues in `pire-evals` case reports so multi-stage exploit-chain regressions are visible in the harness instead of staying buried in task definitions.
 - Extended `pire-evals` enforcement and baseline drift gating to scenario outcome counts as well, so CI can fail directly on scenario pass / near-miss / fail regressions instead of relying only on aggregate score movement.
+- Added real outcome expectations to the persisted chain and scenario fixture metadata, so the shipped eval corpus now carries baseline-ready pass / near-miss / fail gates in `case.json` and `cases.json` instead of relying only on synthetic regression tests.
 
 ### Changed
 

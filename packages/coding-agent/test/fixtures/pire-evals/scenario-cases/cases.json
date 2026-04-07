@@ -1,3 +1,13 @@
 {
-  "title": "Scenario fixture session cases"
+  "title": "Scenario fixture session cases",
+  "expectation": {
+    "minAverageNormalized": 0.7,
+    "maxAverageIssues": 0,
+    "maxRegressions": 0,
+    "minCases": 3,
+    "maxCases": 3,
+    "minScenarioPassed": 1,
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 1
+  }
 }

@@ -1,3 +1,11 @@
 {
-  "title": "Parser-to-vtable chain pass"
+  "title": "Parser-to-vtable chain pass",
+  "expectation": {
+    "minNormalized": 0.95,
+    "maxIssues": 0,
+    "maxRank": 1,
+    "minChainPassed": 1,
+    "maxChainNearMiss": 0,
+    "maxChainFailed": 0
+  }
 }
