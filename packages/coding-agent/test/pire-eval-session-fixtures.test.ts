@@ -6,6 +6,7 @@ import { createPireEvalRunBundleFromBindingFile, scorePireEvalSessionFromFiles }
 
 const FIXTURE_DIR = join(process.cwd(), "test", "fixtures", "pire-evals");
 const SUITE_PATH = join(FIXTURE_DIR, "binary-re-starter-suite.json");
+const CHAIN_SUITE_PATH = join(FIXTURE_DIR, "chain-suite.json");
 const SCENARIO_SUITE_PATH = join(FIXTURE_DIR, "scenario-suite.json");
 
 async function loadExpectedRun(caseRoot: string, caseName: string) {
@@ -34,6 +35,20 @@ describe("pire eval session fixtures", () => {
 			const result = await createPireEvalRunBundleFromBindingFile({
 				cwd,
 				suitePath: SCENARIO_SUITE_PATH,
+				bindingsPath: join(cwd, "bindings.json"),
+			});
+
+			expect(result.run).toEqual(await loadExpectedRun(caseRoot, caseName));
+		}
+	});
+
+	test("extracts stable run bundles from pass, near-miss, and fail chain fixture sessions", async () => {
+		const caseRoot = join(FIXTURE_DIR, "chain-cases");
+		for (const caseName of ["parser-vtable-pass", "helper-pivot-near-miss", "browser-escape-fail"]) {
+			const cwd = join(caseRoot, caseName);
+			const result = await createPireEvalRunBundleFromBindingFile({
+				cwd,
+				suitePath: CHAIN_SUITE_PATH,
 				bindingsPath: join(cwd, "bindings.json"),
 			});
 
@@ -133,5 +148,49 @@ describe("pire eval session fixtures", () => {
 		expect(iterationResult.score.taskScores[0]?.normalized).toBeGreaterThan(
 			originalFailResult.score.taskScores[0]?.normalized ?? 0,
 		);
+	});
+
+	test("scores chain fixture sessions into pass, near-miss, and fail order", async () => {
+		const caseRoot = join(FIXTURE_DIR, "chain-cases");
+		const passCase = join(caseRoot, "parser-vtable-pass");
+		const nearMissCase = join(caseRoot, "helper-pivot-near-miss");
+		const failCase = join(caseRoot, "browser-escape-fail");
+
+		const passResult = await scorePireEvalSessionFromFiles({
+			cwd: passCase,
+			suitePath: CHAIN_SUITE_PATH,
+			bindingsPath: join(passCase, "bindings.json"),
+		});
+		const nearMissResult = await scorePireEvalSessionFromFiles({
+			cwd: nearMissCase,
+			suitePath: CHAIN_SUITE_PATH,
+			bindingsPath: join(nearMissCase, "bindings.json"),
+		});
+		const failResult = await scorePireEvalSessionFromFiles({
+			cwd: failCase,
+			suitePath: CHAIN_SUITE_PATH,
+			bindingsPath: join(failCase, "bindings.json"),
+		});
+
+		expect(passResult.bindingFile.runId).toBe("chain-vtable-001");
+		expect(nearMissResult.bindingFile.runId).toBe("chain-helper-001");
+		expect(failResult.bindingFile.runId).toBe("chain-browser-001");
+		expect(passResult.score.taskScores).toHaveLength(1);
+		expect(nearMissResult.score.taskScores).toHaveLength(1);
+		expect(failResult.score.taskScores).toHaveLength(1);
+		expect(passResult.score.issues).toContain("missing submissions for 2 task(s)");
+		expect(nearMissResult.score.issues).toContain("missing submissions for 2 task(s)");
+		expect(failResult.score.issues).toContain("missing submissions for 2 task(s)");
+		expect(passResult.score.taskScores[0]?.issues).toEqual([]);
+		expect(nearMissResult.score.taskScores[0]?.issues).toEqual([
+			"missing required objectives: privileged-pivot",
+			"ctf task requires captured flag evidence for FLAG_CHAIN_PRIVESC",
+		]);
+		expect(failResult.score.taskScores[0]?.issues).toEqual([
+			"missing required objectives: cross-component-write, sandbox-pivot, escape-control",
+			"ctf task requires captured flag evidence for FLAG_CHAIN_BROWSER_ESCAPE",
+		]);
+		expect(passResult.score.earned).toBeGreaterThan(nearMissResult.score.earned);
+		expect(nearMissResult.score.earned).toBeGreaterThan(failResult.score.earned);
 	});
 });

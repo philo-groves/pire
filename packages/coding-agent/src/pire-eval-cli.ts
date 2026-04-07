@@ -291,6 +291,17 @@ function filterExpectedMissingSubmissionIssues(params: {
 	return params.issues.filter((issue) => issue !== expectedIssue);
 }
 
+function collectChainTaskIssues(
+	taskScores: Array<{
+		lane: PireEvalLane;
+		issues: string[];
+	}>,
+): string[] {
+	return [
+		...new Set(taskScores.filter((taskScore) => taskScore.lane === "chain").flatMap((taskScore) => taskScore.issues)),
+	];
+}
+
 function printHelp(): void {
 	process.stdout.write(`pire-evals - score binary RE eval session directories
 
@@ -906,6 +917,7 @@ async function collectCaseScores(
 			suiteTaskCount: result.suite.tasks.length,
 			boundTaskCount: result.bindingFile.bindings.length,
 		});
+		const chainTaskIssues = collectChainTaskIssues(result.score.taskScores);
 		scores.push({
 			caseName,
 			runId: result.run.runId,
@@ -914,7 +926,7 @@ async function collectCaseScores(
 			normalized: result.score.normalized,
 			scoredTasks: result.score.taskScores.length,
 			missingTasks: result.score.missingTaskIds.length,
-			issues: filteredIssues,
+			issues: [...filteredIssues, ...chainTaskIssues],
 			expectation: definition?.expectation,
 			severityThresholds: mergeSeverityThresholds(
 				resolveDefaultSeverityThresholdsForTasks(caseTaskDescriptors),

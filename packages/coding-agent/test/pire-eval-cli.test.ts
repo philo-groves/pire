@@ -120,6 +120,60 @@ describe("pire eval cli", () => {
 		});
 	});
 
+	test("scores persisted chain fixture cases and surfaces CTF gating issues for incomplete chains", async () => {
+		const result = await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "chain-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "chain-cases"),
+				"--json",
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		const parsed = JSON.parse(result.stdout) as {
+			scores: Array<{ caseName: string; normalized: number; issues: string[] }>;
+			suite: {
+				cases: number;
+				averageNormalized: number;
+				averageIssues: number;
+				scenarioSummary: { scored: number; passed: number; nearMiss: number; failed: number };
+			};
+		};
+
+		expect(parsed.suite.cases).toBe(3);
+		expect(parsed.suite.averageNormalized).toBeGreaterThan(0.65);
+		expect(parsed.suite.averageIssues).toBeGreaterThan(0);
+		expect(parsed.scores.map((score) => score.caseName)).toEqual([
+			"parser-vtable-pass",
+			"helper-pivot-near-miss",
+			"browser-escape-fail",
+		]);
+		expect(parsed.scores[0]?.issues).toEqual([]);
+		expect(parsed.scores[1]?.issues).toEqual([
+			"missing required objectives: privileged-pivot",
+			"ctf task requires captured flag evidence for FLAG_CHAIN_PRIVESC",
+		]);
+		expect(parsed.scores[2]?.issues).toEqual([
+			"missing required objectives: cross-component-write, sandbox-pivot, escape-control",
+			"ctf task requires captured flag evidence for FLAG_CHAIN_BROWSER_ESCAPE",
+		]);
+		expect(parsed.scores[0]?.normalized).toBeGreaterThan(parsed.scores[1]?.normalized ?? 0);
+		expect(parsed.scores[1]?.normalized).toBeGreaterThan(parsed.scores[2]?.normalized ?? 0);
+		expect(parsed.suite.scenarioSummary).toEqual({
+			scored: 0,
+			passed: 0,
+			nearMiss: 0,
+			failed: 0,
+		});
+	});
+
 	test("highlights scenario pass and near-miss outcomes separately from generic scores", async () => {
 		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-scenario-summary-"));
 		const suitePath = join(tempDir, "scenario-suite.json");

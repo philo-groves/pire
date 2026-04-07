@@ -36,6 +36,7 @@
 - Added an improved helper privilege-escalation iteration fixture alongside the original failing scenario, so evals can track fail -> near-miss movement on the same end-to-end path.
 - Tightened complex scenario evals into CTF-style objectives with required stage completion and captured-flag evidence, so scenario passes require explicit end-to-end exploitation artifacts instead of only high partial-credit scores.
 - Extended the same CTF-style objective and captured-flag contract to complex `chain` tasks, so all multi-stage exploit chains require explicit stage completion and proof artifacts instead of scoring well on partial reasoning alone.
+- Added a persisted chain fixture suite with pass / near-miss / fail `.pire` session cases, and surfaced chain-task CTF gating issues in `pire-evals` case reports so multi-stage exploit-chain regressions are visible in the harness instead of staying buried in task definitions.
 
 ### Changed
 

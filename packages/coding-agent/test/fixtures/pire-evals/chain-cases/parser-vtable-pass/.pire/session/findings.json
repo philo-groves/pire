@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T19:20:00.000Z",
+  "findings": [
+    {
+      "id": "find-chain-vtable-001",
+      "title": "Parser leak-to-vtable chain reaches controlled virtual dispatch",
+      "status": "reported",
+      "severity": "critical",
+      "statement": "A parser disclosure is chained into heap corruption and a controlled virtual dispatch in the stripped target.",
+      "basis": ["ev-chain-vtable-001"],
+      "relatedEvidenceIds": ["ev-chain-vtable-001"],
+      "relatedArtifactIds": ["artifact:/tmp/chain-vtable.log", "artifact:/tmp/chain-vtable-proof.txt"],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T19:11:00.000Z",
+      "updatedAt": "2026-04-07T19:18:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-chain-vtable-001",
+      "kind": "tool-result",
+      "summary": "gdb trace confirms parser leak, heap overwrite, and vtable dispatch control",
+      "commandId": "tool:bash:chain-vtable-01",
+      "artifactIds": ["artifact:/tmp/chain-vtable.log", "artifact:/tmp/chain-vtable-proof.txt"],
+      "supports": ["find-chain-vtable-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T19:13:00.000Z"
+    }
+  ]
+}
