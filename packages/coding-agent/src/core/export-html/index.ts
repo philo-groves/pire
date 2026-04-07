@@ -4,6 +4,7 @@ import { basename, join } from "path";
 import { APP_NAME, getExportTemplateDir } from "../../config.js";
 import { getResolvedThemeColors, getThemeExportColors } from "../../modes/interactive/theme/theme.js";
 import type { ToolDefinition } from "../extensions/types.js";
+import { isImplicitContinuationEntry } from "../implicit-continuation.js";
 import type { SessionEntry } from "../session-manager.js";
 import { SessionManager } from "../session-manager.js";
 
@@ -248,11 +249,12 @@ export async function exportSessionToHtml(
 	}
 
 	const entries = sm.getEntries();
+	const visibleEntries = entries.filter((entry) => !isImplicitContinuationEntry(entry));
 
 	// Pre-render custom tools if a tool renderer is provided
 	let renderedTools: Record<string, RenderedToolHtml> | undefined;
 	if (opts.toolRenderer) {
-		renderedTools = preRenderCustomTools(entries, opts.toolRenderer);
+		renderedTools = preRenderCustomTools(visibleEntries, opts.toolRenderer);
 		// Only include if we actually rendered something
 		if (Object.keys(renderedTools).length === 0) {
 			renderedTools = undefined;
@@ -261,7 +263,7 @@ export async function exportSessionToHtml(
 
 	const sessionData: SessionData = {
 		header: sm.getHeader(),
-		entries,
+		entries: visibleEntries,
 		leafId: sm.getLeafId(),
 		systemPrompt: state?.systemPrompt,
 		tools: state?.tools?.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters })),
@@ -295,7 +297,7 @@ export async function exportFromFile(inputPath: string, options?: ExportOptions 
 
 	const sessionData: SessionData = {
 		header: sm.getHeader(),
-		entries: sm.getEntries(),
+		entries: sm.getEntries().filter((entry) => !isImplicitContinuationEntry(entry)),
 		leafId: sm.getLeafId(),
 		systemPrompt: undefined,
 		tools: undefined,

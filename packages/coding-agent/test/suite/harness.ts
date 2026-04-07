@@ -12,6 +12,7 @@ import { registerFauxProvider } from "@mariozechner/pi-ai";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.js";
 import { AuthStorage } from "../../src/core/auth-storage.js";
 import type { ExtensionRunner } from "../../src/core/extensions/index.js";
+import { isImplicitContinuationUserMessage } from "../../src/core/implicit-continuation.js";
 import { convertToLlm } from "../../src/core/messages.js";
 import { ModelRegistry } from "../../src/core/model-registry.js";
 import { SessionManager } from "../../src/core/session-manager.js";
@@ -45,7 +46,7 @@ export function getMessageText(message: unknown): string {
 
 export function getUserTexts(harness: Harness): string[] {
 	return harness.session.messages
-		.filter((message) => message.role === "user")
+		.filter((message) => message.role === "user" && !isImplicitContinuationUserMessage(message))
 		.map((message) => getMessageText(message));
 }
 

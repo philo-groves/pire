@@ -67,6 +67,11 @@ import {
 	type TurnStartEvent,
 	wrapRegisteredTools,
 } from "./extensions/index.js";
+import {
+	extractTextContent,
+	IMPLICIT_CONTINUATION_MESSAGE,
+	isImplicitContinuationUserMessage,
+} from "./implicit-continuation.js";
 import type { BashExecutionMessage, CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
@@ -225,6 +230,10 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 /** Thinking levels including xhigh (for supported models) */
 const THINKING_LEVELS_WITH_XHIGH: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
+const MAX_IMPLICIT_CONTINUATIONS_PER_PROMPT = 1;
+const IMPLICIT_CONTINUATION_PREFIX =
+	/^(?:let me|i(?:'ll| will)\b|i am going to\b|next,?\s+i(?:'ll| will)\b|first,?\s+i(?:'ll| will)\b)/i;
+
 // ============================================================================
 // AgentSession Class
 // ============================================================================
@@ -261,6 +270,9 @@ export class AgentSession {
 	private _retryAttempt = 0;
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
+	private _implicitContinuationPromise: Promise<void> | undefined = undefined;
+	private _implicitContinuationResolve: (() => void) | undefined = undefined;
+	private _implicitContinuationCount = 0;
 
 	// Bash execution state
 	private _bashAbortController: AbortController | undefined = undefined;
@@ -566,6 +578,7 @@ export class AgentSession {
 
 			this._resolveRetry();
 			await this._checkCompaction(msg);
+			await this._maybeStartImplicitContinuation(msg);
 		}
 	}
 
@@ -578,13 +591,84 @@ export class AgentSession {
 		}
 	}
 
+	private _resolveImplicitContinuation(): void {
+		if (this._implicitContinuationResolve) {
+			this._implicitContinuationResolve();
+			this._implicitContinuationResolve = undefined;
+			this._implicitContinuationPromise = undefined;
+		}
+	}
+
 	/** Extract text content from a message */
 	private _getUserMessageText(message: Message): string {
 		if (message.role !== "user") return "";
-		const content = message.content;
-		if (typeof content === "string") return content;
-		const textBlocks = content.filter((c) => c.type === "text");
-		return textBlocks.map((c) => (c as TextContent).text).join("");
+		return extractTextContent(message.content);
+	}
+
+	private _getAssistantText(message: AssistantMessage): string {
+		return message.content
+			.filter((content): content is TextContent => content.type === "text")
+			.map((content) => content.text)
+			.join("\n")
+			.trim();
+	}
+
+	private _shouldImplicitlyContinue(message: AssistantMessage): boolean {
+		if (this._implicitContinuationCount >= MAX_IMPLICIT_CONTINUATIONS_PER_PROMPT) {
+			return false;
+		}
+		if (this._retryPromise || this.agent.hasQueuedMessages()) {
+			return false;
+		}
+		if (message.stopReason === "error" || message.stopReason === "aborted" || message.stopReason === "toolUse") {
+			return false;
+		}
+		if (message.content.some((content) => content.type === "toolCall")) {
+			return false;
+		}
+		if (message.stopReason === "length") {
+			return true;
+		}
+
+		const text = this._getAssistantText(message).replace(/\s+/g, " ").trim();
+		if (text.length === 0 || text.length > 160) {
+			return false;
+		}
+		if (text.endsWith("?")) {
+			return false;
+		}
+
+		return IMPLICIT_CONTINUATION_PREFIX.test(text);
+	}
+
+	private async _maybeStartImplicitContinuation(message: AssistantMessage): Promise<void> {
+		if (!this._shouldImplicitlyContinue(message)) {
+			return;
+		}
+		if (this._implicitContinuationPromise) {
+			return;
+		}
+
+		this._implicitContinuationCount++;
+		this.agent.followUp({
+			role: "user",
+			content: [{ type: "text", text: IMPLICIT_CONTINUATION_MESSAGE }],
+			timestamp: Date.now(),
+		});
+		this._implicitContinuationPromise = new Promise((resolve) => {
+			this._implicitContinuationResolve = resolve;
+		});
+
+		setTimeout(() => {
+			this.agent
+				.continue()
+				.catch(() => {
+					// Failure is surfaced by the follow-on run itself.
+				})
+				.finally(() => {
+					this._resolveImplicitContinuation();
+				});
+		}, 0);
 	}
 
 	/** Find the last assistant message in agent state (including aborted ones) */
@@ -927,6 +1011,7 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
+		this._implicitContinuationCount = 0;
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 
 		// Handle extension commands first (execute immediately, even during streaming)
@@ -1062,7 +1147,7 @@ export class AgentSession {
 		}
 
 		await this.agent.prompt(messages);
-		await this.waitForRetry();
+		await this._waitForFollowOnWork();
 	}
 
 	/**
@@ -2494,6 +2579,16 @@ export class AgentSession {
 		await this.agent.waitForIdle();
 	}
 
+	private async _waitForFollowOnWork(): Promise<void> {
+		while (true) {
+			await this.waitForRetry();
+			if (!this._implicitContinuationPromise) {
+				return;
+			}
+			await this._implicitContinuationPromise;
+		}
+	}
+
 	/** Whether auto-retry is currently in progress */
 	get isRetrying(): boolean {
 		return this._retryPromise !== undefined;
@@ -2833,6 +2928,7 @@ export class AgentSession {
 		for (const entry of entries) {
 			if (entry.type !== "message") continue;
 			if (entry.message.role !== "user") continue;
+			if (isImplicitContinuationUserMessage(entry.message)) continue;
 
 			const text = this._extractUserMessageText(entry.message.content);
 			if (text) {
@@ -2859,7 +2955,9 @@ export class AgentSession {
 	 */
 	getSessionStats(): SessionStats {
 		const state = this.state;
-		const userMessages = state.messages.filter((m) => m.role === "user").length;
+		const userMessages = state.messages.filter(
+			(m) => m.role === "user" && !isImplicitContinuationUserMessage(m),
+		).length;
 		const assistantMessages = state.messages.filter((m) => m.role === "assistant").length;
 		const toolResults = state.messages.filter((m) => m.role === "toolResult").length;
 
