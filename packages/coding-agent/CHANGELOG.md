@@ -33,6 +33,7 @@
 - Added a `scenario` eval lane plus three end-to-end binary RE scenarios that require entry-to-goal exploitation chains with explicit success evidence, forbidden shortcuts, and proof-backed completion criteria.
 - Updated `pire-evals` reports and JSON output to surface scenario outcomes separately, including pass / near-miss / fail counts per case and at the suite level so end-to-end scenario progress is visible apart from lighter RE task scores.
 - Added a persisted scenario fixture suite plus pass / near-miss / fail `.pire` session cases so end-to-end scenario extraction, scoring, and CLI reporting can be exercised from disk instead of only through temporary test data.
+- Added an improved helper privilege-escalation iteration fixture alongside the original failing scenario, so evals can track fail -> near-miss movement on the same end-to-end path.
 
 ### Changed
 

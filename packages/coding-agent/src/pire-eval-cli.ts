@@ -255,6 +255,21 @@ function formatScenarioSummary(summary: PireEvalScenarioSummary): string {
 	return `scored=${summary.scored}, pass=${summary.passed}, near-miss=${summary.nearMiss}, fail=${summary.failed}`;
 }
 
+function filterExpectedMissingSubmissionIssues(params: {
+	issues: string[];
+	missingTaskCount: number;
+	suiteTaskCount: number;
+	boundTaskCount: number;
+}): string[] {
+	const expectedMissingTaskCount = params.suiteTaskCount - params.boundTaskCount;
+	if (params.boundTaskCount <= 0 || params.missingTaskCount !== expectedMissingTaskCount) {
+		return params.issues;
+	}
+
+	const expectedIssue = `missing submissions for ${params.missingTaskCount} task(s)`;
+	return params.issues.filter((issue) => issue !== expectedIssue);
+}
+
 function printHelp(): void {
 	process.stdout.write(`pire-evals - score binary RE eval session directories
 
@@ -864,6 +879,12 @@ async function collectCaseScores(
 				focus: "focus" in task ? task.focus : undefined,
 			}));
 		suiteTaskDescriptors.push(...caseTaskDescriptors);
+		const filteredIssues = filterExpectedMissingSubmissionIssues({
+			issues: result.score.issues,
+			missingTaskCount: result.score.missingTaskIds.length,
+			suiteTaskCount: result.suite.tasks.length,
+			boundTaskCount: result.bindingFile.bindings.length,
+		});
 		scores.push({
 			caseName,
 			runId: result.run.runId,
@@ -872,7 +893,7 @@ async function collectCaseScores(
 			normalized: result.score.normalized,
 			scoredTasks: result.score.taskScores.length,
 			missingTasks: result.score.missingTaskIds.length,
-			issues: result.score.issues,
+			issues: filteredIssues,
 			expectation: definition?.expectation,
 			severityThresholds: mergeSeverityThresholds(
 				resolveDefaultSeverityThresholdsForTasks(caseTaskDescriptors),

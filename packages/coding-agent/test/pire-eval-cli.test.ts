@@ -68,7 +68,7 @@ describe("pire eval cli", () => {
 		expect(parsed.scores).toHaveLength(2);
 		expect(parsed.suite.cases).toBe(2);
 		expect(parsed.suite.averageNormalized).toBeGreaterThan(0);
-		expect(parsed.suite.averageIssues).toBeGreaterThan(0);
+		expect(parsed.suite.averageIssues).toBe(0);
 		expect(parsed.scores[0]?.caseName).toBe("heap-disasm-confirmed");
 		expect(parsed.scores[1]?.caseName).toBe("toctou-candidate");
 		expect(parsed.scores[0]?.normalized).toBeGreaterThanOrEqual(parsed.scores[1]?.normalized ?? 0);
@@ -82,6 +82,42 @@ describe("pire eval cli", () => {
 		});
 		expect(parsed.suite.regressions).toEqual([]);
 		expect(parsed.scores.every((score) => score.regressions.length === 0)).toBe(true);
+	});
+
+	test("suppresses expected missing-submission noise for subset-bound case runs", async () => {
+		const result = await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "scenario-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "scenario-cases"),
+				"--json",
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		const parsed = JSON.parse(result.stdout) as {
+			scores: Array<{
+				caseName: string;
+				issues: string[];
+				scenarioSummary: { passed: number; nearMiss: number; failed: number };
+			}>;
+			suite: { averageIssues: number; scenarioSummary: { passed: number; nearMiss: number; failed: number } };
+		};
+
+		expect(parsed.suite.averageIssues).toBe(0);
+		expect(parsed.scores.every((score) => score.issues.length === 0)).toBe(true);
+		expect(parsed.suite.scenarioSummary).toEqual({
+			scored: 3,
+			passed: 1,
+			nearMiss: 1,
+			failed: 1,
+		});
 	});
 
 	test("highlights scenario pass and near-miss outcomes separately from generic scores", async () => {

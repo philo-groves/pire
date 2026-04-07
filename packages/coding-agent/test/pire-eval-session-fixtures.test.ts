@@ -41,6 +41,19 @@ describe("pire eval session fixtures", () => {
 		}
 	});
 
+	test("extracts a stable improved helper scenario iteration fixture", async () => {
+		const caseRoot = join(FIXTURE_DIR, "scenario-cases-iteration");
+		const caseName = "helper-privesc-near-miss";
+		const cwd = join(caseRoot, caseName);
+		const result = await createPireEvalRunBundleFromBindingFile({
+			cwd,
+			suitePath: SCENARIO_SUITE_PATH,
+			bindingsPath: join(cwd, "bindings.json"),
+		});
+
+		expect(result.run).toEqual(await loadExpectedRun(caseRoot, caseName));
+	});
+
 	test("scores fixture sessions directly from suite, bindings, and persisted .pire state", async () => {
 		const heapCase = join(FIXTURE_DIR, "session-cases", "heap-disasm-confirmed");
 		const toctouCase = join(FIXTURE_DIR, "session-cases", "toctou-candidate");
@@ -98,5 +111,27 @@ describe("pire eval session fixtures", () => {
 		expect(rendererResult.score.earned).toBeGreaterThan(networkResult.score.earned);
 		expect(networkResult.score.earned).toBeGreaterThan(helperResult.score.earned);
 		expect(rendererResult.score.issues).toContain("missing submissions for 2 task(s)");
+	});
+
+	test("scores the improved helper iteration above the original fail fixture", async () => {
+		const originalFailCase = join(FIXTURE_DIR, "scenario-cases", "helper-privesc-fail");
+		const iterationCase = join(FIXTURE_DIR, "scenario-cases-iteration", "helper-privesc-near-miss");
+
+		const originalFailResult = await scorePireEvalSessionFromFiles({
+			cwd: originalFailCase,
+			suitePath: SCENARIO_SUITE_PATH,
+			bindingsPath: join(originalFailCase, "bindings.json"),
+		});
+		const iterationResult = await scorePireEvalSessionFromFiles({
+			cwd: iterationCase,
+			suitePath: SCENARIO_SUITE_PATH,
+			bindingsPath: join(iterationCase, "bindings.json"),
+		});
+
+		expect(iterationResult.bindingFile.runId).toBe("scenario-helper-iteration-001");
+		expect(iterationResult.score.earned).toBeGreaterThan(originalFailResult.score.earned);
+		expect(iterationResult.score.taskScores[0]?.normalized).toBeGreaterThan(
+			originalFailResult.score.taskScores[0]?.normalized ?? 0,
+		);
 	});
 });
