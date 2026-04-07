@@ -71,6 +71,9 @@ describe("pire extension mode and tool gating", () => {
 		"binary_objdump",
 		"binary_nm",
 		"binary_xxd",
+		"net_curl_head",
+		"net_tshark_summary",
+		"net_tshark_follow",
 	];
 	const expectedDynamicOnlyTools = ["debug_gdb", "debug_lldb", "debug_strace", "debug_ltrace"];
 	const expectedDynamicTools = [...expectedReconTools, ...expectedDynamicOnlyTools];

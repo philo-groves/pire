@@ -19,6 +19,13 @@ import {
 	type DebugToolDetails,
 } from "./debug.js";
 import {
+	runNetCurlHead,
+	runNetTsharkFollow,
+	runNetTsharkSummary,
+	type NetArtifactObservation,
+	type NetToolDetails,
+} from "./net.js";
+import {
 	buildArtifactManifestSummary,
 	loadArtifactManifest,
 	recordArtifact,
@@ -53,6 +60,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"binary_objdump",
 		"binary_nm",
 		"binary_xxd",
+		"net_curl_head",
+		"net_tshark_summary",
+		"net_tshark_follow",
 	],
 	dynamic: [
 		"read",
@@ -67,6 +77,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"binary_objdump",
 		"binary_nm",
 		"binary_xxd",
+		"net_curl_head",
+		"net_tshark_summary",
+		"net_tshark_follow",
 		"debug_gdb",
 		"debug_lldb",
 		"debug_strace",
@@ -87,6 +100,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"binary_objdump",
 		"binary_nm",
 		"binary_xxd",
+		"net_curl_head",
+		"net_tshark_summary",
+		"net_tshark_follow",
 		"debug_gdb",
 		"debug_lldb",
 		"debug_strace",
@@ -107,6 +123,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"binary_objdump",
 		"binary_nm",
 		"binary_xxd",
+		"net_curl_head",
+		"net_tshark_summary",
+		"net_tshark_follow",
 	],
 };
 
@@ -272,6 +291,13 @@ function getDebugToolDetails(eventDetails: unknown): DebugToolDetails | undefine
 		return undefined;
 	}
 	return eventDetails as DebugToolDetails;
+}
+
+function getNetToolDetails(eventDetails: unknown): NetToolDetails | undefined {
+	if (!eventDetails || typeof eventDetails !== "object" || !("artifacts" in eventDetails)) {
+		return undefined;
+	}
+	return eventDetails as NetToolDetails;
 }
 
 export default function pireExtension(pi: ExtensionAPI): void {
@@ -658,6 +684,97 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerTool({
+		name: "net_curl_head",
+		label: "Net Curl Head",
+		description: "Fetch bounded HTTP response headers and persist the capture as an artifact log.",
+		promptSnippet: "Use net_curl_head for bounded HTTP header inspection.",
+		promptGuidelines: ["Use net_curl_head for sanctioned HTTP inspection without falling back to raw bash."],
+		parameters: Type.Object({
+			url: Type.String({ description: "URL to inspect." }),
+			followRedirects: Type.Optional(Type.Boolean({ default: true })),
+			maxTimeSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 60, default: 10 })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const details = await runNetCurlHead(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				params.url,
+				{
+					followRedirects: params.followRedirects ?? true,
+					maxTimeSeconds: params.maxTimeSeconds ?? 10,
+				},
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "net_tshark_summary",
+		label: "Net Tshark Summary",
+		description: "Summarize a PCAP with tshark and persist the resulting summary log as an artifact.",
+		promptSnippet: "Use net_tshark_summary for structured PCAP summaries.",
+		promptGuidelines: ["Use net_tshark_summary for protocol hierarchy, endpoint, or conversation summaries from a PCAP."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the PCAP to inspect." }),
+			view: Type.Optional(
+				Type.Union([
+					Type.Literal("protocol-hierarchy"),
+					Type.Literal("endpoints-ip"),
+					Type.Literal("conversations-ip"),
+				]),
+			),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runNetTsharkSummary(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				{ view: params.view ?? "protocol-hierarchy" },
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "net_tshark_follow",
+		label: "Net Tshark Follow",
+		description: "Follow a stream from a PCAP with tshark and persist the decoded stream as an artifact log.",
+		promptSnippet: "Use net_tshark_follow to decode a specific stream from a PCAP.",
+		promptGuidelines: ["Use net_tshark_follow when you need a bounded stream transcript from a PCAP."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the PCAP to inspect." }),
+			streamIndex: Type.Integer({ minimum: 0 }),
+			protocol: Type.Optional(Type.Union([Type.Literal("tcp"), Type.Literal("udp"), Type.Literal("http")])),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runNetTsharkFollow(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				{
+					streamIndex: params.streamIndex,
+					protocol: params.protocol ?? "tcp",
+				},
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
 	pi.registerCommand("mode", {
 		description: "Show or change pire mode: /mode [recon|dynamic|proofing|report]",
 		handler: async (args, ctx) => {
@@ -801,6 +918,18 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
 					type: artifact.type as ArtifactType | undefined,
 					command: artifact.command ?? debugDetails.commandString,
+					finding: artifact.finding,
+				});
+			}
+			return;
+		}
+
+		const netDetails = getNetToolDetails(event.details);
+		if (netDetails) {
+			for (const artifact of netDetails.artifacts as NetArtifactObservation[]) {
+				await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
+					type: artifact.type as ArtifactType | undefined,
+					command: artifact.command ?? netDetails.commandString,
 					finding: artifact.finding,
 				});
 			}
