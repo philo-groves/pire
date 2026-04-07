@@ -80,26 +80,44 @@ import {
 	type Severity,
 } from "./findings.js";
 import { collectEnvironmentInventory, formatInventorySummary, type EnvironmentInventory } from "./inventory.js";
-
-type PireMode = "recon" | "dynamic" | "proofing" | "report";
+import {
+	buildResearchCompactionSummary,
+	formatRolePrompt,
+	formatSessionTypePrompt,
+	getRoleProfile,
+	getSessionTypeProfile,
+	isPireRole,
+	isPireSessionType,
+	PIRE_ROLE_ORDER,
+	PIRE_SESSION_TYPE_ORDER,
+	type PireMode,
+	type PireRole,
+	type PireSessionType,
+	type PireToolActivity,
+	renderTrackerRecordDetail,
+} from "./research-runtime.js";
 
 interface PersistedModeState {
 	mode: PireMode;
 }
 
-interface PireToolActivity {
-	tool: string;
-	target: string;
-	summary: string;
-	artifacts: string[];
-	recordedAt: string;
+interface PersistedRoleState {
+	role: PireRole;
+}
+
+interface PersistedSessionTypeState {
+	sessionType: PireSessionType;
 }
 
 const MODE_ENTRY_TYPE = "pire-mode";
+const ROLE_ENTRY_TYPE = "pire-role";
+const SESSION_TYPE_ENTRY_TYPE = "pire-session-type";
 const ARTIFACT_ENTRY_TYPE = "pire-artifacts";
 const TRACKER_ENTRY_TYPE = "pire-findings-tracker";
 const TOOL_ACTIVITY_ENTRY_TYPE = "pire-tool-activity";
 const MODE_FLAG = "pire-mode";
+const ROLE_FLAG = "pire-role";
+const SESSION_TYPE_FLAG = "pire-session";
 const MODE_TOOLS: Record<PireMode, string[]> = {
 	recon: [
 		"research_tracker",
@@ -368,6 +386,14 @@ function updateStatus(ctx: ExtensionContext, mode: PireMode): void {
 	ctx.ui.setStatus("pire-mode", ctx.ui.theme.fg("accent", `mode:${mode}`));
 }
 
+function updateRoleStatus(ctx: ExtensionContext, role?: PireRole): void {
+	ctx.ui.setStatus("pire-role", role ? ctx.ui.theme.fg("accent", `role:${role}`) : undefined);
+}
+
+function updateSessionTypeStatus(ctx: ExtensionContext, sessionType?: PireSessionType): void {
+	ctx.ui.setStatus("pire-session-type", sessionType ? ctx.ui.theme.fg("accent", `session:${sessionType}`) : undefined);
+}
+
 function updateArtifactStatus(ctx: ExtensionContext, manifest: ArtifactManifest): void {
 	const summary = buildArtifactManifestSummary(manifest);
 	const typeParts = Object.entries(summary.byType)
@@ -450,8 +476,24 @@ function getUnpackToolDetails(eventDetails: unknown): UnpackToolDetails | undefi
 	return eventDetails as UnpackToolDetails;
 }
 
+function collectRecentActivityFromEntries(
+	entries: Array<{ type: string; customType?: string; data?: unknown }>,
+): PireToolActivity[] {
+	return entries
+		.flatMap((entry) => {
+			if (entry.type !== "custom" || entry.customType !== TOOL_ACTIVITY_ENTRY_TYPE || entry.data === undefined) {
+				return [];
+			}
+			return [entry.data as PireToolActivity];
+		})
+		.slice(-8)
+		.reverse();
+}
+
 export default function pireExtension(pi: ExtensionAPI): void {
 	let currentMode: PireMode = "recon";
+	let currentRole: PireRole | undefined;
+	let currentSessionType: PireSessionType | undefined;
 	let currentCwd = process.cwd();
 	let artifactManifest: ArtifactManifest = { version: 1, updatedAt: new Date().toISOString(), artifacts: [] };
 	let findingsTracker: FindingsTracker = {
@@ -474,6 +516,18 @@ export default function pireExtension(pi: ExtensionAPI): void {
 
 	const persistMode = (): void => {
 		pi.appendEntry<PersistedModeState>(MODE_ENTRY_TYPE, { mode: currentMode });
+	};
+
+	const persistRole = (): void => {
+		if (currentRole) {
+			pi.appendEntry<PersistedRoleState>(ROLE_ENTRY_TYPE, { role: currentRole });
+		}
+	};
+
+	const persistSessionType = (): void => {
+		if (currentSessionType) {
+			pi.appendEntry<PersistedSessionTypeState>(SESSION_TYPE_ENTRY_TYPE, { sessionType: currentSessionType });
+		}
 	};
 
 	const persistArtifacts = async (): Promise<void> => {
@@ -504,12 +558,61 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		currentMode = mode;
 		pi.setActiveTools(MODE_TOOLS[mode]);
 		updateStatus(ctx, mode);
+		updateRoleStatus(ctx, currentRole);
+		updateSessionTypeStatus(ctx, currentSessionType);
 		updateArtifactStatus(ctx, artifactManifest);
 		updateTrackerStatus(ctx, findingsTracker);
 		updateActivityStatus(ctx, lastActivity);
 		persistMode();
 		if (options?.notify !== false) {
 			ctx.ui.notify(`pire mode: ${mode}`, "info");
+		}
+	};
+
+	const applyRole = (ctx: ExtensionContext, role: PireRole, options?: { notify?: boolean }): void => {
+		currentRole = role;
+		updateRoleStatus(ctx, role);
+		persistRole();
+		if (options?.notify !== false) {
+			ctx.ui.notify(`pire role: ${getRoleProfile(role).label}`, "info");
+		}
+	};
+
+	const tryApplySessionTypeModel = async (ctx: ExtensionContext, sessionType: PireSessionType): Promise<void> => {
+		const profile = getSessionTypeProfile(sessionType);
+		for (const modelHint of profile.modelHints) {
+			for (const provider of ["anthropic", "google", "openai", "openai-codex"] as const) {
+				const model = ctx.modelRegistry.find(provider, modelHint);
+				if (!model) {
+					continue;
+				}
+				const didSet = await pi.setModel(model);
+				if (didSet) {
+					return;
+				}
+			}
+		}
+	};
+
+	const applySessionType = async (
+		ctx: ExtensionContext,
+		sessionType: PireSessionType,
+		options?: { notify?: boolean; preserveRole?: boolean },
+	): Promise<void> => {
+		const profile = getSessionTypeProfile(sessionType);
+		currentSessionType = sessionType;
+		pi.setThinkingLevel(profile.thinkingLevel);
+		applyMode(ctx, profile.defaultMode, { notify: false });
+		if (!options?.preserveRole) {
+			applyRole(ctx, profile.defaultRole, { notify: false });
+		} else {
+			updateRoleStatus(ctx, currentRole);
+		}
+		updateSessionTypeStatus(ctx, sessionType);
+		persistSessionType();
+		void tryApplySessionTypeModel(ctx, sessionType);
+		if (options?.notify !== false) {
+			ctx.ui.notify(`pire session type: ${profile.label}`, "info");
 		}
 	};
 
@@ -634,10 +737,43 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			},
 			{ triggerTurn: false },
 		);
+		};
+
+	const showHandoff = (ctx: ExtensionContext): void => {
+		const content = buildResearchCompactionSummary({
+			mode: currentMode,
+			role: currentRole,
+			sessionType: currentSessionType,
+			tracker: findingsTracker,
+			manifest: artifactManifest,
+			recentActivity: collectRecentActivityFromEntries(ctx.sessionManager.getEntries()),
+		});
+		pi.sendMessage(
+			{
+				customType: "pire-handoff",
+				content,
+				display: true,
+				details: {
+					mode: currentMode,
+					role: currentRole,
+					sessionType: currentSessionType,
+				},
+			},
+			{ triggerTurn: false },
+		);
 	};
 
 	pi.registerFlag(MODE_FLAG, {
 		description: "Start pire in a specific mode: recon, dynamic, proofing, report",
+		type: "string",
+	});
+	pi.registerFlag(ROLE_FLAG, {
+		description: "Start pire in a specific role: scout, reverser, tracer, fuzzer, reviewer, writer",
+		type: "string",
+	});
+	pi.registerFlag(SESSION_TYPE_FLAG, {
+		description:
+			"Start pire in a specific session type: binary-re, crash-triage, network-protocol, firmware-analysis, web-security-review, malware-analysis",
 		type: "string",
 	});
 
@@ -1576,13 +1712,199 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("tracker-detail", {
+		description: "Show one tracker record with linked evidence, artifacts, and questions",
+		handler: async (args) => {
+			const id = args.trim();
+			if (!id) {
+				pi.sendMessage({ customType: "pire-tracker-detail", content: "Usage: /tracker-detail <record-id>", display: true }, { triggerTurn: false });
+				return;
+			}
+			pi.sendMessage(
+				{
+					customType: "pire-tracker-detail",
+					content: renderTrackerRecordDetail(findingsTracker, id),
+					display: true,
+				},
+				{ triggerTurn: false },
+			);
+		},
+	});
+
+	pi.registerCommand("support-hypothesis", {
+		description: "Mark a hypothesis supported and attach evidence IDs: /support-hypothesis <hyp-id> <ev-id...>",
+		handler: async (args, ctx) => {
+			const parts = args.trim().split(/\s+/).filter((part) => part.length > 0);
+			if (parts.length < 2) {
+				ctx.ui.notify("Usage: /support-hypothesis <hyp-id> <ev-id...>", "warning");
+				return;
+			}
+			const [id, ...evidenceIds] = parts;
+			const record = updateHypothesis(findingsTracker, { id, status: "supported", addEvidenceIds: evidenceIds });
+			if (!record) {
+				ctx.ui.notify(`Unknown hypothesis: ${id}`, "error");
+				return;
+			}
+			await persistTracker();
+			syncTrackerUI(ctx);
+			ctx.ui.notify(`Supported ${record.id}`, "info");
+		},
+	});
+
+	pi.registerCommand("refute-hypothesis", {
+		description: "Mark a hypothesis refuted and attach evidence IDs: /refute-hypothesis <hyp-id> <ev-id...>",
+		handler: async (args, ctx) => {
+			const parts = args.trim().split(/\s+/).filter((part) => part.length > 0);
+			if (parts.length < 2) {
+				ctx.ui.notify("Usage: /refute-hypothesis <hyp-id> <ev-id...>", "warning");
+				return;
+			}
+			const [id, ...evidenceIds] = parts;
+			const record = updateHypothesis(findingsTracker, { id, status: "refuted", addEvidenceIds: evidenceIds });
+			if (!record) {
+				ctx.ui.notify(`Unknown hypothesis: ${id}`, "error");
+				return;
+			}
+			await persistTracker();
+			syncTrackerUI(ctx);
+			ctx.ui.notify(`Refuted ${record.id}`, "info");
+		},
+	});
+
+	pi.registerCommand("promote-finding", {
+		description: "Create a finding from a hypothesis: /promote-finding <hyp-id> <title> :: <statement>",
+		handler: async (args, ctx) => {
+			const trimmed = args.trim();
+			if (!trimmed) {
+				ctx.ui.notify("Usage: /promote-finding <hyp-id> <title> :: <statement>", "warning");
+				return;
+			}
+			const firstSpace = trimmed.indexOf(" ");
+			if (firstSpace === -1) {
+				ctx.ui.notify("Usage: /promote-finding <hyp-id> <title> :: <statement>", "warning");
+				return;
+			}
+			const hypothesisId = trimmed.slice(0, firstSpace).trim();
+			const remainder = trimmed.slice(firstSpace + 1).trim();
+			const [titlePart, statementPart] = remainder.split(/\s*::\s*/, 2);
+			const hypothesis = findingsTracker.hypotheses.find((record) => record.id === hypothesisId);
+			if (!hypothesis) {
+				ctx.ui.notify(`Unknown hypothesis: ${hypothesisId}`, "error");
+				return;
+			}
+			const title = titlePart?.trim();
+			const statement = statementPart?.trim() || hypothesis.claim;
+			if (!title) {
+				ctx.ui.notify("promote-finding requires a title", "warning");
+				return;
+			}
+			const finding = addFinding(findingsTracker, {
+				title,
+				statement,
+				status: "candidate",
+				severity: "medium",
+				reproStatus: "not-reproduced",
+				basis: hypothesis.relatedEvidenceIds,
+				relatedEvidenceIds: hypothesis.relatedEvidenceIds,
+				relatedArtifactIds: hypothesis.relatedArtifactIds,
+			});
+			await persistTracker();
+			syncTrackerUI(ctx);
+			ctx.ui.notify(`Created finding ${finding.id}`, "info");
+		},
+	});
+
+	pi.registerCommand("mark-dead-end", {
+		description: "Record a dead end: /mark-dead-end <summary> :: <why-it-failed>",
+		handler: async (args, ctx) => {
+			const trimmed = args.trim();
+			if (!trimmed) {
+				ctx.ui.notify("Usage: /mark-dead-end <summary> :: <why-it-failed>", "warning");
+				return;
+			}
+			const [summary, whyItFailed] = trimmed.split(/\s*::\s*/, 2);
+			const record = addDeadEnd(findingsTracker, {
+				summary,
+				whyItFailed,
+			});
+			await persistTracker();
+			syncTrackerUI(ctx);
+			ctx.ui.notify(`Recorded dead end ${record.id}`, "info");
+		},
+	});
+
+	pi.registerCommand("role", {
+		description: "Show or change pire role: /role [scout|reverser|tracer|fuzzer|reviewer|writer]",
+		handler: async (args, ctx) => {
+			const requested = args.trim().toLowerCase();
+			if (!requested) {
+				const choice = ctx.hasUI ? await ctx.ui.select("Select pire role", PIRE_ROLE_ORDER) : undefined;
+				if (!choice) {
+					ctx.ui.notify(`current pire role: ${currentRole ?? "unset"}`, "info");
+					return;
+				}
+				applyRole(ctx, choice as PireRole);
+				return;
+			}
+			if (!isPireRole(requested)) {
+				ctx.ui.notify(`unknown role: ${requested}`, "error");
+				return;
+			}
+			applyRole(ctx, requested);
+		},
+	});
+
+	for (const role of PIRE_ROLE_ORDER) {
+		pi.registerCommand(role, {
+			description: `Switch pire to ${role} role`,
+			handler: async (_args, ctx) => applyRole(ctx, role),
+		});
+	}
+
+	pi.registerCommand("session-type", {
+		description:
+			"Show or change pire session type: /session-type [binary-re|crash-triage|network-protocol|firmware-analysis|web-security-review|malware-analysis]",
+		handler: async (args, ctx) => {
+			const requested = args.trim().toLowerCase();
+			if (!requested) {
+				const choice = ctx.hasUI ? await ctx.ui.select("Select pire session type", PIRE_SESSION_TYPE_ORDER) : undefined;
+				if (!choice) {
+					ctx.ui.notify(`current pire session type: ${currentSessionType ?? "unset"}`, "info");
+					return;
+				}
+				await applySessionType(ctx, choice as PireSessionType);
+				return;
+			}
+			if (!isPireSessionType(requested)) {
+				ctx.ui.notify(`unknown session type: ${requested}`, "error");
+				return;
+			}
+			await applySessionType(ctx, requested);
+		},
+	});
+
+	pi.registerCommand("handoff", {
+		description: "Show a research handoff summary for another session or subagent",
+		handler: async (_args, ctx) => {
+			showHandoff(ctx);
+		},
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		currentCwd = ctx.cwd;
 		const flagValue = pi.getFlag(MODE_FLAG);
+		const roleFlagValue = pi.getFlag(ROLE_FLAG);
+		const sessionTypeFlagValue = pi.getFlag(SESSION_TYPE_FLAG);
 		const entries = ctx.sessionManager.getEntries();
 		const persisted = entries
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === MODE_ENTRY_TYPE)
 			.pop() as { data?: PersistedModeState } | undefined;
+		const persistedRole = entries
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === ROLE_ENTRY_TYPE)
+			.pop() as { data?: PersistedRoleState } | undefined;
+		const persistedSessionType = entries
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === SESSION_TYPE_ENTRY_TYPE)
+			.pop() as { data?: PersistedSessionTypeState } | undefined;
 
 		const persistedMode = persisted?.data?.mode;
 		const latestActivityEntry = entries
@@ -1593,10 +1915,21 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === TRACKER_ENTRY_TYPE)
 			.pop() as { data?: { tracker?: FindingsTracker } } | undefined;
 		const flagMode = typeof flagValue === "string" && isPireMode(flagValue) ? flagValue : undefined;
+		const flagRole = typeof roleFlagValue === "string" && isPireRole(roleFlagValue) ? roleFlagValue : undefined;
+		const flagSessionType =
+			typeof sessionTypeFlagValue === "string" && isPireSessionType(sessionTypeFlagValue) ? sessionTypeFlagValue : undefined;
 		artifactManifest = await loadArtifactManifest(ctx.cwd);
 		findingsTracker = latestTrackerEntry?.data?.tracker ?? (await loadFindingsTracker(ctx.cwd));
 		lastActivity = latestActivityEntry?.data;
+		currentRole = flagRole ?? persistedRole?.data?.role;
+		currentSessionType = flagSessionType ?? persistedSessionType?.data?.sessionType;
 		applyMode(ctx, flagMode ?? persistedMode ?? "recon", { notify: false });
+		if (currentSessionType) {
+			await applySessionType(ctx, currentSessionType, { notify: false, preserveRole: currentRole !== undefined });
+		}
+		if (currentRole) {
+			applyRole(ctx, currentRole, { notify: false });
+		}
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
@@ -1604,17 +1937,66 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			.getBranch()
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === TRACKER_ENTRY_TYPE)
 			.pop() as { data?: { tracker?: FindingsTracker } } | undefined;
+		const latestRoleEntry = ctx.sessionManager
+			.getBranch()
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === ROLE_ENTRY_TYPE)
+			.pop() as { data?: PersistedRoleState } | undefined;
+		const latestSessionTypeEntry = ctx.sessionManager
+			.getBranch()
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === SESSION_TYPE_ENTRY_TYPE)
+			.pop() as { data?: PersistedSessionTypeState } | undefined;
 		findingsTracker = latestTrackerEntry?.data?.tracker ?? findingsTracker;
+		currentRole = latestRoleEntry?.data?.role ?? currentRole;
+		currentSessionType = latestSessionTypeEntry?.data?.sessionType ?? currentSessionType;
 		syncTrackerUI(ctx);
+		updateRoleStatus(ctx, currentRole);
+		updateSessionTypeStatus(ctx, currentSessionType);
 	});
 
 	pi.on("before_agent_start", async () => ({
 		message: {
 			customType: "pire-mode-context",
-			content: `${formatModePrompt(currentMode)}\n\n${buildFindingsPromptSummary(findingsTracker)}`,
+			content: [
+				formatModePrompt(currentMode),
+				currentSessionType ? formatSessionTypePrompt(currentSessionType) : undefined,
+				currentRole ? formatRolePrompt(currentRole) : undefined,
+				buildFindingsPromptSummary(findingsTracker),
+			]
+				.filter((value): value is string => value !== undefined)
+				.join("\n\n"),
 			display: false,
 		},
 	}));
+
+	pi.on("session_before_compact", async (event) => {
+		const recentActivity = collectRecentActivityFromEntries(event.branchEntries);
+		if (recentActivity.length === 0 && lastActivity) {
+			recentActivity.push(lastActivity);
+		}
+		return {
+			compaction: {
+				summary: buildResearchCompactionSummary({
+					mode: currentMode,
+					role: currentRole,
+					sessionType: currentSessionType,
+					tracker: findingsTracker,
+					manifest: artifactManifest,
+					recentActivity,
+					customInstructions: event.customInstructions,
+					previousSummary: event.preparation.previousSummary,
+				}),
+				firstKeptEntryId: event.preparation.firstKeptEntryId,
+				tokensBefore: event.preparation.tokensBefore,
+				details: {
+					mode: currentMode,
+					role: currentRole,
+					sessionType: currentSessionType,
+					trackerSummary: buildFindingsTrackerSummary(findingsTracker),
+					artifactSummary: buildArtifactManifestSummary(artifactManifest),
+				},
+			},
+		};
+	});
 
 	pi.on("tool_call", async (event) => {
 		if (currentMode === "proofing") {
