@@ -153,6 +153,20 @@ export type {
 } from "./core/package-manager.js";
 export { DefaultPackageManager } from "./core/package-manager.js";
 export {
+	createStarterBinaryReEvalSuite,
+	type PireEvalRunBundle,
+	type PireEvalRunScore,
+	type PireEvalTaskSuite,
+	parsePireEvalRunBundle,
+	parsePireEvalTaskSuite,
+	scorePireEvalRunBundle,
+	stringifyPireEvalRunBundle,
+	stringifyPireEvalTaskSuite,
+	summarizePireEvalRunScore,
+	validatePireEvalRunBundle,
+	validatePireEvalTaskSuite,
+} from "./core/pire/eval-bundles.js";
+export {
 	createStarterBinaryReEvalCorpus,
 	type PireBinaryBugClass,
 	type PireBinaryEvalCorpusSummary,
