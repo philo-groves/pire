@@ -172,4 +172,54 @@ describe("pire eval cli", () => {
 		expect(JSON.parse(jsonlLines[1] ?? "{}")).toMatchObject({ type: "case", caseName: "heap-disasm-confirmed" });
 		expect(JSON.parse(jsonlLines[2] ?? "{}")).toMatchObject({ type: "case", caseName: "toctou-candidate" });
 	});
+
+	test("compares current results against a prior json baseline and reports deltas", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-baseline-"));
+		const baselinePath = join(tempDir, "baseline.json");
+		const reportPath = join(tempDir, "delta-report.md");
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "session-cases"),
+				"--json",
+				"--report",
+				baselinePath,
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		const result = await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "session-cases-regression"),
+				"--baseline",
+				baselinePath,
+				"--report",
+				reportPath,
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		const report = await readFile(reportPath, "utf-8");
+
+		expect(result.stdout).toContain("- vs baseline:");
+		expect(result.stdout).toContain("delta=");
+		expect(report).toContain("Vs baseline score delta");
+		expect(report).toContain("delta=");
+	});
 });
