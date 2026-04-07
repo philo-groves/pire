@@ -153,6 +153,15 @@ export type {
 } from "./core/package-manager.js";
 export { DefaultPackageManager } from "./core/package-manager.js";
 export {
+	createStarterBinaryReEvalCorpus,
+	type PireBinaryBugClass,
+	type PireBinaryEvalCorpusSummary,
+	type PireBinaryEvalFocus,
+	type PireBinaryEvalTask,
+	summarizeBinaryReEvalCorpus,
+	validateBinaryReEvalCorpus,
+} from "./core/pire/eval-corpus.js";
+export {
 	createDefaultPireEvalRubric,
 	type PireEvalDimension,
 	type PireEvalDimensionScore,

@@ -13,6 +13,7 @@
 - Added the Phase 4 `pire` runtime layer: persisted safety posture controls and active probing gates, notebook export commands (`/notebook-export`), and repro bundle generation for confirmed findings (`/repro-bundle`).
 - Tightened `pire` repro bundle generation so weak findings are refused by default unless they have confirmed/reported status plus linked evidence and replay material, and bundles now include an explicit readiness assessment.
 - Expanded `pire` notebook exports into richer research reports with structured scope/methodology sections, linked finding evidence and artifact details, open questions, dead ends, remediation drafts, and improved HTML evidence rendering.
+- Added a first `pire` eval foundation for reverse-engineering work: typed scoring/rubric helpers plus a starter binary-RE corpus covering disassembly, decompilation, UAF, OOB read/write, heap overflow, double-free, and TOCTOU tasks.
 
 ### Changed
 
