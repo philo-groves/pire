@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -300,5 +300,112 @@ describe("pire eval cli", () => {
 		expect(report).toContain("Vs last-good:");
 		expect(report).toContain("main delta=");
 		expect(report).toContain("last-good delta=");
+	});
+
+	test("enforces maximum case drop against a named baseline", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-baseline-gate-"));
+		const baselinePath = join(tempDir, "last-good.json");
+		const gatedCasesDir = join(tempDir, "gated-cases");
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "session-cases"),
+				"--json",
+				"--report",
+				baselinePath,
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		await cp(join(FIXTURE_DIR, "session-cases-suite-regression"), gatedCasesDir, { recursive: true });
+		await writeFile(
+			join(gatedCasesDir, "cases.json"),
+			`${JSON.stringify(
+				{
+					title: "Baseline drop gate cases",
+				},
+				null,
+				2,
+			)}\n`,
+			"utf-8",
+		);
+		await writeFile(
+			join(gatedCasesDir, "heap-disasm-confirmed", "case.json"),
+			`${JSON.stringify(
+				{
+					title: "Confirmed heap-disassembly session",
+					expectation: {
+						maxNormalizedDropByBaseline: {
+							"last-good": 0.05,
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf-8",
+		);
+		await writeFile(
+			join(gatedCasesDir, "heap-disasm-confirmed", "bindings.json"),
+			`${JSON.stringify(
+				{
+					version: 1,
+					suiteId: "pire-binary-re-starter-v1",
+					runId: "heap-case-001",
+					model: "claude-sonnet-4-5",
+					notes: ["fixture session: degraded heap/disasm case"],
+					bindings: [
+						{
+							taskId: "binre-disasm-001",
+							findingId: "find-heap-001",
+							exploitability: "limited",
+							judgement: {
+								dimensions: {
+									discovery: "partial",
+									classification: "miss",
+									rootCause: "miss",
+									proof: "miss",
+									reporting: "miss",
+									primitives: "miss",
+								},
+							},
+						},
+					],
+				},
+				null,
+				2,
+			)}\n`,
+			"utf-8",
+		);
+
+		await expect(
+			execFileAsync(
+				"npx",
+				[
+					"tsx",
+					"./src/pire-eval-cli.ts",
+					"--suite",
+					join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+					"--cases-dir",
+					gatedCasesDir,
+					"--baseline",
+					`last-good=${baselinePath}`,
+					"--enforce",
+				],
+				{
+					cwd: PACKAGE_ROOT,
+				},
+			),
+		).rejects.toMatchObject({
+			stderr: expect.stringContaining("last-good normalized delta"),
+		});
 	});
 });

@@ -22,6 +22,7 @@
 - Added `pire-evals --report` output for Markdown, JSON, and JSONL artifacts so CI runs can persist compact binary-RE eval summaries and regression details.
 - Added `pire-evals --baseline <report.json>` so current runs can be compared against a prior JSON report and emit per-case and suite-level score/issue deltas in leaderboard and report artifacts.
 - Extended `pire-evals --baseline` to support multiple named baselines via repeated `name=path` arguments, so reports can compare current binary-RE results against references like `main`, `last-good`, and `best-known` at the same time.
+- Added baseline-aware expectation gates for `pire-evals`, so case and suite metadata can fail CI on excessive score drops or issue increases relative to named baselines such as `last-good`.
 
 ### Changed
 

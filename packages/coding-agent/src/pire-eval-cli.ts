@@ -25,6 +25,8 @@ interface PireEvalCaseExpectation {
 	maxIssues?: number;
 	minRank?: number;
 	maxRank?: number;
+	maxNormalizedDropByBaseline?: Record<string, number>;
+	maxIssuesIncreaseByBaseline?: Record<string, number>;
 }
 
 interface PireEvalSuiteExpectation {
@@ -33,6 +35,8 @@ interface PireEvalSuiteExpectation {
 	maxRegressions?: number;
 	minCases?: number;
 	maxCases?: number;
+	maxAverageNormalizedDropByBaseline?: Record<string, number>;
+	maxAverageIssuesIncreaseByBaseline?: Record<string, number>;
 }
 
 interface PireEvalCaseDefinition {
@@ -222,6 +226,26 @@ function collectRegressions(score: PireEvalCaseScore, rank: number): string[] {
 	if (expectation.maxRank !== undefined && rank > expectation.maxRank) {
 		regressions.push(`rank ${rank} exceeded maximum expected rank ${expectation.maxRank}`);
 	}
+	if (expectation.maxNormalizedDropByBaseline && score.baselines) {
+		for (const baseline of score.baselines) {
+			const maxDrop = expectation.maxNormalizedDropByBaseline[baseline.name];
+			if (maxDrop !== undefined && baseline.normalizedDelta < -maxDrop) {
+				regressions.push(
+					`${baseline.name} normalized delta ${formatSignedDelta(baseline.normalizedDelta)} exceeded allowed drop ${formatSignedDelta(-maxDrop)}`,
+				);
+			}
+		}
+	}
+	if (expectation.maxIssuesIncreaseByBaseline && score.baselines) {
+		for (const baseline of score.baselines) {
+			const maxIncrease = expectation.maxIssuesIncreaseByBaseline[baseline.name];
+			if (maxIncrease !== undefined && baseline.issuesDelta > maxIncrease) {
+				regressions.push(
+					`${baseline.name} issues delta ${formatSignedDelta(baseline.issuesDelta)} exceeded allowed increase ${formatSignedDelta(maxIncrease)}`,
+				);
+			}
+		}
+	}
 	return regressions;
 }
 
@@ -255,7 +279,6 @@ function collectSuiteRegressions(
 	if (expectation?.maxCases !== undefined && cases > expectation.maxCases) {
 		regressions.push(`suite cases ${cases} exceeded maximum ${expectation.maxCases}`);
 	}
-
 	return {
 		cases,
 		averageNormalized,
@@ -389,6 +412,36 @@ async function writeReport(reportPath: string, result: PireEvalCollectedScores):
 	await writeFile(targetPath, formatReport(result, targetPath), "utf-8");
 }
 
+function applySuiteBaselineExpectations(
+	suite: PireEvalSuiteSummary,
+	expectation?: PireEvalSuiteExpectation,
+): PireEvalSuiteSummary {
+	if (!expectation) {
+		return suite;
+	}
+
+	const regressions = [...suite.regressions];
+	for (const baseline of suite.baselines ?? []) {
+		const maxDrop = expectation.maxAverageNormalizedDropByBaseline?.[baseline.name];
+		if (maxDrop !== undefined && baseline.averageNormalizedDelta < -maxDrop) {
+			regressions.push(
+				`${baseline.name} average score delta ${formatSignedDelta(baseline.averageNormalizedDelta)} exceeded allowed drop ${formatSignedDelta(-maxDrop)}`,
+			);
+		}
+		const maxIncrease = expectation.maxAverageIssuesIncreaseByBaseline?.[baseline.name];
+		if (maxIncrease !== undefined && baseline.averageIssuesDelta > maxIncrease) {
+			regressions.push(
+				`${baseline.name} average issues delta ${formatSignedDelta(baseline.averageIssuesDelta)} exceeded allowed increase ${formatSignedDelta(maxIncrease)}`,
+			);
+		}
+	}
+
+	return {
+		...suite,
+		regressions,
+	};
+}
+
 function applyBaseline(
 	result: PireEvalCollectedScores,
 	baselineInput: PireEvalBaselineInput,
@@ -501,6 +554,24 @@ async function main(argv: string[]): Promise<void> {
 	for (const baselineInput of args.baselines) {
 		withBaselines = applyBaseline(withBaselines, baselineInput, await loadBaseline(baselineInput.path));
 	}
+	withBaselines = {
+		...withBaselines,
+		scores: withBaselines.scores.map((score, index) => ({
+			...score,
+			regressions: collectRegressions(score, index + 1),
+		})),
+	};
+	const recomputedSuite = collectSuiteRegressions(withBaselines.scores, withBaselines.suite.expectation);
+	withBaselines = {
+		...withBaselines,
+		suite: applySuiteBaselineExpectations(
+			{
+				...recomputedSuite,
+				baselines: withBaselines.suite.baselines,
+			},
+			recomputedSuite.expectation,
+		),
+	};
 
 	if (args.json) {
 		process.stdout.write(`${JSON.stringify(withBaselines, null, 2)}\n`);
