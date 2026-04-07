@@ -31,6 +31,8 @@
 - Added `pire-evals --promote-report <name>` so clean runs can atomically update named stored report aliases like `main` or `nightly`, while regressed runs are refused instead of overwriting the reference report set.
 - Expanded the starter binary-RE eval corpus with explicit chain tasks, including three sophisticated cases that require linking 3+ vulnerabilities and one case that requires a 4-stage chain, so future eval growth can ratchet toward 5+ stage exploit paths without redesigning the corpus schema.
 - Added a `scenario` eval lane plus three end-to-end binary RE scenarios that require entry-to-goal exploitation chains with explicit success evidence, forbidden shortcuts, and proof-backed completion criteria.
+- Updated `pire-evals` reports and JSON output to surface scenario outcomes separately, including pass / near-miss / fail counts per case and at the suite level so end-to-end scenario progress is visible apart from lighter RE task scores.
+- Added a persisted scenario fixture suite plus pass / near-miss / fail `.pire` session cases so end-to-end scenario extraction, scoring, and CLI reporting can be exercised from disk instead of only through temporary test data.
 
 ### Changed
 

@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T18:30:00.000Z",
+  "findings": [
+    {
+      "id": "find-helper-001",
+      "title": "Local helper corruption chain remains below the privilege boundary",
+      "status": "candidate",
+      "severity": "medium",
+      "statement": "The helper invocation exposes a race and a corruption stage, but the session never wins the privileged path.",
+      "basis": ["ev-helper-001"],
+      "relatedEvidenceIds": ["ev-helper-001"],
+      "relatedArtifactIds": ["artifact:/tmp/helper-chain.log"],
+      "reproStatus": "partial",
+      "createdAt": "2026-04-07T18:21:00.000Z",
+      "updatedAt": "2026-04-07T18:28:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-helper-001",
+      "kind": "trace",
+      "summary": "strace shows the helper race window but no privileged path win",
+      "commandId": "tool:bash:helper-01",
+      "artifactIds": ["artifact:/tmp/helper-chain.log"],
+      "supports": ["find-helper-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T18:23:00.000Z"
+    }
+  ]
+}

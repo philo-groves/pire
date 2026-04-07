@@ -70,6 +70,7 @@ interface PireEvalCaseScore {
 	severityThresholds?: PireEvalDeltaSeverityThresholds;
 	regressions: string[];
 	baselines?: PireEvalCaseBaseline[];
+	scenarioSummary: PireEvalScenarioSummary;
 }
 
 interface PireEvalSuiteSummary {
@@ -80,6 +81,7 @@ interface PireEvalSuiteSummary {
 	expectation?: PireEvalSuiteExpectation;
 	severityThresholds?: PireEvalDeltaSeverityThresholds;
 	baselines?: PireEvalSuiteBaseline[];
+	scenarioSummary: PireEvalScenarioSummary;
 }
 
 interface PireEvalCollectedScores {
@@ -101,6 +103,13 @@ interface PireEvalSuiteBaseline {
 	averageIssuesDelta: number;
 	baselineCases: number;
 	severity: PireEvalDeltaSeverity;
+}
+
+interface PireEvalScenarioSummary {
+	scored: number;
+	passed: number;
+	nearMiss: number;
+	failed: number;
 }
 
 type PireEvalDeltaSeverity = "none" | "notice" | "warning" | "critical";
@@ -206,6 +215,45 @@ const FOCUS_SEVERITY_THRESHOLDS: Partial<Record<PireBinaryEvalFocus, Required<Pi
 		criticalIssuesIncrease: 3,
 	},
 };
+
+function createEmptyScenarioSummary(): PireEvalScenarioSummary {
+	return {
+		scored: 0,
+		passed: 0,
+		nearMiss: 0,
+		failed: 0,
+	};
+}
+
+function summarizeScenarioTaskScores(
+	taskScores: Array<{
+		lane: PireEvalLane;
+		normalized: number;
+		issues: string[];
+	}>,
+): PireEvalScenarioSummary {
+	const summary = createEmptyScenarioSummary();
+
+	for (const taskScore of taskScores) {
+		if (taskScore.lane !== "scenario") {
+			continue;
+		}
+		summary.scored += 1;
+		if (taskScore.normalized >= 0.85 && taskScore.issues.length === 0) {
+			summary.passed += 1;
+		} else if (taskScore.normalized >= 0.6) {
+			summary.nearMiss += 1;
+		} else {
+			summary.failed += 1;
+		}
+	}
+
+	return summary;
+}
+
+function formatScenarioSummary(summary: PireEvalScenarioSummary): string {
+	return `scored=${summary.scored}, pass=${summary.passed}, near-miss=${summary.nearMiss}, fail=${summary.failed}`;
+}
 
 function printHelp(): void {
 	process.stdout.write(`pire-evals - score binary RE eval session directories
@@ -518,6 +566,15 @@ function collectSuiteRegressions(
 		regressions,
 		expectation,
 		severityThresholds: undefined,
+		scenarioSummary: scores.reduce<PireEvalScenarioSummary>(
+			(acc, score) => ({
+				scored: acc.scored + score.scenarioSummary.scored,
+				passed: acc.passed + score.scenarioSummary.passed,
+				nearMiss: acc.nearMiss + score.scenarioSummary.nearMiss,
+				failed: acc.failed + score.scenarioSummary.failed,
+			}),
+			createEmptyScenarioSummary(),
+		),
 	};
 }
 
@@ -527,6 +584,7 @@ function formatLeaderboard(result: PireEvalCollectedScores): string {
 		`- cases: ${result.suite.cases}`,
 		`- average score: ${Math.round(result.suite.averageNormalized * 100)}%`,
 		`- average issues: ${result.suite.averageIssues.toFixed(2)}`,
+		`- scenario outcomes: ${formatScenarioSummary(result.suite.scenarioSummary)}`,
 		`- regressions: ${result.suite.regressions.length}`,
 	];
 	if (result.suite.baselines && result.suite.baselines.length > 0) {
@@ -539,7 +597,7 @@ function formatLeaderboard(result: PireEvalCollectedScores): string {
 		const baselineSuffix =
 			score.baselines && score.baselines.length > 0 ? `, ${formatCaseBaselineSummary(score.baselines)}` : "";
 		lines.push(
-			`- ${score.caseName}: ${score.earned}/${score.max} (${Math.round(score.normalized * 100)}%), run=${score.runId}, tasks=${score.scoredTasks}, missing=${score.missingTasks}${issueSuffix}${regressionSuffix}${baselineSuffix}`,
+			`- ${score.caseName}: ${score.earned}/${score.max} (${Math.round(score.normalized * 100)}%), run=${score.runId}, tasks=${score.scoredTasks}, missing=${score.missingTasks}, scenarios=${formatScenarioSummary(score.scenarioSummary)}${issueSuffix}${regressionSuffix}${baselineSuffix}`,
 		);
 	}
 
@@ -561,6 +619,7 @@ function formatMarkdownReport(result: PireEvalCollectedScores): string {
 		`- Cases: ${result.suite.cases}`,
 		`- Average score: ${Math.round(result.suite.averageNormalized * 100)}%`,
 		`- Average issues: ${result.suite.averageIssues.toFixed(2)}`,
+		`- Scenario outcomes: ${formatScenarioSummary(result.suite.scenarioSummary)}`,
 		`- Regressions: ${result.suite.regressions.length}`,
 		"",
 		"## Cases",
@@ -580,7 +639,7 @@ function formatMarkdownReport(result: PireEvalCollectedScores): string {
 		const baselineSuffix =
 			score.baselines && score.baselines.length > 0 ? `, ${formatCaseBaselineSummary(score.baselines)}` : "";
 		lines.push(
-			`- ${score.caseName}: ${score.earned}/${score.max} (${Math.round(score.normalized * 100)}%), run=${score.runId}, tasks=${score.scoredTasks}, missing=${score.missingTasks}, issues=${score.issues.length}, regressions=${score.regressions.length}${baselineSuffix}`,
+			`- ${score.caseName}: ${score.earned}/${score.max} (${Math.round(score.normalized * 100)}%), run=${score.runId}, tasks=${score.scoredTasks}, missing=${score.missingTasks}, scenarios=${formatScenarioSummary(score.scenarioSummary)}, issues=${score.issues.length}, regressions=${score.regressions.length}${baselineSuffix}`,
 		);
 	}
 
@@ -601,6 +660,7 @@ function formatJsonlReport(result: PireEvalCollectedScores): string {
 			cases: result.suite.cases,
 			averageNormalized: result.suite.averageNormalized,
 			averageIssues: result.suite.averageIssues,
+			scenarioSummary: result.suite.scenarioSummary,
 			regressions: result.suite.regressions,
 			expectation: result.suite.expectation,
 			baselines: result.suite.baselines,
@@ -618,6 +678,7 @@ function formatJsonlReport(result: PireEvalCollectedScores): string {
 				normalized: score.normalized,
 				scoredTasks: score.scoredTasks,
 				missingTasks: score.missingTasks,
+				scenarioSummary: score.scenarioSummary,
 				issues: score.issues,
 				regressions: score.regressions,
 				expectation: score.expectation,
@@ -701,6 +762,7 @@ function reclassifyBaselineSeverities(result: PireEvalCollectedScores): PireEval
 				...baseline,
 				severity: classifyDeltaSeverity(baseline.normalizedDelta, baseline.issuesDelta, score.severityThresholds),
 			})),
+			scenarioSummary: score.scenarioSummary,
 		})),
 		suite: {
 			...result.suite,
@@ -712,6 +774,7 @@ function reclassifyBaselineSeverities(result: PireEvalCollectedScores): PireEval
 					result.suite.severityThresholds,
 				),
 			})),
+			scenarioSummary: result.suite.scenarioSummary,
 		},
 	};
 }
@@ -816,6 +879,7 @@ async function collectCaseScores(
 				definition?.severityThresholds,
 			),
 			regressions: [],
+			scenarioSummary: summarizeScenarioTaskScores(result.score.taskScores),
 		});
 	}
 

@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T18:20:00.000Z",
+  "findings": [
+    {
+      "id": "find-network-001",
+      "title": "Network parser chain reaches allocator primitive but stops short of shell",
+      "status": "reported",
+      "severity": "high",
+      "statement": "An unauthenticated request stream triggers allocator corruption and stale pointer reuse, but the final control-hijack stage remains partial.",
+      "basis": ["ev-network-001"],
+      "relatedEvidenceIds": ["ev-network-001"],
+      "relatedArtifactIds": ["artifact:/tmp/network-chain.log", "artifact:/tmp/network-poc.pkt"],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T18:11:00.000Z",
+      "updatedAt": "2026-04-07T18:18:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-network-001",
+      "kind": "tool-result",
+      "summary": "strace plus gdb show request-triggered allocator corruption and stale pointer reuse",
+      "commandId": "tool:bash:network-01",
+      "artifactIds": ["artifact:/tmp/network-chain.log", "artifact:/tmp/network-poc.pkt"],
+      "supports": ["find-network-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T18:13:00.000Z"
+    }
+  ]
+}

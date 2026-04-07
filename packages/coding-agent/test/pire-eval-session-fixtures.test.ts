@@ -6,24 +6,38 @@ import { createPireEvalRunBundleFromBindingFile, scorePireEvalSessionFromFiles }
 
 const FIXTURE_DIR = join(process.cwd(), "test", "fixtures", "pire-evals");
 const SUITE_PATH = join(FIXTURE_DIR, "binary-re-starter-suite.json");
+const SCENARIO_SUITE_PATH = join(FIXTURE_DIR, "scenario-suite.json");
 
-async function loadExpectedRun(caseName: string) {
-	return parsePireEvalRunBundle(
-		await readFile(join(FIXTURE_DIR, "session-cases", caseName, "expected-run.json"), "utf-8"),
-	);
+async function loadExpectedRun(caseRoot: string, caseName: string) {
+	return parsePireEvalRunBundle(await readFile(join(caseRoot, caseName, "expected-run.json"), "utf-8"));
 }
 
 describe("pire eval session fixtures", () => {
 	test("extracts stable run bundles from confirmed and candidate binary RE fixture sessions", async () => {
 		for (const caseName of ["heap-disasm-confirmed", "toctou-candidate"]) {
-			const cwd = join(FIXTURE_DIR, "session-cases", caseName);
+			const caseRoot = join(FIXTURE_DIR, "session-cases");
+			const cwd = join(caseRoot, caseName);
 			const result = await createPireEvalRunBundleFromBindingFile({
 				cwd,
 				suitePath: SUITE_PATH,
 				bindingsPath: join(cwd, "bindings.json"),
 			});
 
-			expect(result.run).toEqual(await loadExpectedRun(caseName));
+			expect(result.run).toEqual(await loadExpectedRun(caseRoot, caseName));
+		}
+	});
+
+	test("extracts stable run bundles from pass, near-miss, and fail scenario fixture sessions", async () => {
+		const caseRoot = join(FIXTURE_DIR, "scenario-cases");
+		for (const caseName of ["renderer-rce-pass", "network-rce-near-miss", "helper-privesc-fail"]) {
+			const cwd = join(caseRoot, caseName);
+			const result = await createPireEvalRunBundleFromBindingFile({
+				cwd,
+				suitePath: SCENARIO_SUITE_PATH,
+				bindingsPath: join(cwd, "bindings.json"),
+			});
+
+			expect(result.run).toEqual(await loadExpectedRun(caseRoot, caseName));
 		}
 	});
 
@@ -51,5 +65,38 @@ describe("pire eval session fixtures", () => {
 		expect(toctouResult.bindingFile.runId).toBe("toctou-case-001");
 		expect(toctouResult.score.taskScores).toHaveLength(1);
 		expect(toctouResult.score.earned).toBeGreaterThan(0);
+	});
+
+	test("scores scenario fixture sessions into pass, near-miss, and fail order", async () => {
+		const caseRoot = join(FIXTURE_DIR, "scenario-cases");
+		const rendererCase = join(caseRoot, "renderer-rce-pass");
+		const networkCase = join(caseRoot, "network-rce-near-miss");
+		const helperCase = join(caseRoot, "helper-privesc-fail");
+
+		const rendererResult = await scorePireEvalSessionFromFiles({
+			cwd: rendererCase,
+			suitePath: SCENARIO_SUITE_PATH,
+			bindingsPath: join(rendererCase, "bindings.json"),
+		});
+		const networkResult = await scorePireEvalSessionFromFiles({
+			cwd: networkCase,
+			suitePath: SCENARIO_SUITE_PATH,
+			bindingsPath: join(networkCase, "bindings.json"),
+		});
+		const helperResult = await scorePireEvalSessionFromFiles({
+			cwd: helperCase,
+			suitePath: SCENARIO_SUITE_PATH,
+			bindingsPath: join(helperCase, "bindings.json"),
+		});
+
+		expect(rendererResult.bindingFile.runId).toBe("scenario-renderer-001");
+		expect(networkResult.bindingFile.runId).toBe("scenario-network-001");
+		expect(helperResult.bindingFile.runId).toBe("scenario-helper-001");
+		expect(rendererResult.score.taskScores).toHaveLength(1);
+		expect(networkResult.score.taskScores).toHaveLength(1);
+		expect(helperResult.score.taskScores).toHaveLength(1);
+		expect(rendererResult.score.earned).toBeGreaterThan(networkResult.score.earned);
+		expect(networkResult.score.earned).toBeGreaterThan(helperResult.score.earned);
+		expect(rendererResult.score.issues).toContain("missing submissions for 2 task(s)");
 	});
 });
