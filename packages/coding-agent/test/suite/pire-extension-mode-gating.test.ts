@@ -66,6 +66,10 @@ describe("pire extension mode and tool gating", () => {
 		"read",
 		"bash",
 		"environment_inventory",
+		"platform_powershell",
+		"platform_hyperv",
+		"platform_macos",
+		"platform_xcrun",
 		"binary_file",
 		"binary_strings",
 		"binary_readelf",
@@ -145,6 +149,29 @@ describe("pire extension mode and tool gating", () => {
 		expect(log).toEqual(["bash:pwd"]);
 	});
 
+	it("allows benign local analysis commands in recon mode without requiring a hardcoded whitelist", async () => {
+		const log: string[] = [];
+		const harness = await createHarness({
+			tools: createToolSet(log),
+			extensionFactories: [{ factory: pireExtension, path: PIRE_EXTENSION_PATH }],
+		});
+		harnesses.push(harness);
+
+		await harness.session.bindExtensions({ shutdownHandler: () => {} });
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: "python3 analyze_sample.py --input sample.bin" })], {
+				stopReason: "toolUse",
+			}),
+			(context) => fauxAssistantMessage(getToolResultText(context.messages)),
+		]);
+
+		await harness.session.prompt("run the local helper");
+
+		expect(getAssistantTexts(harness)).toContain("ran python3 analyze_sample.py --input sample.bin");
+		expect(log).toEqual(["bash:python3 analyze_sample.py --input sample.bin"]);
+	});
+
 	it("blocks destructive bash in recon mode and allows proofing mode escalation", async () => {
 		const log: string[] = [];
 		const harness = await createHarness({
@@ -164,7 +191,7 @@ describe("pire extension mode and tool gating", () => {
 
 		expect(
 			getAssistantTexts(harness).some((text) =>
-				text.includes("pire recon mode blocked this command as destructive or outside the current posture."),
+				text.includes("pire recon mode blocked this command as destructive or requiring a more invasive posture."),
 			),
 		).toBe(true);
 		expect(log).toEqual([]);

@@ -360,71 +360,6 @@ const DESTRUCTIVE_PATTERNS = [
 	/\bservice\s+\S+\s+(start|stop|restart)/i,
 ];
 
-const SAFE_READ_ONLY_PATTERNS = [
-	/^\s*cat\b/,
-	/^\s*head\b/,
-	/^\s*tail\b/,
-	/^\s*less\b/,
-	/^\s*more\b/,
-	/^\s*grep\b/,
-	/^\s*find\b/,
-	/^\s*ls\b/,
-	/^\s*pwd\b/,
-	/^\s*echo\b/,
-	/^\s*printf\b/,
-	/^\s*wc\b/,
-	/^\s*sort\b/,
-	/^\s*uniq\b/,
-	/^\s*diff\b/,
-	/^\s*file\b/,
-	/^\s*stat\b/,
-	/^\s*du\b/,
-	/^\s*df\b/,
-	/^\s*tree\b/,
-	/^\s*which\b/,
-	/^\s*whereis\b/,
-	/^\s*type\b/,
-	/^\s*env\b/,
-	/^\s*printenv\b/,
-	/^\s*uname\b/,
-	/^\s*whoami\b/,
-	/^\s*id\b/,
-	/^\s*date\b/,
-	/^\s*uptime\b/,
-	/^\s*ps\b/,
-	/^\s*top\b/,
-	/^\s*htop\b/,
-	/^\s*free\b/,
-	/^\s*git\s+(status|log|diff|show|branch|remote|config\s+--get)/i,
-	/^\s*git\s+ls-/i,
-	/^\s*jq\b/,
-	/^\s*sed\s+-n/i,
-	/^\s*awk\b/,
-	/^\s*rg\b/,
-	/^\s*fd\b/,
-	/^\s*bat\b/,
-	/^\s*exa\b/,
-	/^\s*strings\b/,
-	/^\s*readelf\b/,
-	/^\s*objdump\b/,
-	/^\s*nm\b/,
-	/^\s*xxd\b/,
-	/^\s*sha(1|224|256|384|512)sum\b/,
-	/^\s*md5(sum)?\b/,
-	/^\s*rizin\b/,
-	/^\s*radare2\b/,
-	/^\s*curl\b/,
-	/^\s*tcpdump\b/,
-	/^\s*tshark\b/,
-	/^\s*pwsh\b/i,
-	/^\s*powershell(\.exe)?\b/i,
-	/^\s*xcrun\b/,
-	/^\s*codesign\b/,
-	/^\s*otool\b/,
-	/^\s*plutil\b/,
-	/^\s*xattr\b/,
-];
-
 const DYNAMIC_PATTERNS = [
 	/^\s*gdb\b/,
 	/^\s*lldb\b/,
@@ -453,11 +388,11 @@ function isAllowedResearchCommand(command: string, mode: PireMode): boolean {
 		return true;
 	}
 
-	if (SAFE_READ_ONLY_PATTERNS.some((pattern) => pattern.test(command))) {
-		return true;
+	if (DYNAMIC_PATTERNS.some((pattern) => pattern.test(command))) {
+		return mode === "dynamic";
 	}
 
-	return mode === "dynamic" && DYNAMIC_PATTERNS.some((pattern) => pattern.test(command));
+	return true;
 }
 
 function formatModePrompt(mode: PireMode): string {
@@ -469,11 +404,11 @@ function formatModePrompt(mode: PireMode): string {
 	];
 
 	if (mode === "recon") {
-		lines.push("Recon mode is read-only. Prefer inventory, environment validation, and hypothesis generation before action.");
-		lines.push("Do not edit or write files. Avoid active probing or destructive commands.");
+		lines.push("Recon mode starts with inventory, environment validation, and hypothesis generation before mutation.");
+		lines.push("Do not edit or write files. Avoid active probing or destructive commands, but keep moving with benign local analysis.");
 	} else if (mode === "dynamic") {
-		lines.push("Dynamic mode allows runtime observation and tracing, but still avoids mutation and active external probing by default.");
-		lines.push("Do not edit or write files unless the user explicitly switches to proofing or report mode.");
+		lines.push("Dynamic mode allows runtime observation and tracing while still avoiding mutation and active external probing by default.");
+		lines.push("Do not edit or write files unless the user explicitly switches to proofing or report mode, but do not stall on safe local runtime checks.");
 	} else if (mode === "proofing") {
 		lines.push("Proofing mode is explicitly authorized for mutation, reproduction harnesses, and tightly scoped proof-of-concept work.");
 		lines.push("Keep modifications narrow and evidence-driven.");
@@ -3061,13 +2996,13 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					return { block: true, reason: decision.reason ?? "active probing blocked" };
 				}
 			}
-			if (!isAllowedResearchCommand(command, currentMode)) {
-				return {
-					block: true,
-					reason: `pire ${currentMode} mode blocked this command as destructive or outside the current posture.\nCommand: ${command}`,
-				};
+				if (!isAllowedResearchCommand(command, currentMode)) {
+					return {
+						block: true,
+						reason: `pire ${currentMode} mode blocked this command as destructive or requiring a more invasive posture.\nCommand: ${command}`,
+					};
+				}
 			}
-		}
 
 		if (event.toolName === "net_curl_head") {
 			const url = typeof event.input.url === "string" ? event.input.url : "";

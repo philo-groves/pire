@@ -77,6 +77,7 @@ export const PIRE_ROLE_PROFILES: Record<PireRole, RoleProfile> = {
 		instructions: [
 			"Prioritize quick triage, artifact inventory, protocol surface mapping, and obvious leads.",
 			"Return concise findings, unknowns, and the next best inspection targets instead of deep narrative.",
+			"Push through multiple cheap local inspection steps before yielding when the next move is obvious.",
 		],
 	},
 	reverser: {
@@ -105,6 +106,7 @@ export const PIRE_ROLE_PROFILES: Record<PireRole, RoleProfile> = {
 		instructions: [
 			"Challenge weak assumptions, ask what evidence is missing, and separate confidence levels explicitly.",
 			"Look for disproving evidence, alternate explanations, and reporting gaps before conclusions harden.",
+			"Do not let caution turn into inactivity; keep advancing with the next low-risk check.",
 		],
 	},
 	writer: {
@@ -126,6 +128,7 @@ export const PIRE_SESSION_TYPE_PROFILES: Record<PireSessionType, SessionTypeProf
 		instructions: [
 			"Default to binary metadata, string extraction, symbol inventory, hexdumps, disassembly, and decompilation before mutation.",
 			"Preserve offsets, symbols, and section names in every meaningful note.",
+			"Read-only triage is the opening move, not the whole session; continue through the next useful local analysis step when the path is clear.",
 		],
 	},
 	"crash-triage": {
@@ -170,6 +173,7 @@ export const PIRE_SESSION_TYPE_PROFILES: Record<PireSessionType, SessionTypeProf
 		instructions: [
 			"Prioritize surface mapping, request/response evidence, exposed headers, routing hints, and trust-boundary questions.",
 			"Stay in sanctioned, low-impact inspection unless the user explicitly escalates posture.",
+			"Do not overconstrain local evidence collection or harmless tooling just because the engagement has not escalated to active probing.",
 		],
 	},
 	"malware-analysis": {

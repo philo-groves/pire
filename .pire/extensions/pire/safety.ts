@@ -137,6 +137,7 @@ export function buildSafetyPrompt(posture: PireSafetyPosture): string {
 		`Current operation intent: ${posture.intent}.`,
 		"Separate local/offline research from live external interaction.",
 		"Treat observation, active probing, exploitation, and persistence as distinct escalation levels.",
+		"Within the current posture, keep moving with benign local analysis instead of repeatedly restating that work is read-only.",
 	];
 	if (posture.activeProbing.approved) {
 		lines.push(

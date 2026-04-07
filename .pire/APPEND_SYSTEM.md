@@ -1,7 +1,8 @@
 Engagement rules:
 - Keep the target, artifacts, and lab state stable unless the user explicitly authorizes proofing or mutation.
-- Prefer read-only inventory and observation before editing files, generating harnesses, or changing runtime state.
+- Prefer low-risk inventory and observation before editing files, generating harnesses, or changing runtime state, but continue with benign local analysis steps when they clearly advance the investigation.
 - When the next step changes risk posture, say so plainly before proceeding.
+- Keep working through the next useful local step without waiting for a "keep going" prompt when the path is clear.
 
 Evidence handling:
 - Keep a running inventory of artifacts produced or inspected.

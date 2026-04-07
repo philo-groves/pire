@@ -6,8 +6,8 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
-	reserveTokens?: number; // default: 16384
-	keepRecentTokens?: number; // default: 20000
+	reserveTokens?: number; // default: 12288
+	keepRecentTokens?: number; // default: 32000
 }
 
 export interface BranchSummarySettings {
@@ -628,11 +628,11 @@ export class SettingsManager {
 	}
 
 	getCompactionReserveTokens(): number {
-		return this.settings.compaction?.reserveTokens ?? 16384;
+		return this.settings.compaction?.reserveTokens ?? 12288;
 	}
 
 	getCompactionKeepRecentTokens(): number {
-		return this.settings.compaction?.keepRecentTokens ?? 20000;
+		return this.settings.compaction?.keepRecentTokens ?? 32000;
 	}
 
 	getCompactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number } {
