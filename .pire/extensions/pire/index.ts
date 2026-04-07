@@ -55,6 +55,30 @@ import {
 	type ArtifactManifest,
 	type ArtifactType,
 } from "./artifacts.js";
+import {
+	addDeadEnd,
+	addEvidence,
+	addFinding,
+	addHypothesis,
+	addQuestion,
+	buildArtifactRef,
+	buildFindingsPromptSummary,
+	buildFindingsTrackerSummary,
+	buildFindingsWidgetLines,
+	loadFindingsTracker,
+	saveFindingsTracker,
+	summarizeFindingsTracker,
+	updateFinding,
+	updateHypothesis,
+	updateQuestion,
+	type FindingsTracker,
+	type EvidenceKind,
+	type FindingStatus,
+	type HypothesisStatus,
+	type QuestionStatus,
+	type ReproStatus,
+	type Severity,
+} from "./findings.js";
 import { collectEnvironmentInventory, formatInventorySummary, type EnvironmentInventory } from "./inventory.js";
 
 type PireMode = "recon" | "dynamic" | "proofing" | "report";
@@ -73,10 +97,12 @@ interface PireToolActivity {
 
 const MODE_ENTRY_TYPE = "pire-mode";
 const ARTIFACT_ENTRY_TYPE = "pire-artifacts";
+const TRACKER_ENTRY_TYPE = "pire-findings-tracker";
 const TOOL_ACTIVITY_ENTRY_TYPE = "pire-tool-activity";
 const MODE_FLAG = "pire-mode";
 const MODE_TOOLS: Record<PireMode, string[]> = {
 	recon: [
+		"research_tracker",
 		"read",
 		"bash",
 		"grep",
@@ -101,6 +127,7 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"unpack_archive_list",
 	],
 	dynamic: [
+		"research_tracker",
 		"read",
 		"bash",
 		"grep",
@@ -130,6 +157,7 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"debug_ltrace",
 	],
 	proofing: [
+		"research_tracker",
 		"read",
 		"bash",
 		"edit",
@@ -161,6 +189,7 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"debug_ltrace",
 	],
 	report: [
+		"research_tracker",
 		"read",
 		"bash",
 		"edit",
@@ -358,6 +387,27 @@ function updateActivityStatus(ctx: ExtensionContext, activity?: PireToolActivity
 	ctx.ui.setStatus("pire-activity", ctx.ui.theme.fg("accent", `last:${activity.tool}`));
 }
 
+function updateTrackerStatus(ctx: ExtensionContext, tracker: FindingsTracker): void {
+	const summary = buildFindingsTrackerSummary(tracker);
+	ctx.ui.setStatus(
+		"pire-tracker",
+		ctx.ui.theme.fg("accent", `tracker:h${summary.openHypotheses}/f${summary.confirmedFindings}/q${summary.blockedQuestions}`),
+	);
+	ctx.ui.setWidget("pire-tracker", buildFindingsWidgetLines(tracker), { placement: "belowEditor" });
+}
+
+function summarizeToolResult(event: {
+	toolName: string;
+	content: Array<{ type: string; text?: string }>;
+}): string {
+	const firstLine = event.content
+		.filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
+		.flatMap((part) => part.text.split("\n"))
+		.map((line) => line.trim())
+		.find((line) => line.length > 0);
+	return firstLine ?? `${event.toolName} completed`;
+}
+
 function getBinaryToolDetails(eventDetails: unknown): BinaryToolDetails | undefined {
 	if (!eventDetails || typeof eventDetails !== "object" || !("artifacts" in eventDetails)) {
 		return undefined;
@@ -404,6 +454,22 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	let currentMode: PireMode = "recon";
 	let currentCwd = process.cwd();
 	let artifactManifest: ArtifactManifest = { version: 1, updatedAt: new Date().toISOString(), artifacts: [] };
+	let findingsTracker: FindingsTracker = {
+		version: 1,
+		updatedAt: new Date().toISOString(),
+		hypotheses: [],
+		findings: [],
+		questions: [],
+		evidence: [],
+		deadEnds: [],
+		nextIds: {
+			hypothesis: 1,
+			finding: 1,
+			question: 1,
+			evidence: 1,
+			deadEnd: 1,
+		},
+	};
 	let lastActivity: PireToolActivity | undefined;
 
 	const persistMode = (): void => {
@@ -419,6 +485,18 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			manifestPath,
 			byType: summary.byType,
 			recentPaths: summary.recentPaths,
+			});
+	};
+
+	const persistTracker = async (): Promise<void> => {
+		const paths = await saveFindingsTracker(currentCwd, findingsTracker);
+		const summary = buildFindingsTrackerSummary(findingsTracker);
+		pi.appendEntry(TRACKER_ENTRY_TYPE, {
+			updatedAt: findingsTracker.updatedAt,
+			jsonPath: paths.jsonPath,
+			markdownPath: paths.markdownPath,
+			summary,
+			tracker: findingsTracker,
 		});
 	};
 
@@ -427,6 +505,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		pi.setActiveTools(MODE_TOOLS[mode]);
 		updateStatus(ctx, mode);
 		updateArtifactStatus(ctx, artifactManifest);
+		updateTrackerStatus(ctx, findingsTracker);
 		updateActivityStatus(ctx, lastActivity);
 		persistMode();
 		if (options?.notify !== false) {
@@ -442,6 +521,22 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				content: formatInventorySummary(inventory),
 				display: true,
 				details: inventory,
+				},
+				{ triggerTurn: false },
+			);
+		};
+
+	const showTracker = (filterText?: string): void => {
+		pi.sendMessage(
+			{
+				customType: "pire-tracker",
+				content: summarizeFindingsTracker(findingsTracker, filterText),
+				display: true,
+				details: {
+					filter: filterText,
+					summary: buildFindingsTrackerSummary(findingsTracker),
+					tracker: findingsTracker,
+				},
 			},
 			{ triggerTurn: false },
 		);
@@ -488,7 +583,11 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			recordedAt: activity.recordedAt ?? new Date().toISOString(),
 		};
 		pi.appendEntry<PireToolActivity>(TOOL_ACTIVITY_ENTRY_TYPE, lastActivity);
-		updateActivityStatus(ctx, lastActivity);
+			updateActivityStatus(ctx, lastActivity);
+		};
+
+	const syncTrackerUI = (ctx: ExtensionContext): void => {
+		updateTrackerStatus(ctx, findingsTracker);
 	};
 
 	const showActivity = (ctx: ExtensionContext, filterText?: string): void => {
@@ -540,6 +639,272 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	pi.registerFlag(MODE_FLAG, {
 		description: "Start pire in a specific mode: recon, dynamic, proofing, report",
 		type: "string",
+	});
+
+	pi.registerTool({
+		name: "research_tracker",
+		label: "Research Tracker",
+		description: "Update the structured hypothesis, findings, questions, evidence, and dead-end tracker for this pire session.",
+		promptSnippet: "Use research_tracker to persist hypotheses, findings, evidence, open questions, and dead ends as structured state.",
+		promptGuidelines: [
+			"Record new evidence immediately after meaningful tool output instead of relying on the transcript alone.",
+			"Promote findings only when you can cite evidence IDs or concrete basis statements.",
+		],
+		parameters: Type.Object({
+			action: Type.Union([
+				Type.Literal("list"),
+				Type.Literal("add_hypothesis"),
+				Type.Literal("update_hypothesis"),
+				Type.Literal("add_finding"),
+				Type.Literal("update_finding"),
+				Type.Literal("add_question"),
+				Type.Literal("update_question"),
+				Type.Literal("add_evidence"),
+				Type.Literal("add_dead_end"),
+			]),
+			filter: Type.Optional(Type.String()),
+			id: Type.Optional(Type.String()),
+			title: Type.Optional(Type.String()),
+			claim: Type.Optional(Type.String()),
+			rationale: Type.Optional(Type.String()),
+			statement: Type.Optional(Type.String()),
+			prompt: Type.Optional(Type.String()),
+			summary: Type.Optional(Type.String()),
+			whyItFailed: Type.Optional(Type.String()),
+			owner: Type.Optional(Type.String()),
+			status: Type.Optional(Type.String()),
+			confidence: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high")])),
+			severity: Type.Optional(
+				Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("critical")]),
+			),
+			reproStatus: Type.Optional(
+				Type.Union([Type.Literal("not-reproduced"), Type.Literal("partial"), Type.Literal("reproduced")]),
+			),
+			kind: Type.Optional(
+				Type.Union([
+					Type.Literal("tool-result"),
+					Type.Literal("observation"),
+					Type.Literal("trace"),
+					Type.Literal("artifact"),
+					Type.Literal("note"),
+				]),
+			),
+			relatedEvidenceIds: Type.Optional(Type.Array(Type.String())),
+			relatedArtifactIds: Type.Optional(Type.Array(Type.String())),
+			relatedQuestionIds: Type.Optional(Type.Array(Type.String())),
+			addEvidenceIds: Type.Optional(Type.Array(Type.String())),
+			addArtifactIds: Type.Optional(Type.Array(Type.String())),
+			addQuestionIds: Type.Optional(Type.Array(Type.String())),
+			basis: Type.Optional(Type.Array(Type.String())),
+			addBasis: Type.Optional(Type.Array(Type.String())),
+			blockedOn: Type.Optional(Type.Array(Type.String())),
+			addBlockedOn: Type.Optional(Type.Array(Type.String())),
+			commandId: Type.Optional(Type.String()),
+			artifactIds: Type.Optional(Type.Array(Type.String())),
+			supports: Type.Optional(Type.Array(Type.String())),
+			refutes: Type.Optional(Type.Array(Type.String())),
+			artifactsChecked: Type.Optional(Type.Array(Type.String())),
+			doNotRepeatUntil: Type.Optional(Type.String()),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			let resultText = "";
+
+			switch (params.action) {
+				case "list": {
+					resultText = summarizeFindingsTracker(findingsTracker, params.filter);
+					break;
+				}
+				case "add_hypothesis": {
+					if (!params.title || !params.claim) {
+						resultText = "research_tracker add_hypothesis requires title and claim.";
+						break;
+					}
+					const record = addHypothesis(findingsTracker, {
+						title: params.title,
+						claim: params.claim,
+						rationale: params.rationale,
+						confidence: params.confidence,
+						relatedEvidenceIds: params.relatedEvidenceIds,
+						relatedArtifactIds: params.relatedArtifactIds,
+						relatedQuestionIds: params.relatedQuestionIds,
+					});
+					await persistTracker();
+					syncTrackerUI(ctx);
+					resultText = `Added hypothesis ${record.id}: ${record.title}`;
+					break;
+				}
+				case "update_hypothesis": {
+					if (!params.id) {
+						resultText = "research_tracker update_hypothesis requires id.";
+						break;
+					}
+					const status =
+						params.status === "open" || params.status === "supported" || params.status === "refuted" || params.status === "needs-more-evidence"
+							? (params.status as HypothesisStatus)
+							: undefined;
+					const record = updateHypothesis(findingsTracker, {
+						id: params.id,
+						title: params.title,
+						claim: params.claim,
+						rationale: params.rationale,
+						status,
+						confidence: params.confidence,
+						addEvidenceIds: params.addEvidenceIds,
+						addArtifactIds: params.addArtifactIds,
+						addQuestionIds: params.addQuestionIds,
+					});
+					if (!record) {
+						resultText = `Unknown hypothesis: ${params.id}`;
+						break;
+					}
+					await persistTracker();
+					syncTrackerUI(ctx);
+					resultText = `Updated hypothesis ${record.id}: ${record.status}`;
+					break;
+				}
+				case "add_finding": {
+					if (!params.title || !params.statement) {
+						resultText = "research_tracker add_finding requires title and statement.";
+						break;
+					}
+					const status =
+						params.status === "candidate" || params.status === "confirmed" || params.status === "reported"
+							? (params.status as FindingStatus)
+							: undefined;
+					const record = addFinding(findingsTracker, {
+						title: params.title,
+						statement: params.statement,
+						severity: params.severity,
+						status,
+						basis: params.basis,
+						relatedEvidenceIds: params.relatedEvidenceIds,
+						relatedArtifactIds: params.relatedArtifactIds,
+						reproStatus: params.reproStatus,
+					});
+					await persistTracker();
+					syncTrackerUI(ctx);
+					resultText = `Added finding ${record.id}: ${record.title}`;
+					break;
+				}
+				case "update_finding": {
+					if (!params.id) {
+						resultText = "research_tracker update_finding requires id.";
+						break;
+					}
+					const status =
+						params.status === "candidate" || params.status === "confirmed" || params.status === "reported"
+							? (params.status as FindingStatus)
+							: undefined;
+					const record = updateFinding(findingsTracker, {
+						id: params.id,
+						title: params.title,
+						statement: params.statement,
+						severity: params.severity,
+						status,
+						reproStatus: params.reproStatus as ReproStatus | undefined,
+						addBasis: params.addBasis,
+						addEvidenceIds: params.addEvidenceIds,
+						addArtifactIds: params.addArtifactIds,
+					});
+					if (!record) {
+						resultText = `Unknown finding: ${params.id}`;
+						break;
+					}
+					await persistTracker();
+					syncTrackerUI(ctx);
+					resultText = `Updated finding ${record.id}: ${record.status}`;
+					break;
+				}
+				case "add_question": {
+					if (!params.prompt) {
+						resultText = "research_tracker add_question requires prompt.";
+						break;
+					}
+					const status =
+						params.status === "open" || params.status === "answered" || params.status === "blocked"
+							? (params.status as QuestionStatus)
+							: undefined;
+					const record = addQuestion(findingsTracker, {
+						prompt: params.prompt,
+						status,
+						owner: params.owner,
+						blockedOn: params.blockedOn,
+					});
+					await persistTracker();
+					syncTrackerUI(ctx);
+					resultText = `Added question ${record.id}: ${record.prompt}`;
+					break;
+				}
+				case "update_question": {
+					if (!params.id) {
+						resultText = "research_tracker update_question requires id.";
+						break;
+					}
+					const status =
+						params.status === "open" || params.status === "answered" || params.status === "blocked"
+							? (params.status as QuestionStatus)
+							: undefined;
+					const record = updateQuestion(findingsTracker, {
+						id: params.id,
+						prompt: params.prompt,
+						status,
+						owner: params.owner,
+						addBlockedOn: params.addBlockedOn,
+					});
+					if (!record) {
+						resultText = `Unknown question: ${params.id}`;
+						break;
+					}
+					await persistTracker();
+					syncTrackerUI(ctx);
+					resultText = `Updated question ${record.id}: ${record.status}`;
+					break;
+				}
+				case "add_evidence": {
+					if (!params.summary) {
+						resultText = "research_tracker add_evidence requires summary.";
+						break;
+					}
+					const record = addEvidence(findingsTracker, {
+						kind: params.kind as EvidenceKind | undefined,
+						summary: params.summary,
+						commandId: params.commandId,
+						artifactIds: params.artifactIds,
+						supports: params.supports,
+						refutes: params.refutes,
+					});
+					await persistTracker();
+					syncTrackerUI(ctx);
+					resultText = `Added evidence ${record.id}: ${record.summary}`;
+					break;
+				}
+				case "add_dead_end": {
+					if (!params.summary) {
+						resultText = "research_tracker add_dead_end requires summary.";
+						break;
+					}
+					const record = addDeadEnd(findingsTracker, {
+						summary: params.summary,
+						whyItFailed: params.whyItFailed,
+						artifactsChecked: params.artifactsChecked,
+						doNotRepeatUntil: params.doNotRepeatUntil,
+					});
+					await persistTracker();
+					syncTrackerUI(ctx);
+					resultText = `Added dead end ${record.id}: ${record.summary}`;
+					break;
+				}
+			}
+
+			return {
+				content: [{ type: "text", text: resultText }],
+				details: {
+					action: params.action,
+					summary: buildFindingsTrackerSummary(findingsTracker),
+					tracker: findingsTracker,
+				},
+			};
+		},
 	});
 
 	pi.registerTool({
@@ -1195,6 +1560,22 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("tracker", {
+		description: "Show the current pire hypothesis/findings tracker, optionally filtered by substring",
+		handler: async (args) => {
+			const filterText = args.trim();
+			showTracker(filterText.length > 0 ? filterText : undefined);
+		},
+	});
+
+	pi.registerCommand("findings", {
+		description: "Alias for /tracker",
+		handler: async (args) => {
+			const filterText = args.trim();
+			showTracker(filterText.length > 0 ? filterText : undefined);
+		},
+	});
+
 	pi.on("session_start", async (_event, ctx) => {
 		currentCwd = ctx.cwd;
 		const flagValue = pi.getFlag(MODE_FLAG);
@@ -1207,16 +1588,30 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		const latestActivityEntry = entries
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === TOOL_ACTIVITY_ENTRY_TYPE)
 			.pop() as { data?: PireToolActivity } | undefined;
+		const latestTrackerEntry = ctx.sessionManager
+			.getBranch()
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === TRACKER_ENTRY_TYPE)
+			.pop() as { data?: { tracker?: FindingsTracker } } | undefined;
 		const flagMode = typeof flagValue === "string" && isPireMode(flagValue) ? flagValue : undefined;
 		artifactManifest = await loadArtifactManifest(ctx.cwd);
+		findingsTracker = latestTrackerEntry?.data?.tracker ?? (await loadFindingsTracker(ctx.cwd));
 		lastActivity = latestActivityEntry?.data;
 		applyMode(ctx, flagMode ?? persistedMode ?? "recon", { notify: false });
+	});
+
+	pi.on("session_tree", async (_event, ctx) => {
+		const latestTrackerEntry = ctx.sessionManager
+			.getBranch()
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === TRACKER_ENTRY_TYPE)
+			.pop() as { data?: { tracker?: FindingsTracker } } | undefined;
+		findingsTracker = latestTrackerEntry?.data?.tracker ?? findingsTracker;
+		syncTrackerUI(ctx);
 	});
 
 	pi.on("before_agent_start", async () => ({
 		message: {
 			customType: "pire-mode-context",
-			content: formatModePrompt(currentMode),
+			content: `${formatModePrompt(currentMode)}\n\n${buildFindingsPromptSummary(findingsTracker)}`,
 			display: false,
 		},
 	}));
@@ -1247,6 +1642,62 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	pi.on("tool_result", async (event, ctx) => {
 		if (event.isError) {
 			return;
+		}
+
+		if (event.toolName !== "research_tracker") {
+			const artifactIds: string[] = [];
+			const observedArtifactPaths: string[] = [];
+			const firstLine = summarizeToolResult(event);
+			if (event.toolName === "read" || event.toolName === "write" || event.toolName === "edit") {
+				const rawPath = typeof event.input.path === "string" ? event.input.path : undefined;
+				if (rawPath) {
+					const resolvedPath = resolveArtifactPath(ctx.cwd, rawPath);
+					artifactIds.push(buildArtifactRef(resolvedPath));
+					observedArtifactPaths.push(resolvedPath);
+				}
+			}
+
+			const eventDetails = event.details;
+			if (eventDetails && typeof eventDetails === "object" && "artifacts" in eventDetails && Array.isArray(eventDetails.artifacts)) {
+				for (const artifact of eventDetails.artifacts) {
+					if (
+						artifact &&
+						typeof artifact === "object" &&
+						"path" in artifact &&
+						typeof artifact.path === "string"
+					) {
+						const resolvedPath = resolveArtifactPath(ctx.cwd, artifact.path);
+						artifactIds.push(buildArtifactRef(resolvedPath));
+						observedArtifactPaths.push(resolvedPath);
+					}
+				}
+			}
+
+			addEvidence(findingsTracker, {
+				kind: event.toolName === "debug_strace" || event.toolName === "debug_ltrace" ? "trace" : "tool-result",
+				summary: `${event.toolName}: ${firstLine}`,
+				commandId: `tool:${event.toolName}:${event.toolCallId}`,
+				artifactIds,
+			});
+			await persistTracker();
+			syncTrackerUI(ctx);
+			if (event.toolName !== "read" && event.toolName !== "write" && event.toolName !== "edit" && event.toolName !== "bash") {
+				for (const artifactPath of observedArtifactPaths) {
+					artifactManifest = await recordArtifact(artifactManifest, {
+						path: artifactPath,
+						provenance: `tool:${event.toolName}`,
+					});
+				}
+				if (observedArtifactPaths.length > 0) {
+					await persistArtifacts();
+					recordToolActivity(ctx, {
+						tool: event.toolName,
+						target: observedArtifactPaths[0] ?? event.toolName,
+						summary: firstLine,
+						artifacts: observedArtifactPaths,
+					});
+				}
+			}
 		}
 
 		if (event.toolName === "read" || event.toolName === "write" || event.toolName === "edit") {
@@ -1373,8 +1824,8 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-		const unpackDetails = getUnpackToolDetails(event.details);
-		if (unpackDetails) {
+			const unpackDetails = getUnpackToolDetails(event.details);
+			if (unpackDetails) {
 			for (const artifact of unpackDetails.artifacts as UnpackArtifactObservation[]) {
 				await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
 					type: artifact.type as ArtifactType | undefined,
@@ -1382,12 +1833,41 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					finding: artifact.finding,
 				});
 			}
-			recordToolActivity(ctx, {
-				tool: event.toolName,
-				target: unpackDetails.targetPath,
-				summary: unpackDetails.summary.split("\n")[0] ?? event.toolName,
-				artifacts: unpackDetails.artifacts.map((artifact) => artifact.path),
-			});
-		}
-	});
-}
+				recordToolActivity(ctx, {
+					tool: event.toolName,
+					target: unpackDetails.targetPath,
+					summary: unpackDetails.summary.split("\n")[0] ?? event.toolName,
+					artifacts: unpackDetails.artifacts.map((artifact) => artifact.path),
+				});
+				return;
+			}
+
+			const inferredPathTarget = typeof event.input.path === "string" ? resolveArtifactPath(ctx.cwd, event.input.path) : undefined;
+			const inferredStringTarget =
+				typeof event.input.url === "string"
+					? event.input.url
+					: typeof event.input.path === "string"
+						? resolveArtifactPath(ctx.cwd, event.input.path)
+						: undefined;
+			if (
+				event.toolName.startsWith("binary_") ||
+				event.toolName.startsWith("disasm_") ||
+				event.toolName.startsWith("decomp_") ||
+				event.toolName.startsWith("debug_") ||
+				event.toolName.startsWith("net_") ||
+				event.toolName.startsWith("unpack_")
+			) {
+				if (inferredPathTarget) {
+					await observeArtifact(ctx, inferredPathTarget, `tool:${event.toolName}`);
+				}
+				if (inferredStringTarget) {
+					recordToolActivity(ctx, {
+						tool: event.toolName,
+						target: inferredStringTarget,
+						summary: summarizeToolResult(event),
+						artifacts: inferredPathTarget ? [inferredPathTarget] : [],
+					});
+				}
+			}
+		});
+	}

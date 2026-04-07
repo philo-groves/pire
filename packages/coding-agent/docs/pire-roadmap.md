@@ -174,6 +174,103 @@ Security research is iterative. Add a structured tracker for:
 
 The agent should be able to update this state during a session and render it in a sidebar/widget. This is more useful than a generic todo list because the unit of work is not "edit file X" but "determine whether parser Y is reachable with attacker-controlled length."
 
+Tracker shape:
+
+- Keep the canonical state in a session-local file such as `.pire/session/findings.json`
+- Mirror a human-readable projection in `.pire/session/findings.md`
+- Treat hypotheses, findings, questions, and evidence as separate record types with stable IDs
+- Require explicit links between records instead of burying relationships in freeform prose
+- Preserve command references and artifact references so compaction can summarize without dropping provenance
+
+Suggested record model:
+
+- `hypothesis`
+  - `id`, `title`, `status`
+  - `claim`
+  - `rationale`
+  - `relatedEvidenceIds`
+  - `relatedArtifactIds`
+  - `relatedQuestionIds`
+  - `confidence`
+- `finding`
+  - `id`, `title`, `severity`
+  - `statement`
+  - `basis`
+  - `relatedEvidenceIds`
+  - `relatedArtifactIds`
+  - `reproStatus`
+- `question`
+  - `id`, `prompt`, `status`
+  - `owner`
+  - `blockedOn`
+- `evidence`
+  - `id`, `kind`
+  - `summary`
+  - `commandId`
+  - `artifactId`
+  - `supports`
+  - `refutes`
+- `deadEnd`
+  - `id`, `summary`
+  - `whyItFailed`
+  - `artifactsChecked`
+  - `doNotRepeatUntil`
+
+Suggested statuses:
+
+- Hypotheses: `open`, `supported`, `refuted`, `needs-more-evidence`
+- Findings: `candidate`, `confirmed`, `reported`
+- Questions: `open`, `answered`, `blocked`
+
+Update rules:
+
+1. Every non-trivial investigation step should either add evidence, update a hypothesis, answer a question, or explicitly record a dead end.
+2. Commands that produce artifacts or observations should attach a short evidence entry immediately after execution rather than relying on transcript recovery later.
+3. A finding should only move from `candidate` to `confirmed` when it cites concrete evidence records, not just narrative reasoning.
+4. If a hypothesis is refuted, keep it in the tracker with its refuting evidence instead of deleting it.
+5. Compaction should preserve the tracker as structured state, not flatten it into a prose summary.
+
+Minimal UI behavior:
+
+- Left sidebar shows open hypotheses, confirmed findings, and blocked questions
+- Selecting a record reveals linked commands, artifacts, and supporting/refuting evidence
+- Filters for `open`, `confirmed`, `blocked`, and `dead-end`
+- Quick actions: `support hypothesis`, `refute hypothesis`, `promote to finding`, `mark dead end`
+
+Example:
+
+```json
+{
+  "hypotheses": [
+    {
+      "id": "hyp-004",
+      "title": "Length field reaches parser copy loop",
+      "status": "supported",
+      "claim": "The packet length field can drive an unchecked copy in parse_frame().",
+      "rationale": "Static review shows a length-controlled memcpy candidate.",
+      "relatedEvidenceIds": ["ev-011", "ev-014"],
+      "relatedArtifactIds": ["artifact-bin-main", "artifact-pcap-crash-01"],
+      "relatedQuestionIds": ["q-002"],
+      "confidence": "medium"
+    }
+  ],
+  "findings": [
+    {
+      "id": "find-002",
+      "title": "Out-of-bounds read in parse_frame()",
+      "severity": "high",
+      "statement": "A crafted frame triggers an out-of-bounds read before checksum validation.",
+      "basis": ["ev-014", "ev-018"],
+      "relatedEvidenceIds": ["ev-014", "ev-018"],
+      "relatedArtifactIds": ["artifact-pcap-crash-01"],
+      "reproStatus": "reproduced"
+    }
+  ]
+}
+```
+
+This tracker should land before deeper compaction changes. Without it, later reporting and multi-agent handoff will still depend too heavily on transcript archaeology.
+
 ### 9. Better Compaction for Research Sessions
 
 Current compaction is conversation-oriented and file-operation-oriented. `pire` needs compaction that preserves research state:

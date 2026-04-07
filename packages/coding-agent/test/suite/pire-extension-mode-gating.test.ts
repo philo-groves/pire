@@ -62,6 +62,7 @@ function createToolSet(log: string[]): AgentTool[] {
 describe("pire extension mode and tool gating", () => {
 	const harnesses: Harness[] = [];
 	const expectedReconTools = [
+		"research_tracker",
 		"read",
 		"bash",
 		"environment_inventory",
@@ -85,18 +86,18 @@ describe("pire extension mode and tool gating", () => {
 	const expectedDynamicOnlyTools = ["debug_gdb", "debug_lldb", "debug_strace", "debug_ltrace"];
 	const expectedDynamicTools = [...expectedReconTools, "unpack_binwalk_extract", ...expectedDynamicOnlyTools];
 	const expectedProofingTools = [
-		...expectedReconTools.slice(0, 2),
+		...expectedReconTools.slice(0, 3),
 		"edit",
 		"write",
-		...expectedReconTools.slice(2),
+		...expectedReconTools.slice(3),
 		"unpack_binwalk_extract",
 		...expectedDynamicOnlyTools,
 	];
 	const expectedReportTools = [
-		...expectedReconTools.slice(0, 2),
+		...expectedReconTools.slice(0, 3),
 		"edit",
 		"write",
-		...expectedReconTools.slice(2),
+		...expectedReconTools.slice(3),
 		"unpack_binwalk_extract",
 	];
 
@@ -203,7 +204,7 @@ describe("pire extension mode and tool gating", () => {
 		expect(harness.session.getActiveToolNames()).toEqual(expectedReportTools);
 	});
 
-	it("registers binary wrapper results as artifacts", async () => {
+	it("registers binary wrapper results as tracker evidence", async () => {
 		const log: string[] = [];
 		const harness = await createHarness({
 			tools: createToolSet(log),
@@ -226,49 +227,103 @@ describe("pire extension mode and tool gating", () => {
 		expect(getAssistantTexts(harness).some((text) => text.includes("binary_file:"))).toBe(true);
 		expect(log).toEqual([]);
 
-		const manifestPath = join(harness.tempDir, ".pire", "artifacts.json");
-		expect(existsSync(manifestPath)).toBe(true);
-		const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
-			artifacts: Array<{ path: string; provenance: string[]; relatedCommands: string[] }>;
+		const trackerPath = join(harness.tempDir, ".pire", "session", "findings.json");
+		expect(existsSync(trackerPath)).toBe(true);
+		const tracker = JSON.parse(readFileSync(trackerPath, "utf-8")) as {
+			evidence: Array<{ summary: string; commandId?: string; artifactIds: string[] }>;
 		};
-		expect(manifest.artifacts.some((artifact) => artifact.path === samplePath)).toBe(true);
-		expect(manifest.artifacts.find((artifact) => artifact.path === samplePath)?.provenance).toContain(
-			"tool:binary_file",
-		);
-		expect(manifest.artifacts.find((artifact) => artifact.path === samplePath)?.relatedCommands[0]).toContain(
-			"file -b",
-		);
+		expect(
+			tracker.evidence.some(
+				(record) =>
+					record.commandId?.startsWith("tool:binary_file:") === true &&
+					record.artifactIds.some((artifactId) => artifactId.includes(samplePath)),
+			),
+		).toBe(true);
 
-		const artifactEntries = harness.sessionManager
+		const trackerEntries = harness.sessionManager
 			.getEntries()
-			.filter((entry) => entry.type === "custom" && entry.customType === "pire-artifacts");
-		const latestArtifactEntry = artifactEntries.at(-1) as
+			.filter((entry) => entry.type === "custom" && entry.customType === "pire-findings-tracker");
+		const latestTrackerEntry = trackerEntries.at(-1) as
 			| {
 					data?: {
-						count?: number;
-						byType?: Record<string, number>;
-						recentPaths?: string[];
+						summary?: {
+							totalEvidence?: number;
+						};
 					};
 			  }
 			| undefined;
-		expect(latestArtifactEntry?.data?.count).toBe(1);
-		expect(latestArtifactEntry?.data?.byType?.binary).toBe(1);
-		expect(latestArtifactEntry?.data?.recentPaths).toContain(samplePath);
+		expect(latestTrackerEntry?.data?.summary?.totalEvidence).toBeGreaterThan(0);
+	});
 
-		const activityEntries = harness.sessionManager
+	it("persists tracker state from tracker actions and automatic tool evidence", async () => {
+		const log: string[] = [];
+		const harness = await createHarness({
+			tools: createToolSet(log),
+			extensionFactories: [{ factory: pireExtension, path: PIRE_EXTENSION_PATH }],
+		});
+		harnesses.push(harness);
+
+		const samplePath = join(harness.tempDir, "sample.bin");
+		writeFileSync(samplePath, "hello pire\n", "utf-8");
+
+		await harness.session.bindExtensions({ shutdownHandler: () => {} });
+
+		harness.setResponses([
+			fauxAssistantMessage(
+				[
+					fauxToolCall("research_tracker", {
+						action: "add_hypothesis",
+						title: "Length field reaches parser copy loop",
+						claim: "The packet length field can drive parse_frame() into a copy path.",
+					}),
+				],
+				{ stopReason: "toolUse" },
+			),
+			fauxAssistantMessage([fauxToolCall("binary_file", { path: samplePath })], { stopReason: "toolUse" }),
+			(context) => fauxAssistantMessage(getToolResultText(context.messages)),
+		]);
+
+		await harness.session.prompt("track the current reversing hypothesis and inspect the sample");
+
+		expect(getAssistantTexts(harness).some((text) => text.includes("binary_file:"))).toBe(true);
+
+		const trackerPath = join(harness.tempDir, ".pire", "session", "findings.json");
+		expect(existsSync(trackerPath)).toBe(true);
+		const tracker = JSON.parse(readFileSync(trackerPath, "utf-8")) as {
+			hypotheses: Array<{ id: string; title: string }>;
+			evidence: Array<{ summary: string; commandId?: string; artifactIds: string[] }>;
+		};
+		expect(tracker.hypotheses).toHaveLength(1);
+		expect(tracker.hypotheses[0]?.title).toContain("Length field reaches parser copy loop");
+		expect(tracker.evidence.some((record) => record.commandId?.startsWith("tool:binary_file:"))).toBe(true);
+		expect(
+			tracker.evidence.some((record) => record.artifactIds.some((artifactId) => artifactId.includes(samplePath))),
+		).toBe(true);
+
+		const trackerEntries = harness.sessionManager
 			.getEntries()
-			.filter((entry) => entry.type === "custom" && entry.customType === "pire-tool-activity");
-		const latestActivityEntry = activityEntries.at(-1) as
+			.filter((entry) => entry.type === "custom" && entry.customType === "pire-findings-tracker");
+		const latestTrackerEntry = trackerEntries.at(-1) as
 			| {
 					data?: {
-						tool?: string;
-						target?: string;
-						artifacts?: string[];
+						summary?: {
+							totalHypotheses?: number;
+							totalEvidence?: number;
+						};
 					};
 			  }
 			| undefined;
-		expect(latestActivityEntry?.data?.tool).toBe("binary_file");
-		expect(latestActivityEntry?.data?.target).toBe(samplePath);
-		expect(latestActivityEntry?.data?.artifacts).toContain(samplePath);
+		expect(latestTrackerEntry?.data?.summary?.totalHypotheses).toBe(1);
+		expect(latestTrackerEntry?.data?.summary?.totalEvidence).toBeGreaterThan(0);
+
+		await harness.session.prompt("/tracker");
+		const trackerMessage = harness.session.messages.find(
+			(
+				message,
+			): message is Extract<(typeof harness.session.messages)[number], { role: "custom"; customType: string }> =>
+				message.role === "custom" && message.customType === "pire-tracker",
+		);
+		expect(trackerMessage?.content).toContain("Pire Tracker");
+		expect(trackerMessage?.content).toContain("Length field reaches parser copy loop");
 	});
 });
