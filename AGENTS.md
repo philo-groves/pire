@@ -1,5 +1,7 @@
 # Development Rules
 
+See `EVALUATION.md` for the repo-level eval workflow and current fixture suites.
+
 ## First Message
 If the user did not give you a concrete task in their first message,
 read README.md, then ask which module(s) to work on. Based on the answer, read the relevant README.md files in parallel.
