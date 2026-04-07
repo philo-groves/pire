@@ -727,4 +727,81 @@ describe("pire eval cli", () => {
 			"Vs last-good",
 		);
 	});
+
+	test("promotes a named baseline only when the run has no regressions", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-promote-clean-"));
+		const suitePath = join(FIXTURE_DIR, "binary-re-starter-suite.json");
+		const casesPath = join(FIXTURE_DIR, "session-cases");
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				join(PACKAGE_ROOT, "src/pire-eval-cli.ts"),
+				"--suite",
+				suitePath,
+				"--cases-dir",
+				casesPath,
+				"--promote-baseline",
+				"last-good",
+			],
+			{
+				cwd: tempDir,
+			},
+		);
+
+		expect(
+			await readFile(join(tempDir, ".pire", "session", "evals", "baselines", "last-good.json"), "utf-8"),
+		).toContain('"scores"');
+	});
+
+	test("refuses to promote a named baseline when regressions are present", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-promote-regression-"));
+		const suitePath = join(FIXTURE_DIR, "binary-re-starter-suite.json");
+		const cleanCasesPath = join(FIXTURE_DIR, "session-cases");
+		const regressionCasesPath = join(FIXTURE_DIR, "session-cases-suite-regression");
+		const baselinePath = join(tempDir, ".pire", "session", "evals", "baselines", "last-good.json");
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				join(PACKAGE_ROOT, "src/pire-eval-cli.ts"),
+				"--suite",
+				suitePath,
+				"--cases-dir",
+				cleanCasesPath,
+				"--promote-baseline",
+				"last-good",
+			],
+			{
+				cwd: tempDir,
+			},
+		);
+
+		const originalBaseline = await readFile(baselinePath, "utf-8");
+
+		await expect(
+			execFileAsync(
+				"npx",
+				[
+					"tsx",
+					join(PACKAGE_ROOT, "src/pire-eval-cli.ts"),
+					"--suite",
+					suitePath,
+					"--cases-dir",
+					regressionCasesPath,
+					"--promote-baseline",
+					"last-good",
+				],
+				{
+					cwd: tempDir,
+				},
+			),
+		).rejects.toMatchObject({
+			stderr: expect.stringContaining("cannot promote baseline while regressions are present"),
+		});
+
+		expect(await readFile(baselinePath, "utf-8")).toBe(originalBaseline);
+	});
 });
