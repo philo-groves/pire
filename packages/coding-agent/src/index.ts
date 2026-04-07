@@ -176,9 +176,14 @@ export {
 	validateBinaryReEvalCorpus,
 } from "./core/pire/eval-corpus.js";
 export {
+	type CreatePireEvalRunBundleFromSessionOptions,
+	createPireEvalRunBundleFromSession,
 	formatPireEvalRunScoreReport,
 	loadPireEvalRunBundle,
 	loadPireEvalTaskSuite,
+	loadPireSessionArtifactManifest,
+	loadPireSessionTracker,
+	type PireEvalSessionTaskBinding,
 	scorePireEvalRunFromFiles,
 } from "./core/pire/eval-runner.js";
 export {
