@@ -81,6 +81,21 @@ import {
 } from "./findings.js";
 import { collectEnvironmentInventory, formatInventorySummary, type EnvironmentInventory } from "./inventory.js";
 import {
+	addCampaignReportPath,
+	appendCampaignJournalEntry,
+	buildCampaignLedgerSummary,
+	buildCampaignPromptSummary,
+	loadCampaignLedger,
+	renderCampaignDetail,
+	saveCampaignLedger,
+	summarizeCampaignLedger,
+	type CampaignFindingStatus,
+	type CampaignLedger,
+	type CampaignLedgerSummary,
+	upsertCampaignFinding,
+	updateCampaignFindingStatus,
+} from "./campaign.js";
+import {
 	ReproBundleAssessmentError,
 	buildNotebookDocument,
 	generateReproBundle,
@@ -147,6 +162,14 @@ interface PersistedSafetyState {
 	posture: PireSafetyPosture;
 }
 
+interface PersistedCampaignState {
+	updatedAt: string;
+	jsonPath: string;
+	statusPath: string;
+	summary: CampaignLedgerSummary;
+	ledger: CampaignLedger;
+}
+
 const MODE_ENTRY_TYPE = "pire-mode";
 const ROLE_ENTRY_TYPE = "pire-role";
 const SESSION_TYPE_ENTRY_TYPE = "pire-session-type";
@@ -156,6 +179,7 @@ const TOOL_ACTIVITY_ENTRY_TYPE = "pire-tool-activity";
 const INVENTORY_ENTRY_TYPE = "pire-env-inventory-state";
 const FOCUS_ENTRY_TYPE = "pire-focus";
 const SAFETY_ENTRY_TYPE = "pire-safety";
+const CAMPAIGN_ENTRY_TYPE = "pire-campaign";
 const MODE_FLAG = "pire-mode";
 const ROLE_FLAG = "pire-role";
 const SESSION_TYPE_FLAG = "pire-session";
@@ -506,6 +530,17 @@ function updateTrackerStatus(ctx: ExtensionContext, tracker: FindingsTracker): v
 	ctx.ui.setWidget("pire-tracker", buildFindingsWidgetLines(tracker), { placement: "belowEditor" });
 }
 
+function updateCampaignStatus(ctx: ExtensionContext, ledger: CampaignLedger): void {
+	const summary = buildCampaignLedgerSummary(ledger);
+	ctx.ui.setStatus(
+		"pire-campaign",
+		ctx.ui.theme.fg(
+			"accent",
+			`campaign:l${summary.leadFindings}/c${summary.confirmedFindings}/s${summary.submittedFindings}/x${summary.deEscalatedFindings + summary.blockedFindings}`,
+		),
+	);
+}
+
 function summarizeToolResult(event: {
 	toolName: string;
 	content: Array<{ type: string; text?: string }>;
@@ -600,6 +635,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	let currentInventory: EnvironmentInventory | undefined;
 	let currentFocus: FocusState = createEmptyFocusState();
 	let currentSafety: PireSafetyPosture = createDefaultSafetyPosture();
+	let campaignLedger: CampaignLedger = { version: 1, updatedAt: new Date().toISOString(), findings: [], nextIds: { journal: 1 } };
 
 	const persistMode = (): void => {
 		pi.appendEntry<PersistedModeState>(MODE_ENTRY_TYPE, { mode: currentMode });
@@ -658,6 +694,19 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		pi.appendEntry<PersistedSafetyState>(SAFETY_ENTRY_TYPE, { posture: currentSafety });
 	};
 
+	const persistCampaign = async (): Promise<{ jsonPath: string; statusPath: string }> => {
+		const paths = await saveCampaignLedger(currentCwd, campaignLedger);
+		const summary = buildCampaignLedgerSummary(campaignLedger);
+		pi.appendEntry<PersistedCampaignState>(CAMPAIGN_ENTRY_TYPE, {
+			updatedAt: campaignLedger.updatedAt,
+			jsonPath: paths.jsonPath,
+			statusPath: paths.statusPath,
+			summary,
+			ledger: campaignLedger,
+		});
+		return paths;
+	};
+
 	const applyMode = (ctx: ExtensionContext, mode: PireMode, options?: { notify?: boolean }): void => {
 		currentMode = mode;
 		pi.setActiveTools(MODE_TOOLS[mode]);
@@ -669,6 +718,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			updateActivityStatus(ctx, lastActivity);
 			updateFocusStatus(ctx, currentFocus);
 			updateSafetyStatus(ctx, currentSafety);
+			updateCampaignStatus(ctx, campaignLedger);
 			persistMode();
 		if (options?.notify !== false) {
 			ctx.ui.notify(`pire mode: ${mode}`, "info");
@@ -786,6 +836,22 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		);
 	};
 
+	const showCampaign = (filterText?: string): void => {
+		pi.sendMessage(
+			{
+				customType: "pire-campaign",
+				content: summarizeCampaignLedger(campaignLedger, filterText),
+				display: true,
+				details: {
+					filter: filterText,
+					summary: buildCampaignLedgerSummary(campaignLedger),
+					ledger: campaignLedger,
+				},
+			},
+			{ triggerTurn: false },
+		);
+	};
+
 	const observeArtifact = async (
 		ctx: ExtensionContext,
 		path: string,
@@ -820,6 +886,36 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		if (options?.notify !== false) {
 			ctx.ui.notify(`pire safety: ${currentSafety.scope}/${currentSafety.intent}`, "info");
 		}
+	};
+
+	const syncCampaignUI = (ctx: ExtensionContext): void => {
+		updateCampaignStatus(ctx, campaignLedger);
+	};
+
+	const syncCampaignFinding = async (
+		ctx: ExtensionContext,
+		findingId: string,
+		summary: string,
+	): Promise<void> => {
+		const finding = findingsTracker.findings.find((record) => record.id === findingId);
+		if (!finding) {
+			return;
+		}
+		const result = upsertCampaignFinding(campaignLedger, {
+			finding,
+			tracker: findingsTracker,
+			artifacts: artifactManifest.artifacts,
+		});
+		await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+			findingId: result.record.id,
+			action: result.created ? "create" : "sync",
+			summary,
+			details: result.created
+				? `created campaign record ${result.record.id} with status ${result.record.status}`
+				: `synced campaign record ${result.record.id} with status ${result.record.status}`,
+		});
+		await persistCampaign();
+		syncCampaignUI(ctx);
 	};
 
 	const applyFocus = (
@@ -1069,6 +1165,17 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				await observeArtifact(ctx, file.bundledPath, "command:repro-bundle", { type: file.type });
 			}
 		}
+		const campaignRecord = addCampaignReportPath(campaignLedger, { id: finding.id, path: bundle.readmePath });
+		if (campaignRecord) {
+			await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+				findingId: campaignRecord.id,
+				action: "report",
+				summary: `Attached repro bundle readme for ${campaignRecord.id}`,
+				details: bundle.readmePath,
+			});
+			await persistCampaign();
+			syncCampaignUI(ctx);
+		}
 		pi.sendMessage(
 			{
 				customType: "pire-repro-bundle",
@@ -1248,6 +1355,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						reproStatus: params.reproStatus,
 					});
 					await persistTracker();
+					await syncCampaignFinding(ctx, record.id, `Synced ${record.id} into the campaign ledger from research_tracker add_finding.`);
 					syncTrackerUI(ctx);
 					applyFocus(ctx, { findingIds: [record.id] }, { notify: false });
 					resultText = `Added finding ${record.id}: ${record.title}`;
@@ -1278,6 +1386,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						break;
 					}
 					await persistTracker();
+					await syncCampaignFinding(ctx, record.id, `Synced ${record.id} into the campaign ledger from research_tracker update_finding.`);
 					syncTrackerUI(ctx);
 					applyFocus(ctx, { findingIds: [record.id] }, { notify: false });
 					resultText = `Updated finding ${record.id}: ${record.status}`;
@@ -2102,6 +2211,96 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("campaign", {
+		description: "Show the current pire campaign ledger, optionally filtered by substring",
+		handler: async (args) => {
+			const filterText = args.trim();
+			showCampaign(filterText.length > 0 ? filterText : undefined);
+		},
+	});
+
+	pi.registerCommand("campaign-detail", {
+		description: "Show one campaign finding with its current status, note, and linked evidence",
+		handler: async (args) => {
+			const id = args.trim();
+			if (!id) {
+				pi.sendMessage({ customType: "pire-campaign-detail", content: "Usage: /campaign-detail <finding-id>", display: true }, { triggerTurn: false });
+				return;
+			}
+			pi.sendMessage(
+				{
+					customType: "pire-campaign-detail",
+					content: renderCampaignDetail(campaignLedger, id),
+					display: true,
+				},
+				{ triggerTurn: false },
+			);
+		},
+	});
+
+	pi.registerCommand("campaign-status", {
+		description: "Update the campaign ledger status: /campaign-status <id> <lead|confirmed|submitted|de-escalated|blocked> :: <reason>",
+		handler: async (args, ctx) => {
+			const trimmed = args.trim();
+			if (!trimmed) {
+				ctx.ui.notify("Usage: /campaign-status <id> <lead|confirmed|submitted|de-escalated|blocked> :: <reason>", "warning");
+				return;
+			}
+			const [head, notePart] = trimmed.split(/\s*::\s*/, 2);
+			const [id, statusText] = head.trim().split(/\s+/, 2);
+			if (!id || !statusText || !notePart?.trim()) {
+				ctx.ui.notify("Usage: /campaign-status <id> <lead|confirmed|submitted|de-escalated|blocked> :: <reason>", "warning");
+				return;
+			}
+			if (
+				statusText !== "lead" &&
+				statusText !== "confirmed" &&
+				statusText !== "submitted" &&
+				statusText !== "de-escalated" &&
+				statusText !== "blocked"
+			) {
+				ctx.ui.notify(`Unknown campaign status: ${statusText}`, "error");
+				return;
+			}
+			const record = updateCampaignFindingStatus(campaignLedger, {
+				id,
+				status: statusText as CampaignFindingStatus,
+				note: notePart,
+			});
+			if (!record) {
+				ctx.ui.notify(`Unknown campaign finding: ${id}`, "error");
+				return;
+			}
+			await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+				findingId: record.id,
+				action: "status",
+				summary: `Set ${record.id} to ${record.status}`,
+				details: notePart.trim(),
+			});
+			await persistCampaign();
+			syncCampaignUI(ctx);
+			ctx.ui.notify(`Campaign ${record.id}: ${record.status}`, "info");
+		},
+	});
+
+	pi.registerCommand("campaign-sync", {
+		description: "Sync session findings into the campaign ledger: /campaign-sync [finding-id]",
+		handler: async (args, ctx) => {
+			const findingId = args.trim();
+			const findings = findingId
+				? findingsTracker.findings.filter((record) => record.id === findingId)
+				: findingsTracker.findings;
+			if (findings.length === 0) {
+				ctx.ui.notify(findingId ? `Unknown finding: ${findingId}` : "No findings to sync", "warning");
+				return;
+			}
+			for (const finding of findings) {
+				await syncCampaignFinding(ctx, finding.id, `Synced ${finding.id} into the campaign ledger from /campaign-sync.`);
+			}
+			ctx.ui.notify(`Synced ${findings.length} finding(s) into the campaign ledger`, "info");
+		},
+	});
+
 	pi.registerCommand("tracker-detail", {
 		description: "Show one tracker record with linked evidence, artifacts, and questions",
 		handler: async (args, ctx) => {
@@ -2211,6 +2410,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				relatedArtifactIds: hypothesis.relatedArtifactIds,
 			});
 			await persistTracker();
+			await syncCampaignFinding(ctx, finding.id, `Synced ${finding.id} into the campaign ledger from /promote-finding.`);
 			syncTrackerUI(ctx);
 			applyFocus(ctx, { hypothesisIds: [hypothesis.id], findingIds: [finding.id] }, { notify: false });
 			ctx.ui.notify(`Created finding ${finding.id}`, "info");
@@ -2347,6 +2547,10 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			.getBranch()
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === INVENTORY_ENTRY_TYPE)
 			.pop() as { data?: PersistedInventoryState } | undefined;
+		const latestCampaignEntry = ctx.sessionManager
+			.getBranch()
+			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === CAMPAIGN_ENTRY_TYPE)
+			.pop() as { data?: PersistedCampaignState } | undefined;
 			const latestFocusEntry = ctx.sessionManager
 				.getBranch()
 				.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === FOCUS_ENTRY_TYPE)
@@ -2360,6 +2564,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		const flagSessionType =
 			typeof sessionTypeFlagValue === "string" && isPireSessionType(sessionTypeFlagValue) ? sessionTypeFlagValue : undefined;
 		artifactManifest = await loadArtifactManifest(ctx.cwd);
+			campaignLedger = latestCampaignEntry?.data?.ledger ?? (await loadCampaignLedger(ctx.cwd));
 			findingsTracker = latestTrackerEntry?.data?.tracker ?? (await loadFindingsTracker(ctx.cwd));
 			lastActivity = latestActivityEntry?.data;
 			currentInventory = latestInventoryEntry?.data?.inventory;
@@ -2376,6 +2581,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			}
 			updateFocusStatus(ctx, currentFocus);
 			updateSafetyStatus(ctx, currentSafety);
+			updateCampaignStatus(ctx, campaignLedger);
 			if (!currentInventory || currentInventory.cwd !== ctx.cwd) {
 			const inventory = await collectEnvironmentInventory(ctx.cwd, (command, args) => pi.exec(command, args, { cwd: ctx.cwd }));
 			persistInventory(inventory, "auto");
@@ -2405,6 +2611,10 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			.getBranch()
 			.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === INVENTORY_ENTRY_TYPE)
 			.pop() as { data?: PersistedInventoryState } | undefined;
+			const latestCampaignEntry = ctx.sessionManager
+				.getBranch()
+				.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === CAMPAIGN_ENTRY_TYPE)
+				.pop() as { data?: PersistedCampaignState } | undefined;
 			const latestFocusEntry = ctx.sessionManager
 				.getBranch()
 				.filter((entry: { type: string; customType?: string }) => entry.type === "custom" && entry.customType === FOCUS_ENTRY_TYPE)
@@ -2417,6 +2627,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			currentRole = latestRoleEntry?.data?.role ?? currentRole;
 			currentSessionType = latestSessionTypeEntry?.data?.sessionType ?? currentSessionType;
 			currentInventory = latestInventoryEntry?.data?.inventory ?? currentInventory;
+			campaignLedger = latestCampaignEntry?.data?.ledger ?? campaignLedger;
 			currentFocus = latestFocusEntry?.data ?? createEmptyFocusState();
 			currentSafety = latestSafetyEntry?.data?.posture ?? currentSafety;
 			syncTrackerUI(ctx);
@@ -2424,6 +2635,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			updateSessionTypeStatus(ctx, currentSessionType);
 			updateFocusStatus(ctx, currentFocus);
 			updateSafetyStatus(ctx, currentSafety);
+			updateCampaignStatus(ctx, campaignLedger);
 		});
 
 	pi.on("before_agent_start", async (_event, ctx) => {
@@ -2440,6 +2652,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						currentRole ? formatRolePrompt(currentRole) : undefined,
 						buildSafetyPrompt(currentSafety),
 						buildInventoryPromptSummary(currentInventory),
+						buildCampaignPromptSummary(campaignLedger),
 						buildFindingsPromptSummary(findingsTracker, {
 						activeHypothesisIds: currentFocus.hypothesisIds,
 						activeFindingIds: currentFocus.findingIds,

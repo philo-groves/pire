@@ -206,4 +206,54 @@ describe("pire research runtime features", () => {
 			title: "Out-of-bounds read",
 		});
 	});
+
+	it("persists a campaign ledger and journal alongside session findings", async () => {
+		const harness = await createHarness({
+			extensionFactories: [{ factory: pireExtension, path: PIRE_EXTENSION_PATH }],
+		});
+		harnesses.push(harness);
+
+		await harness.session.bindExtensions({ shutdownHandler: () => {} });
+
+		harness.setResponses([
+			fauxAssistantMessage(
+				[
+					fauxToolCall("research_tracker", {
+						action: "add_finding",
+						title: "Sandbox escape candidate",
+						statement: "Initial review suggests a reachable trust-boundary bypass.",
+						status: "candidate",
+						severity: "high",
+						reproStatus: "not-reproduced",
+					}),
+				],
+				{ stopReason: "toolUse" },
+			),
+			(context) => fauxAssistantMessage(getToolResultText(context.messages)),
+		]);
+
+		await harness.session.prompt("record the current candidate finding");
+		await harness.session.prompt(
+			"/campaign-status find-001 de-escalated :: disproved after cross-boundary validation failed on the real target",
+		);
+
+		const campaignJsonPath = join(harness.tempDir, ".pire", "campaign.json");
+		const campaignStatusPath = join(harness.tempDir, ".pire", "STATUS.md");
+		const journalPath = join(harness.tempDir, ".pire", "journal", `${new Date().toISOString().slice(0, 10)}.md`);
+
+		expect(existsSync(campaignJsonPath)).toBe(true);
+		expect(existsSync(campaignStatusPath)).toBe(true);
+		expect(existsSync(journalPath)).toBe(true);
+
+		const campaign = JSON.parse(readFileSync(campaignJsonPath, "utf-8")) as {
+			findings: Array<{ id: string; status: string; note?: string }>;
+		};
+		expect(campaign.findings[0]).toMatchObject({
+			id: "find-001",
+			status: "de-escalated",
+		});
+		expect(campaign.findings[0]?.note).toContain("cross-boundary validation failed");
+		expect(readFileSync(campaignStatusPath, "utf-8")).toContain("de-escalated");
+		expect(readFileSync(journalPath, "utf-8")).toContain("Set find-001 to de-escalated");
+	});
 });
