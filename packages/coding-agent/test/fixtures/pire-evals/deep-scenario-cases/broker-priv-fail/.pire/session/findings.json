@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T21:00:00.000Z",
+  "findings": [
+    {
+      "id": "find-broker-fail-001",
+      "title": "Broker chain stops after cross-component leak with no write primitive",
+      "status": "candidate",
+      "severity": "medium",
+      "statement": "The renderer trigger yields a cross-component leak, but the write, reuse, broker escape, and privileged action stages remain unproven.",
+      "basis": ["ev-broker-fail-001"],
+      "relatedEvidenceIds": ["ev-broker-fail-001"],
+      "relatedArtifactIds": ["artifact:/tmp/broker-fail.log"],
+      "reproStatus": "partial",
+      "createdAt": "2026-04-07T20:51:00.000Z",
+      "updatedAt": "2026-04-07T20:58:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-broker-fail-001",
+      "kind": "tool-result",
+      "summary": "disassembly and gdb recover the leak stage but fail to prove write, reuse, or broker escape",
+      "commandId": "tool:bash:broker-fail-01",
+      "artifactIds": ["artifact:/tmp/broker-fail.log"],
+      "supports": ["find-broker-fail-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T20:53:00.000Z"
+    }
+  ]
+}

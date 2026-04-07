@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T20:40:00.000Z",
+  "findings": [
+    {
+      "id": "find-broker-pass-001",
+      "title": "Broker chain reaches privileged action after renderer-to-broker pivot",
+      "status": "reported",
+      "severity": "critical",
+      "statement": "Attacker-controlled renderer content yields a disclosure, write primitive, reuse pivot, broker escape, and privileged action beyond renderer code execution.",
+      "basis": ["ev-broker-pass-001"],
+      "relatedEvidenceIds": ["ev-broker-pass-001"],
+      "relatedArtifactIds": ["artifact:/tmp/broker-pass.log", "artifact:/tmp/broker-pass-proof.txt"],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T20:31:00.000Z",
+      "updatedAt": "2026-04-07T20:38:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-broker-pass-001",
+      "kind": "tool-result",
+      "summary": "gdb plus strace confirm renderer leak, write primitive, broker escape, and privileged action",
+      "commandId": "tool:bash:broker-pass-01",
+      "artifactIds": ["artifact:/tmp/broker-pass.log", "artifact:/tmp/broker-pass-proof.txt"],
+      "supports": ["find-broker-pass-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T20:33:00.000Z"
+    }
+  ]
+}

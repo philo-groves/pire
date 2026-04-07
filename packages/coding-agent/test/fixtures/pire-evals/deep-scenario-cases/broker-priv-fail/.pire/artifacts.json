@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T21:00:00.000Z",
+  "artifacts": [
+    {
+      "path": "/tmp/broker-fail.log",
+      "type": "log"
+    }
+  ]
+}

@@ -41,6 +41,7 @@
 - Added real outcome expectations to the persisted chain and scenario fixture metadata, so the shipped eval corpus now carries baseline-ready pass / near-miss / fail gates in `case.json` and `cases.json` instead of relying only on synthetic regression tests.
 - Expanded the starter binary-RE corpus with three harder end-to-end scenarios targeting sandbox escape, updater trust bypass, and broker-mediated privileged actions, including new 5-stage and 6-stage paths intended to expose harness weaknesses in long-horizon planning, cross-boundary state tracking, and proof discipline.
 - Added a persisted deep-scenario fixture suite for the new plugin-host sandbox-escape path, including pass / near-miss / fail `.pire` session cases so the harness can now score a concrete 5-stage scenario ladder instead of only defining the deeper tasks in the corpus.
+- Extended the persisted deep-scenario fixture suite with a second pass / near-miss / fail ladder for the 6-stage renderer-to-broker privileged-action path, so the harness can distinguish sandbox-themed failures from deeper long-horizon chain-depth failures.
 
 ### Changed
 

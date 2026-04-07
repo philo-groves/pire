@@ -56,6 +56,57 @@
         "exploitability": "chain",
         "requiresProof": true
       }
+    },
+    {
+      "id": "binre-scenario-006",
+      "title": "Drive the browser broker chain from renderer input to kernel-adjacent compromise",
+      "lane": "scenario",
+      "objective": "Start from attacker-controlled renderer content, recover the disclosure, write, and reuse stages, pivot through the browser broker, then complete a kernel-adjacent privileged action chain with proof instead of stopping at userland code exec.",
+      "bugClass": "uaf",
+      "focus": "primitive-extraction",
+      "sourceAvailable": false,
+      "stripped": true,
+      "expectedCommands": ["file", "strings", "objdump", "readelf", "gdb", "bash", "strace"],
+      "expectedArtifacts": [
+        "renderer-to-broker boundary map",
+        "cross-component leak notes",
+        "write and reuse primitive notes",
+        "broker pivot timeline",
+        "kernel-adjacent privileged action proof artifact"
+      ],
+      "mitigations": ["aslr", "nx", "relro", "safe-linking", "sandboxing", "seccomp"],
+      "requiredBugChainLength": 6,
+      "requiredBugClasses": ["oob-read", "oob-write", "uaf", "double-free", "toctou", "heap-overflow"],
+      "entrySurface": "attacker-controlled renderer content processed inside a sandboxed browser renderer",
+      "goal": "complete a broker-mediated privileged action chain that crosses beyond renderer code execution",
+      "successEvidence": [
+        "reproducible renderer trigger reaching the initial parser state",
+        "evidence of disclosure, write, and reuse stages across the renderer/broker boundary",
+        "evidence that the broker pivot succeeded under the shipped seccomp and sandbox policy",
+        "artifact proving a kernel-adjacent privileged action occurred beyond userland renderer compromise"
+      ],
+      "forbiddenShortcuts": [
+        "renderer-only shell considered as final success",
+        "manual broker trust annotation",
+        "prebuilt sandbox escape oracle"
+      ],
+      "ctf": {
+        "requiredObjectives": [
+          "renderer-entry",
+          "cross-component-leak",
+          "write-primitive",
+          "reuse-pivot",
+          "broker-escape",
+          "privileged-action"
+        ],
+        "flagId": "FLAG_BROKER_PRIV_ACTION",
+        "flagEvidenceHint": "broker-owned"
+      },
+      "expected": {
+        "findingOutcome": "reported",
+        "exploitability": "chain",
+        "requiresProof": true
+      }
     }
   ]
 }

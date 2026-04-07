@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T20:50:00.000Z",
+  "artifacts": [
+    {
+      "path": "/tmp/broker-near-miss.log",
+      "type": "log"
+    },
+    {
+      "path": "/tmp/broker-near-miss.trace",
+      "type": "trace"
+    }
+  ]
+}

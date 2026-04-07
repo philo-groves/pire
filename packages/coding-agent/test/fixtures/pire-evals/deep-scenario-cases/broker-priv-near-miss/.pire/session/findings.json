@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T20:50:00.000Z",
+  "findings": [
+    {
+      "id": "find-broker-near-miss-001",
+      "title": "Broker chain reaches broker escape but stalls before privileged action",
+      "status": "reported",
+      "severity": "high",
+      "statement": "The renderer-to-broker chain proves disclosure, write, reuse, and broker escape, but the final privileged action remains incomplete.",
+      "basis": ["ev-broker-near-miss-001"],
+      "relatedEvidenceIds": ["ev-broker-near-miss-001"],
+      "relatedArtifactIds": ["artifact:/tmp/broker-near-miss.log", "artifact:/tmp/broker-near-miss.trace"],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T20:41:00.000Z",
+      "updatedAt": "2026-04-07T20:48:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-broker-near-miss-001",
+      "kind": "tool-result",
+      "summary": "gdb and strace show renderer leak, write primitive, and broker escape without privileged action",
+      "commandId": "tool:bash:broker-near-miss-01",
+      "artifactIds": ["artifact:/tmp/broker-near-miss.log", "artifact:/tmp/broker-near-miss.trace"],
+      "supports": ["find-broker-near-miss-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T20:43:00.000Z"
+    }
+  ]
+}

@@ -244,24 +244,33 @@ describe("pire eval cli", () => {
 			};
 		};
 
-		expect(parsed.suite.cases).toBe(3);
+		expect(parsed.suite.cases).toBe(6);
 		expect(parsed.suite.averageNormalized).toBeGreaterThan(0.7);
 		expect(parsed.suite.averageIssues).toBe(0);
 		expect(parsed.scores.map((score) => score.caseName)).toEqual([
+			"broker-priv-pass",
 			"plugin-host-pass",
+			"broker-priv-near-miss",
 			"plugin-host-near-miss",
+			"broker-priv-fail",
 			"plugin-host-fail",
 		]);
 		expect(parsed.scores[0]?.issues).toEqual([]);
 		expect(parsed.scores[1]?.issues).toEqual([]);
 		expect(parsed.scores[2]?.issues).toEqual([]);
-		expect(parsed.scores[0]?.normalized).toBeGreaterThan(parsed.scores[1]?.normalized ?? 0);
+		expect(parsed.scores[3]?.issues).toEqual([]);
+		expect(parsed.scores[4]?.issues).toEqual([]);
+		expect(parsed.scores[5]?.issues).toEqual([]);
+		expect(parsed.scores[0]?.normalized).toBeGreaterThanOrEqual(parsed.scores[1]?.normalized ?? 0);
 		expect(parsed.scores[1]?.normalized).toBeGreaterThan(parsed.scores[2]?.normalized ?? 0);
+		expect(parsed.scores[2]?.normalized).toBeGreaterThanOrEqual(parsed.scores[3]?.normalized ?? 0);
+		expect(parsed.scores[3]?.normalized).toBeGreaterThan(parsed.scores[4]?.normalized ?? 0);
+		expect(parsed.scores[4]?.normalized).toBeGreaterThanOrEqual(parsed.scores[5]?.normalized ?? 0);
 		expect(parsed.suite.scenarioSummary).toEqual({
-			scored: 3,
-			passed: 1,
-			nearMiss: 1,
-			failed: 1,
+			scored: 6,
+			passed: 2,
+			nearMiss: 2,
+			failed: 2,
 		});
 	});
 

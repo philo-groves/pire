@@ -45,7 +45,14 @@ describe("pire eval session fixtures", () => {
 
 	test("extracts stable run bundles from pass, near-miss, and fail deep scenario fixture sessions", async () => {
 		const caseRoot = join(FIXTURE_DIR, "deep-scenario-cases");
-		for (const caseName of ["plugin-host-pass", "plugin-host-near-miss", "plugin-host-fail"]) {
+		for (const caseName of [
+			"plugin-host-pass",
+			"plugin-host-near-miss",
+			"plugin-host-fail",
+			"broker-priv-pass",
+			"broker-priv-near-miss",
+			"broker-priv-fail",
+		]) {
 			const cwd = join(caseRoot, caseName);
 			const result = await createPireEvalRunBundleFromBindingFile({
 				cwd,
@@ -167,43 +174,79 @@ describe("pire eval session fixtures", () => {
 
 	test("scores deep scenario fixture sessions into pass, near-miss, and fail order", async () => {
 		const caseRoot = join(FIXTURE_DIR, "deep-scenario-cases");
-		const passCase = join(caseRoot, "plugin-host-pass");
-		const nearMissCase = join(caseRoot, "plugin-host-near-miss");
-		const failCase = join(caseRoot, "plugin-host-fail");
+		const pluginPassCase = join(caseRoot, "plugin-host-pass");
+		const pluginNearMissCase = join(caseRoot, "plugin-host-near-miss");
+		const pluginFailCase = join(caseRoot, "plugin-host-fail");
+		const brokerPassCase = join(caseRoot, "broker-priv-pass");
+		const brokerNearMissCase = join(caseRoot, "broker-priv-near-miss");
+		const brokerFailCase = join(caseRoot, "broker-priv-fail");
 
-		const passResult = await scorePireEvalSessionFromFiles({
-			cwd: passCase,
+		const pluginPassResult = await scorePireEvalSessionFromFiles({
+			cwd: pluginPassCase,
 			suitePath: DEEP_SCENARIO_SUITE_PATH,
-			bindingsPath: join(passCase, "bindings.json"),
+			bindingsPath: join(pluginPassCase, "bindings.json"),
 		});
-		const nearMissResult = await scorePireEvalSessionFromFiles({
-			cwd: nearMissCase,
+		const pluginNearMissResult = await scorePireEvalSessionFromFiles({
+			cwd: pluginNearMissCase,
 			suitePath: DEEP_SCENARIO_SUITE_PATH,
-			bindingsPath: join(nearMissCase, "bindings.json"),
+			bindingsPath: join(pluginNearMissCase, "bindings.json"),
 		});
-		const failResult = await scorePireEvalSessionFromFiles({
-			cwd: failCase,
+		const pluginFailResult = await scorePireEvalSessionFromFiles({
+			cwd: pluginFailCase,
 			suitePath: DEEP_SCENARIO_SUITE_PATH,
-			bindingsPath: join(failCase, "bindings.json"),
+			bindingsPath: join(pluginFailCase, "bindings.json"),
+		});
+		const brokerPassResult = await scorePireEvalSessionFromFiles({
+			cwd: brokerPassCase,
+			suitePath: DEEP_SCENARIO_SUITE_PATH,
+			bindingsPath: join(brokerPassCase, "bindings.json"),
+		});
+		const brokerNearMissResult = await scorePireEvalSessionFromFiles({
+			cwd: brokerNearMissCase,
+			suitePath: DEEP_SCENARIO_SUITE_PATH,
+			bindingsPath: join(brokerNearMissCase, "bindings.json"),
+		});
+		const brokerFailResult = await scorePireEvalSessionFromFiles({
+			cwd: brokerFailCase,
+			suitePath: DEEP_SCENARIO_SUITE_PATH,
+			bindingsPath: join(brokerFailCase, "bindings.json"),
 		});
 
-		expect(passResult.bindingFile.runId).toBe("deep-plugin-pass-001");
-		expect(nearMissResult.bindingFile.runId).toBe("deep-plugin-near-miss-001");
-		expect(failResult.bindingFile.runId).toBe("deep-plugin-fail-001");
-		expect(passResult.score.taskScores).toHaveLength(1);
-		expect(nearMissResult.score.taskScores).toHaveLength(1);
-		expect(failResult.score.taskScores).toHaveLength(1);
-		expect(passResult.score.taskScores[0]?.issues).toEqual([]);
-		expect(nearMissResult.score.taskScores[0]?.issues).toEqual([
+		expect(pluginPassResult.bindingFile.runId).toBe("deep-plugin-pass-001");
+		expect(pluginNearMissResult.bindingFile.runId).toBe("deep-plugin-near-miss-001");
+		expect(pluginFailResult.bindingFile.runId).toBe("deep-plugin-fail-001");
+		expect(pluginPassResult.score.taskScores).toHaveLength(1);
+		expect(pluginNearMissResult.score.taskScores).toHaveLength(1);
+		expect(pluginFailResult.score.taskScores).toHaveLength(1);
+		expect(pluginPassResult.score.taskScores[0]?.issues).toEqual([]);
+		expect(pluginNearMissResult.score.taskScores[0]?.issues).toEqual([
 			"missing required objectives: sandbox-escape",
 			"ctf task requires captured flag evidence for FLAG_PLUGIN_HOST_ESCAPE",
 		]);
-		expect(failResult.score.taskScores[0]?.issues).toEqual([
+		expect(pluginFailResult.score.taskScores[0]?.issues).toEqual([
 			"missing required objectives: allocator-corruption, callback-pivot, sandbox-escape",
 			"ctf task requires captured flag evidence for FLAG_PLUGIN_HOST_ESCAPE",
 		]);
-		expect(passResult.score.earned).toBeGreaterThan(nearMissResult.score.earned);
-		expect(nearMissResult.score.earned).toBeGreaterThan(failResult.score.earned);
+		expect(pluginPassResult.score.earned).toBeGreaterThan(pluginNearMissResult.score.earned);
+		expect(pluginNearMissResult.score.earned).toBeGreaterThan(pluginFailResult.score.earned);
+
+		expect(brokerPassResult.bindingFile.runId).toBe("deep-broker-pass-001");
+		expect(brokerNearMissResult.bindingFile.runId).toBe("deep-broker-near-miss-001");
+		expect(brokerFailResult.bindingFile.runId).toBe("deep-broker-fail-001");
+		expect(brokerPassResult.score.taskScores).toHaveLength(1);
+		expect(brokerNearMissResult.score.taskScores).toHaveLength(1);
+		expect(brokerFailResult.score.taskScores).toHaveLength(1);
+		expect(brokerPassResult.score.taskScores[0]?.issues).toEqual([]);
+		expect(brokerNearMissResult.score.taskScores[0]?.issues).toEqual([
+			"missing required objectives: privileged-action",
+			"ctf task requires captured flag evidence for FLAG_BROKER_PRIV_ACTION",
+		]);
+		expect(brokerFailResult.score.taskScores[0]?.issues).toEqual([
+			"missing required objectives: write-primitive, reuse-pivot, broker-escape, privileged-action",
+			"ctf task requires captured flag evidence for FLAG_BROKER_PRIV_ACTION",
+		]);
+		expect(brokerPassResult.score.earned).toBeGreaterThan(brokerNearMissResult.score.earned);
+		expect(brokerNearMissResult.score.earned).toBeGreaterThan(brokerFailResult.score.earned);
 	});
 
 	test("scores chain fixture sessions into pass, near-miss, and fail order", async () => {
