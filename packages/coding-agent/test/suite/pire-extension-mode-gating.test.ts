@@ -72,7 +72,16 @@ describe("pire extension mode and tool gating", () => {
 		"binary_nm",
 		"binary_xxd",
 	];
-	const expectedProofingTools = [...expectedReconTools.slice(0, 2), "edit", "write", ...expectedReconTools.slice(2)];
+	const expectedDynamicOnlyTools = ["debug_gdb", "debug_lldb", "debug_strace", "debug_ltrace"];
+	const expectedDynamicTools = [...expectedReconTools, ...expectedDynamicOnlyTools];
+	const expectedProofingTools = [
+		...expectedReconTools.slice(0, 2),
+		"edit",
+		"write",
+		...expectedReconTools.slice(2),
+		...expectedDynamicOnlyTools,
+	];
+	const expectedReportTools = [...expectedReconTools.slice(0, 2), "edit", "write", ...expectedReconTools.slice(2)];
 
 	const getToolResultText = (messages: Message[]): string => {
 		const toolResult = [...messages]
@@ -158,6 +167,25 @@ describe("pire extension mode and tool gating", () => {
 		expect(log).toContain("edit:/tmp/proof.txt");
 	});
 
+	it("exposes debug tools only after switching to dynamic mode", async () => {
+		const log: string[] = [];
+		const harness = await createHarness({
+			tools: createToolSet(log),
+			extensionFactories: [{ factory: pireExtension, path: PIRE_EXTENSION_PATH }],
+		});
+		harnesses.push(harness);
+
+		await harness.session.bindExtensions({ shutdownHandler: () => {} });
+
+		expect(harness.session.getActiveToolNames()).toEqual(expectedReconTools);
+
+		await harness.session.prompt("/dynamic");
+		expect(harness.session.getActiveToolNames()).toEqual(expectedDynamicTools);
+
+		await harness.session.prompt("/report");
+		expect(harness.session.getActiveToolNames()).toEqual(expectedReportTools);
+	});
+
 	it("registers binary wrapper results as artifacts", async () => {
 		const log: string[] = [];
 		const harness = await createHarness({
@@ -193,5 +221,21 @@ describe("pire extension mode and tool gating", () => {
 		expect(manifest.artifacts.find((artifact) => artifact.path === samplePath)?.relatedCommands[0]).toContain(
 			"file -b",
 		);
+
+		const artifactEntries = harness.sessionManager
+			.getEntries()
+			.filter((entry) => entry.type === "custom" && entry.customType === "pire-artifacts");
+		const latestArtifactEntry = artifactEntries.at(-1) as
+			| {
+					data?: {
+						count?: number;
+						byType?: Record<string, number>;
+						recentPaths?: string[];
+					};
+			  }
+			| undefined;
+		expect(latestArtifactEntry?.data?.count).toBe(1);
+		expect(latestArtifactEntry?.data?.byType?.binary).toBe(1);
+		expect(latestArtifactEntry?.data?.recentPaths).toContain(samplePath);
 	});
 });

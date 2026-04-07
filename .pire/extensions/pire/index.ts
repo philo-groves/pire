@@ -11,6 +11,15 @@ import {
 	type BinaryToolDetails,
 } from "./binary.js";
 import {
+	runDebugGdb,
+	runDebugLldb,
+	runDebugLtrace,
+	runDebugStrace,
+	type DebugArtifactObservation,
+	type DebugToolDetails,
+} from "./debug.js";
+import {
+	buildArtifactManifestSummary,
 	loadArtifactManifest,
 	recordArtifact,
 	resolveArtifactPath,
@@ -58,6 +67,10 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"binary_objdump",
 		"binary_nm",
 		"binary_xxd",
+		"debug_gdb",
+		"debug_lldb",
+		"debug_strace",
+		"debug_ltrace",
 	],
 	proofing: [
 		"read",
@@ -74,6 +87,10 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"binary_objdump",
 		"binary_nm",
 		"binary_xxd",
+		"debug_gdb",
+		"debug_lldb",
+		"debug_strace",
+		"debug_ltrace",
 	],
 	report: [
 		"read",
@@ -250,6 +267,13 @@ function getBinaryToolDetails(eventDetails: unknown): BinaryToolDetails | undefi
 	return eventDetails as BinaryToolDetails;
 }
 
+function getDebugToolDetails(eventDetails: unknown): DebugToolDetails | undefined {
+	if (!eventDetails || typeof eventDetails !== "object" || !("artifacts" in eventDetails)) {
+		return undefined;
+	}
+	return eventDetails as DebugToolDetails;
+}
+
 export default function pireExtension(pi: ExtensionAPI): void {
 	let currentMode: PireMode = "recon";
 	let currentCwd = process.cwd();
@@ -261,10 +285,13 @@ export default function pireExtension(pi: ExtensionAPI): void {
 
 	const persistArtifacts = async (): Promise<void> => {
 		const manifestPath = await saveArtifactManifest(currentCwd, artifactManifest);
+		const summary = buildArtifactManifestSummary(artifactManifest);
 		pi.appendEntry(ARTIFACT_ENTRY_TYPE, {
 			updatedAt: artifactManifest.updatedAt,
 			count: artifactManifest.artifacts.length,
 			manifestPath,
+			byType: summary.byType,
+			recentPaths: summary.recentPaths,
 		});
 	};
 
@@ -291,13 +318,17 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		);
 	};
 
-	const showArtifacts = (): void => {
+	const showArtifacts = (filterText?: string): void => {
 		pi.sendMessage(
 			{
 				customType: "pire-artifact-manifest",
-				content: summarizeArtifactManifest(artifactManifest),
+				content: summarizeArtifactManifest(artifactManifest, filterText),
 				display: true,
-				details: artifactManifest,
+				details: {
+					manifest: artifactManifest,
+					summary: buildArtifactManifestSummary(artifactManifest),
+					filter: filterText,
+				},
 			},
 			{ triggerTurn: false },
 		);
@@ -501,6 +532,132 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerTool({
+		name: "debug_gdb",
+		label: "Debug GDB",
+		description: "Run bounded batch-mode GDB inspection commands against a target binary.",
+		promptSnippet: "Use debug_gdb for structured debugger inspection in dynamic analysis sessions.",
+		promptGuidelines: ["Use debug_gdb for read-only inspection such as info file or shared libraries."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary to inspect with gdb." }),
+			view: Type.Optional(
+				Type.Union([
+					Type.Literal("info-file"),
+					Type.Literal("info-functions"),
+					Type.Literal("info-sharedlibrary"),
+				]),
+			),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDebugGdb(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				path,
+				params.view ?? "info-file",
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "debug_lldb",
+		label: "Debug LLDB",
+		description: "Run bounded batch-mode LLDB inspection commands against a target binary.",
+		promptSnippet: "Use debug_lldb for structured LLDB inspection in dynamic analysis sessions.",
+		promptGuidelines: ["Use debug_lldb for read-only target inspection when LLDB is the available debugger."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary to inspect with lldb." }),
+			view: Type.Optional(
+				Type.Union([
+					Type.Literal("image-list"),
+					Type.Literal("target-modules"),
+					Type.Literal("breakpoint-list"),
+				]),
+			),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDebugLldb(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				path,
+				params.view ?? "image-list",
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "debug_strace",
+		label: "Debug Strace",
+		description: "Trace a target execution with strace and register the resulting trace log as an artifact.",
+		promptSnippet: "Use debug_strace to capture syscall traces into durable artifacts.",
+		promptGuidelines: ["Use debug_strace in dynamic mode when syscall-level evidence matters."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the executable to trace." }),
+			argv: Type.Optional(Type.Array(Type.String())),
+			followForks: Type.Optional(Type.Boolean({ default: true })),
+			stringLimit: Type.Optional(Type.Integer({ minimum: 32, maximum: 8192, default: 256 })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDebugStrace(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				{
+					argv: params.argv ?? [],
+					followForks: params.followForks ?? true,
+					stringLimit: params.stringLimit ?? 256,
+				},
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "debug_ltrace",
+		label: "Debug Ltrace",
+		description: "Trace library calls with ltrace and register the resulting trace log as an artifact.",
+		promptSnippet: "Use debug_ltrace to capture library-call traces into durable artifacts.",
+		promptGuidelines: ["Use debug_ltrace in dynamic mode when libc or PLT call behavior matters."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the executable to trace." }),
+			argv: Type.Optional(Type.Array(Type.String())),
+			followForks: Type.Optional(Type.Boolean({ default: true })),
+			stringLimit: Type.Optional(Type.Integer({ minimum: 32, maximum: 8192, default: 256 })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDebugLtrace(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				{
+					argv: params.argv ?? [],
+					followForks: params.followForks ?? true,
+					stringLimit: params.stringLimit ?? 256,
+				},
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
 	pi.registerCommand("mode", {
 		description: "Show or change pire mode: /mode [recon|dynamic|proofing|report]",
 		handler: async (args, ctx) => {
@@ -541,9 +698,10 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("artifacts", {
-		description: "Show the current pire artifact manifest summary",
-		handler: async () => {
-			showArtifacts();
+		description: "Show the current pire artifact manifest summary, optionally filtered by type or substring",
+		handler: async (args) => {
+			const filterText = args.trim();
+			showArtifacts(filterText.length > 0 ? filterText : undefined);
 		},
 	});
 
@@ -631,6 +789,18 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
 					type: artifact.type as ArtifactType | undefined,
 					command: artifact.command ?? binaryDetails.commandString,
+					finding: artifact.finding,
+				});
+			}
+			return;
+		}
+
+		const debugDetails = getDebugToolDetails(event.details);
+		if (debugDetails) {
+			for (const artifact of debugDetails.artifacts as DebugArtifactObservation[]) {
+				await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
+					type: artifact.type as ArtifactType | undefined,
+					command: artifact.command ?? debugDetails.commandString,
 					finding: artifact.finding,
 				});
 			}

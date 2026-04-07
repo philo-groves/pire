@@ -36,6 +36,12 @@ export interface ArtifactManifest {
 	artifacts: ArtifactRecord[];
 }
 
+export interface ArtifactManifestSummary {
+	total: number;
+	byType: Partial<Record<ArtifactType, number>>;
+	recentPaths: string[];
+}
+
 export interface ArtifactObservation {
 	path: string;
 	type?: ArtifactType;
@@ -188,14 +194,63 @@ export async function saveArtifactManifest(cwd: string, manifest: ArtifactManife
 	return manifestPath;
 }
 
-export function summarizeArtifactManifest(manifest: ArtifactManifest): string {
-	if (manifest.artifacts.length === 0) {
-		return "Artifact Manifest\n- no artifacts recorded yet";
+export function buildArtifactManifestSummary(manifest: ArtifactManifest): ArtifactManifestSummary {
+	const byType: Partial<Record<ArtifactType, number>> = {};
+	const sortedArtifacts = [...manifest.artifacts].sort((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
+
+	for (const artifact of manifest.artifacts) {
+		byType[artifact.type] = (byType[artifact.type] ?? 0) + 1;
 	}
 
-	const lines = [`Artifact Manifest`, `- updated: ${manifest.updatedAt}`, `- artifacts: ${manifest.artifacts.length}`];
+	return {
+		total: manifest.artifacts.length,
+		byType,
+		recentPaths: sortedArtifacts.slice(0, 5).map((artifact) => artifact.path),
+	};
+}
 
-	for (const artifact of manifest.artifacts.slice(0, 15)) {
+function matchesArtifactFilter(artifact: ArtifactRecord, filterText: string): boolean {
+	const normalizedFilter = filterText.trim().toLowerCase();
+	if (normalizedFilter.length === 0) {
+		return true;
+	}
+
+	return (
+		artifact.type.toLowerCase() === normalizedFilter ||
+		artifact.path.toLowerCase().includes(normalizedFilter) ||
+		artifact.relatedCommands.some((command) => command.toLowerCase().includes(normalizedFilter)) ||
+		artifact.relatedFindings.some((finding) => finding.toLowerCase().includes(normalizedFilter))
+	);
+}
+
+export function summarizeArtifactManifest(manifest: ArtifactManifest, filterText?: string): string {
+	const filteredArtifacts = filterText ? manifest.artifacts.filter((artifact) => matchesArtifactFilter(artifact, filterText)) : manifest.artifacts;
+	if (filteredArtifacts.length === 0) {
+		return filterText
+			? `Artifact Manifest\n- filter: ${filterText}\n- no matching artifacts`
+			: "Artifact Manifest\n- no artifacts recorded yet";
+	}
+
+	const summary = buildArtifactManifestSummary({ ...manifest, artifacts: filteredArtifacts });
+	const lines = [
+		`Artifact Manifest`,
+		`- updated: ${manifest.updatedAt}`,
+		`- artifacts: ${filteredArtifacts.length}`,
+	];
+
+	if (filterText) {
+		lines.push(`- filter: ${filterText}`);
+	}
+
+	const typeCounts = Object.entries(summary.byType)
+		.sort((left, right) => left[0].localeCompare(right[0]))
+		.map(([type, count]) => `${type}:${count}`)
+		.join(", ");
+	if (typeCounts.length > 0) {
+		lines.push(`- by type: ${typeCounts}`);
+	}
+
+	for (const artifact of filteredArtifacts.slice(0, 15)) {
 		const meta: string[] = [artifact.type];
 		if (artifact.sha256) {
 			meta.push(`sha256:${artifact.sha256.slice(0, 12)}`);
@@ -206,8 +261,8 @@ export function summarizeArtifactManifest(manifest: ArtifactManifest): string {
 		lines.push(`- ${artifact.path} (${meta.join(", ")})`);
 	}
 
-	if (manifest.artifacts.length > 15) {
-		lines.push(`- ... ${manifest.artifacts.length - 15} more artifacts`);
+	if (filteredArtifacts.length > 15) {
+		lines.push(`- ... ${filteredArtifacts.length - 15} more artifacts`);
 	}
 
 	return lines.join("\n");

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
 	type ArtifactManifest,
+	buildArtifactManifestSummary,
 	inferArtifactType,
 	recordArtifact,
 	summarizeArtifactManifest,
@@ -65,5 +66,75 @@ describe("pire artifact helpers", () => {
 		expect(summary).toContain("artifacts: 1");
 		expect(summary).toContain("/tmp/trace.log");
 		expect(summary).toContain("cmd:strace -o trace.log ./sample");
+	});
+
+	test("buildArtifactManifestSummary aggregates artifact types and recent paths", () => {
+		const manifest: ArtifactManifest = {
+			version: 1,
+			updatedAt: "2026-01-01T00:00:00.000Z",
+			artifacts: [
+				{
+					path: "/tmp/trace.log",
+					type: "log",
+					firstSeenAt: "2026-01-01T00:00:00.000Z",
+					lastSeenAt: "2026-01-01T00:00:01.000Z",
+					provenance: ["tool:bash"],
+					relatedCommands: ["strace -o trace.log ./sample"],
+					relatedFindings: [],
+				},
+				{
+					path: "/tmp/sample.bin",
+					type: "binary",
+					firstSeenAt: "2026-01-01T00:00:00.000Z",
+					lastSeenAt: "2026-01-01T00:00:02.000Z",
+					provenance: ["tool:binary_file"],
+					relatedCommands: ["file -b /tmp/sample.bin"],
+					relatedFindings: [],
+				},
+			],
+		};
+
+		const summary = buildArtifactManifestSummary(manifest);
+		expect(summary.total).toBe(2);
+		expect(summary.byType.binary).toBe(1);
+		expect(summary.byType.log).toBe(1);
+		expect(summary.recentPaths[0]).toBe("/tmp/sample.bin");
+	});
+
+	test("summarizeArtifactManifest filters by type or substring", () => {
+		const manifest: ArtifactManifest = {
+			version: 1,
+			updatedAt: "2026-01-01T00:00:00.000Z",
+			artifacts: [
+				{
+					path: "/tmp/report.md",
+					type: "report",
+					firstSeenAt: "2026-01-01T00:00:00.000Z",
+					lastSeenAt: "2026-01-01T00:00:00.000Z",
+					provenance: ["tool:write"],
+					relatedCommands: ["write /tmp/report.md"],
+					relatedFindings: ["final write-up"],
+				},
+				{
+					path: "/tmp/sample.bin",
+					type: "binary",
+					firstSeenAt: "2026-01-01T00:00:00.000Z",
+					lastSeenAt: "2026-01-01T00:00:00.000Z",
+					provenance: ["tool:binary_file"],
+					relatedCommands: ["file -b /tmp/sample.bin"],
+					relatedFindings: ["elf binary"],
+				},
+			],
+		};
+
+		const typeFiltered = summarizeArtifactManifest(manifest, "binary");
+		expect(typeFiltered).toContain("filter: binary");
+		expect(typeFiltered).toContain("/tmp/sample.bin");
+		expect(typeFiltered).not.toContain("/tmp/report.md");
+
+		const substringFiltered = summarizeArtifactManifest(manifest, "write-up");
+		expect(substringFiltered).toContain("filter: write-up");
+		expect(substringFiltered).toContain("/tmp/report.md");
+		expect(substringFiltered).not.toContain("/tmp/sample.bin");
 	});
 });
