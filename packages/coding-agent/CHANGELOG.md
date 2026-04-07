@@ -29,6 +29,7 @@
 - Added conventional `.pire/session/evals/` storage support for `pire-evals`, including named baseline saves/loads and named report sets so runs can update `last-good`, `main`, or other eval artifacts without ad hoc paths.
 - Added `pire-evals --promote-baseline <name>` so clean runs can atomically update named stored baselines like `last-good`, while regressed runs are refused instead of overwriting the reference.
 - Added `pire-evals --promote-report <name>` so clean runs can atomically update named stored report aliases like `main` or `nightly`, while regressed runs are refused instead of overwriting the reference report set.
+- Expanded the starter binary-RE eval corpus with explicit chain tasks, including three sophisticated cases that require linking 3+ vulnerabilities and one case that requires a 4-stage chain, so future eval growth can ratchet toward 5+ stage exploit paths without redesigning the corpus schema.
 
 ### Changed
 

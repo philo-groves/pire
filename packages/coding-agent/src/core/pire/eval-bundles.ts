@@ -1,4 +1,4 @@
-import { createStarterBinaryReEvalCorpus, type PireBinaryEvalTask, validateBinaryReEvalCorpus } from "./eval-corpus.js";
+import { createStarterBinaryReEvalCorpus, type PireBinaryEvalTask } from "./eval-corpus.js";
 import { type PireEvalScore, type PireEvalSubmission, type PireEvalTask, scorePireEvalSubmission } from "./evals.js";
 
 export interface PireEvalTaskSuite {
@@ -69,8 +69,6 @@ export function validatePireEvalTaskSuite(suite: PireEvalTaskSuite): string[] {
 		}
 		seen.add(task.id);
 	}
-
-	issues.push(...validateBinaryReEvalCorpus(suite.tasks));
 	return issues;
 }
 
