@@ -82,6 +82,7 @@ interface PireEvalCaseBaseline {
 	normalizedDelta: number;
 	issuesDelta: number;
 	baselineRunId: string;
+	severity: PireEvalDeltaSeverity;
 }
 
 interface PireEvalSuiteBaseline {
@@ -89,7 +90,10 @@ interface PireEvalSuiteBaseline {
 	averageNormalizedDelta: number;
 	averageIssuesDelta: number;
 	baselineCases: number;
+	severity: PireEvalDeltaSeverity;
 }
+
+type PireEvalDeltaSeverity = "none" | "notice" | "warning" | "critical";
 
 function printHelp(): void {
 	process.stdout.write(`pire-evals - score binary RE eval session directories
@@ -155,11 +159,24 @@ function formatSignedDelta(value: number, digits = 2): string {
 	return value > 0 ? `+${rounded}` : rounded;
 }
 
+function classifyDeltaSeverity(scoreDelta: number, issuesDelta: number): PireEvalDeltaSeverity {
+	if (scoreDelta <= -0.2 || issuesDelta >= 3) {
+		return "critical";
+	}
+	if (scoreDelta <= -0.1 || issuesDelta >= 2) {
+		return "warning";
+	}
+	if (scoreDelta <= -0.03 || issuesDelta >= 1) {
+		return "notice";
+	}
+	return "none";
+}
+
 function formatBaselineSummary(baselines: PireEvalSuiteBaseline[]): string {
 	return baselines
 		.map(
 			(baseline) =>
-				`${baseline.name}: score ${formatSignedDelta(baseline.averageNormalizedDelta)}, issues ${formatSignedDelta(baseline.averageIssuesDelta)}`,
+				`${baseline.name}: score ${formatSignedDelta(baseline.averageNormalizedDelta)}, issues ${formatSignedDelta(baseline.averageIssuesDelta)}, severity=${baseline.severity}`,
 		)
 		.join(" | ");
 }
@@ -168,7 +185,7 @@ function formatCaseBaselineSummary(baselines: PireEvalCaseBaseline[]): string {
 	return baselines
 		.map(
 			(baseline) =>
-				`${baseline.name} delta=${formatSignedDelta(baseline.normalizedDelta)}, issue-delta=${formatSignedDelta(baseline.issuesDelta)}`,
+				`${baseline.name} delta=${formatSignedDelta(baseline.normalizedDelta)}, issue-delta=${formatSignedDelta(baseline.issuesDelta)}, severity=${baseline.severity}`,
 		)
 		.join(" | ");
 }
@@ -338,7 +355,7 @@ function formatMarkdownReport(result: PireEvalCollectedScores): string {
 			0,
 			...result.suite.baselines.map(
 				(baseline) =>
-					`- Vs ${baseline.name}: score delta ${formatSignedDelta(baseline.averageNormalizedDelta)}, issues delta ${formatSignedDelta(baseline.averageIssuesDelta)}`,
+					`- Vs ${baseline.name}: score delta ${formatSignedDelta(baseline.averageNormalizedDelta)}, issues delta ${formatSignedDelta(baseline.averageIssuesDelta)}, severity ${baseline.severity}`,
 			),
 		);
 	}
@@ -460,6 +477,10 @@ function applyBaseline(
 							normalizedDelta: score.normalized - baselineScore.normalized,
 							issuesDelta: score.issues.length - baselineScore.issues.length,
 							baselineRunId: baselineScore.runId,
+							severity: classifyDeltaSeverity(
+								score.normalized - baselineScore.normalized,
+								score.issues.length - baselineScore.issues.length,
+							),
 						},
 					]
 				: score.baselines,
@@ -477,6 +498,10 @@ function applyBaseline(
 					averageNormalizedDelta: result.suite.averageNormalized - baseline.suite.averageNormalized,
 					averageIssuesDelta: result.suite.averageIssues - baseline.suite.averageIssues,
 					baselineCases: baseline.suite.cases,
+					severity: classifyDeltaSeverity(
+						result.suite.averageNormalized - baseline.suite.averageNormalized,
+						result.suite.averageIssues - baseline.suite.averageIssues,
+					),
 				},
 			],
 		},

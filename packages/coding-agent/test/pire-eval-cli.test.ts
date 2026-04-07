@@ -220,8 +220,10 @@ describe("pire eval cli", () => {
 		expect(result.stdout).toContain("- vs baselines:");
 		expect(result.stdout).toContain("baseline: score");
 		expect(result.stdout).toContain("baseline delta=");
+		expect(result.stdout).toContain("severity=");
 		expect(report).toContain("Vs baseline:");
 		expect(report).toContain("baseline delta=");
+		expect(report).toContain("severity");
 	});
 
 	test("supports multiple named baselines in json and markdown outputs", async () => {
@@ -289,17 +291,20 @@ describe("pire eval cli", () => {
 		);
 
 		const parsed = JSON.parse(result.stdout) as {
-			scores: Array<{ caseName: string; baselines?: Array<{ name: string }> }>;
-			suite: { baselines?: Array<{ name: string }> };
+			scores: Array<{ caseName: string; baselines?: Array<{ name: string; severity: string }> }>;
+			suite: { baselines?: Array<{ name: string; severity: string }> };
 		};
 		const report = await readFile(reportPath, "utf-8");
 
 		expect(parsed.suite.baselines?.map((entry) => entry.name)).toEqual(["main", "last-good"]);
 		expect(parsed.scores[0]?.baselines?.map((entry) => entry.name)).toEqual(["main", "last-good"]);
+		expect(parsed.suite.baselines?.every((entry) => typeof entry.severity === "string")).toBe(true);
+		expect(parsed.scores[0]?.baselines?.every((entry) => typeof entry.severity === "string")).toBe(true);
 		expect(report).toContain("Vs main:");
 		expect(report).toContain("Vs last-good:");
 		expect(report).toContain("main delta=");
 		expect(report).toContain("last-good delta=");
+		expect(report).toContain("severity");
 	});
 
 	test("enforces maximum case drop against a named baseline", async () => {
