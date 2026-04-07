@@ -149,6 +149,14 @@ import {
 	type PireSafetyPosture,
 	type PireSafetyScope,
 } from "./safety.js";
+import {
+	createPireEvalRunBundleFromSession,
+	formatPireEvalRunScoreReport,
+	loadPireEvalSessionBindingFile,
+	loadPireEvalTaskSuite,
+	savePireEvalRunBundle,
+} from "../../../packages/coding-agent/src/core/pire/eval-runner.js";
+import { scorePireEvalRunBundle } from "../../../packages/coding-agent/src/core/pire/eval-bundles.js";
 
 interface PersistedModeState {
 	mode: PireMode;
@@ -1055,6 +1063,88 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				].join("\n"),
 				display: true,
 				details: bundle,
+			},
+			{ triggerTurn: false },
+		);
+	};
+
+	const exportEval = async (
+		ctx: ExtensionContext,
+		suitePathInput: string,
+		bindingsPathInput: string,
+		runIdInput?: string,
+		outputPathInput?: string,
+	): Promise<void> => {
+		const suitePath = resolveArtifactPath(ctx.cwd, suitePathInput);
+		const bindingsPath = resolveArtifactPath(ctx.cwd, bindingsPathInput);
+		const outputPath = outputPathInput ? resolveArtifactPath(ctx.cwd, outputPathInput) : undefined;
+
+		const suite = await loadPireEvalTaskSuite(suitePath);
+		const bindingFile = await loadPireEvalSessionBindingFile(bindingsPath);
+		if (bindingFile.suiteId && bindingFile.suiteId !== suite.suiteId) {
+			ctx.ui.notify(
+				`Binding file suiteId ${bindingFile.suiteId} does not match task suite ${suite.suiteId}`,
+				"error",
+			);
+			return;
+		}
+
+		const runId = runIdInput?.trim() || bindingFile.runId?.trim() || `eval-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+		const run = await createPireEvalRunBundleFromSession({
+			cwd: ctx.cwd,
+			suite,
+			runId,
+			bindings: bindingFile.bindings,
+			model: bindingFile.model,
+			startedAt: bindingFile.startedAt,
+			finishedAt: bindingFile.finishedAt,
+			notes: bindingFile.notes,
+		});
+		if (run.submissions.length === 0) {
+			pi.sendMessage(
+				{
+					customType: "pire-eval-export-refused",
+					content: [
+						"Pire Eval Export Refused",
+						`- suite: ${suite.suiteId}`,
+						`- bindings: ${bindingsPath}`,
+						"- no matching findings were found for the provided task bindings",
+					].join("\n"),
+					display: true,
+				},
+				{ triggerTurn: false },
+			);
+			return;
+		}
+
+		const savedPath = await savePireEvalRunBundle(ctx.cwd, run, outputPath);
+		await observeArtifact(ctx, savedPath, "command:eval-export", { type: "json" });
+		recordToolActivity(ctx, {
+			tool: "eval_export",
+			target: savedPath,
+			summary: `Exported eval run bundle for ${suite.suiteId}`,
+			artifacts: [savedPath],
+		});
+
+		const score = scorePireEvalRunBundle(suite, run);
+		pi.sendMessage(
+			{
+				customType: "pire-eval-export",
+				content: [
+					"Pire Eval Export",
+					`- suite: ${suite.suiteId}`,
+					`- run: ${run.runId}`,
+					`- output: ${savedPath}`,
+					`- submissions: ${run.submissions.length}`,
+					"",
+					formatPireEvalRunScoreReport(score).trimEnd(),
+				].join("\n"),
+				display: true,
+				details: {
+					path: savedPath,
+					run,
+					score,
+				},
 			},
 			{ triggerTurn: false },
 		);
@@ -2662,6 +2752,25 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				return;
 			}
 			await createReproBundle(ctx, findingId, slugParts.join("-") || undefined);
+		},
+	});
+
+	pi.registerCommand("eval-export", {
+		description:
+			"Export a scored eval run bundle from the current pire session: /eval-export <suite-path> :: <bindings-path> [:: run-id] [:: output-path]",
+		handler: async (args, ctx) => {
+			const parts = args
+				.split(/\s*::\s*/)
+				.map((part) => part.trim())
+				.filter((part) => part.length > 0);
+			if (parts.length < 2) {
+				ctx.ui.notify(
+					"Usage: /eval-export <suite-path> :: <bindings-path> [:: run-id] [:: output-path]",
+					"warning",
+				);
+				return;
+			}
+			await exportEval(ctx, parts[0]!, parts[1]!, parts[2], parts[3]);
 		},
 	});
 

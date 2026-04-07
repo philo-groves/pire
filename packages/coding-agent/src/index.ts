@@ -180,10 +180,14 @@ export {
 	createPireEvalRunBundleFromSession,
 	formatPireEvalRunScoreReport,
 	loadPireEvalRunBundle,
+	loadPireEvalSessionBindingFile,
 	loadPireEvalTaskSuite,
 	loadPireSessionArtifactManifest,
 	loadPireSessionTracker,
+	type PireEvalSessionBindingFile,
 	type PireEvalSessionTaskBinding,
+	parsePireEvalSessionBindingFile,
+	savePireEvalRunBundle,
 	scorePireEvalRunFromFiles,
 } from "./core/pire/eval-runner.js";
 export {

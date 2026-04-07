@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import {
 	type PireEvalRunBundle,
 	type PireEvalRunScore,
@@ -8,6 +8,7 @@ import {
 	parsePireEvalRunBundle,
 	parsePireEvalTaskSuite,
 	scorePireEvalRunBundle,
+	stringifyPireEvalRunBundle,
 	summarizePireEvalRunScore,
 } from "./eval-bundles.js";
 import type { PireEvalEvidenceRef, PireEvalJudgement, PireExploitability } from "./evals.js";
@@ -62,6 +63,17 @@ export interface CreatePireEvalRunBundleFromSessionOptions {
 	startedAt?: string;
 	finishedAt?: string;
 	notes?: string[];
+}
+
+export interface PireEvalSessionBindingFile {
+	version: 1;
+	suiteId?: string;
+	runId?: string;
+	model?: string;
+	startedAt?: string;
+	finishedAt?: string;
+	notes?: string[];
+	bindings: PireEvalSessionTaskBinding[];
 }
 
 function parseJsonFile<T>(text: string, fallback: T): T {
@@ -195,6 +207,14 @@ export async function loadPireEvalRunBundle(path: string): Promise<PireEvalRunBu
 	return parsePireEvalRunBundle(await readFile(path, "utf-8"));
 }
 
+export function parsePireEvalSessionBindingFile(text: string): PireEvalSessionBindingFile {
+	return JSON.parse(text) as PireEvalSessionBindingFile;
+}
+
+export async function loadPireEvalSessionBindingFile(path: string): Promise<PireEvalSessionBindingFile> {
+	return parsePireEvalSessionBindingFile(await readFile(path, "utf-8"));
+}
+
 export async function loadPireSessionTracker(cwd: string): Promise<PireSessionTrackerSnapshot> {
 	const path = join(cwd, ".pire", "session", "findings.json");
 	if (!existsSync(path)) {
@@ -254,6 +274,13 @@ export async function createPireEvalRunBundleFromSession(
 		submissions,
 		notes: options.notes,
 	};
+}
+
+export async function savePireEvalRunBundle(cwd: string, run: PireEvalRunBundle, outputPath?: string): Promise<string> {
+	const targetPath = outputPath ?? join(cwd, ".pire", "session", "evals", `${run.runId}.json`);
+	await mkdir(dirname(targetPath), { recursive: true });
+	await writeFile(targetPath, stringifyPireEvalRunBundle(run), "utf-8");
+	return targetPath;
 }
 
 export async function scorePireEvalRunFromFiles(paths: { suitePath: string; runPath: string }): Promise<{
