@@ -302,10 +302,17 @@ export function renderNotebookMarkdown(doc: NotebookDocument): string {
 			`- Submitted: ${doc.campaignSummary.submittedFindings}`,
 			`- De-escalated: ${doc.campaignSummary.deEscalatedFindings}`,
 			`- Blocked: ${doc.campaignSummary.blockedFindings}`,
+			`- Chains: ${doc.campaignSummary.totalChains} (${doc.campaignSummary.activeChains} active, ${doc.campaignSummary.parkedChains} parked, ${doc.campaignSummary.closedChains} closed)`,
 		];
 		if ((doc.campaign?.findings.length ?? 0) > 0) {
 			campaignLines.push("- Campaign findings:");
 			for (const record of doc.campaign!.findings.slice(0, 6)) {
+				campaignLines.push(`  - ${record.id} [${record.status}] ${record.title}`);
+			}
+		}
+		if ((doc.campaign?.chains.length ?? 0) > 0) {
+			campaignLines.push("- Campaign chains:");
+			for (const record of doc.campaign!.chains.slice(0, 4)) {
 				campaignLines.push(`  - ${record.id} [${record.status}] ${record.title}`);
 			}
 		}
@@ -473,6 +480,7 @@ ${artifactItemsForFinding}
 				`<li>Submitted: ${doc.campaignSummary.submittedFindings}</li>`,
 				`<li>De-escalated: ${doc.campaignSummary.deEscalatedFindings}</li>`,
 				`<li>Blocked: ${doc.campaignSummary.blockedFindings}</li>`,
+				`<li>Chains: ${doc.campaignSummary.totalChains} (${doc.campaignSummary.activeChains} active, ${doc.campaignSummary.parkedChains} parked, ${doc.campaignSummary.closedChains} closed)</li>`,
 			].join("")
 		: "<li>Campaign ledger not captured</li>";
 	const campaignItems =
@@ -486,6 +494,17 @@ ${artifactItemsForFinding}
 					)
 					.join("")
 			: "<li>No campaign findings recorded</li>";
+	const campaignChainItems =
+		doc.campaign && doc.campaign.chains.length > 0
+			? doc.campaign.chains
+					.map(
+						(record) =>
+							`<li><strong>${escapeHtml(record.id)}</strong> [${escapeHtml(record.status)}] ${escapeHtml(record.title)}${
+								record.note ? `<br>${escapeHtml(record.note)}` : ""
+							}</li>`,
+					)
+					.join("")
+			: "<li>No campaign chains recorded</li>";
 
 	return `<!doctype html>
 <html lang="en">
@@ -510,6 +529,7 @@ details { margin: 0.5rem 0; padding: 0.5rem; background: #fffdf8; border: 1px so
 <h2>Campaign</h2>
 <ul>${campaignSummaryItems}</ul>
 <ul>${campaignItems}</ul>
+<ul>${campaignChainItems}</ul>
 </section>
 <section>
 <h2>Timeline of Actions</h2>

@@ -24,6 +24,22 @@ function getToolResultText(messages: Message[]): string {
 		.join("\n");
 }
 
+function getCustomTexts(messages: unknown[]): string[] {
+	return messages.flatMap((message) => {
+		if (
+			typeof message === "object" &&
+			message !== null &&
+			"role" in message &&
+			"content" in message &&
+			message.role === "custom" &&
+			typeof message.content === "string"
+		) {
+			return [message.content];
+		}
+		return [];
+	});
+}
+
 function createToolSet(): AgentTool[] {
 	return [
 		{
@@ -89,6 +105,8 @@ describe("pire research runtime features", () => {
 		expect(injectedText).toContain("[PIRE ROLE: REVIEWER]");
 		expect(injectedText).toContain("[PIRE MODE: DYNAMIC]");
 		expect(harness.session.getActiveToolNames()).toContain("debug_gdb");
+		expect(harness.session.getActiveToolNames()).toContain("platform_powershell");
+		expect(harness.session.getActiveToolNames()).toContain("platform_macos");
 		expect(harness.session.getActiveToolNames()).not.toContain("edit");
 	});
 
@@ -265,5 +283,70 @@ describe("pire research runtime features", () => {
 		expect(campaign.findings[0]?.note).toContain("cross-boundary validation failed");
 		expect(readFileSync(campaignStatusPath, "utf-8")).toContain("de-escalated");
 		expect(readFileSync(journalPath, "utf-8")).toContain("Set find-001 to de-escalated");
+	});
+
+	it("supports campaign browsing commands, note-guarded closures, and generic chains", async () => {
+		const harness = await createHarness({
+			extensionFactories: [{ factory: pireExtension, path: PIRE_EXTENSION_PATH }],
+		});
+		harnesses.push(harness);
+
+		await harness.session.bindExtensions({ shutdownHandler: () => {} });
+
+		harness.setResponses([
+			fauxAssistantMessage(
+				[
+					fauxToolCall("research_tracker", {
+						action: "add_finding",
+						title: "Kernel trust-boundary candidate",
+						statement: "Initial review suggests a reachable boundary bypass.",
+						status: "candidate",
+						severity: "high",
+						reproStatus: "not-reproduced",
+					}),
+				],
+				{ stopReason: "toolUse" },
+			),
+			(context) => fauxAssistantMessage(getToolResultText(context.messages)),
+		]);
+
+		await harness.session.prompt("record the current candidate finding");
+		await harness.session.prompt("/campaign-status find-001 blocked");
+		await harness.session.prompt(
+			"/campaign-status find-001 blocked :: parked until we can reproduce against the production image",
+		);
+		await harness.session.prompt(
+			"/chain-create Hyper-V to kernel chain :: Track the VM escape candidate through host validation.",
+		);
+		await harness.session.prompt("/chain-link chain-001 find-001");
+		await harness.session.prompt("/chain-status chain-001 parked :: waiting on fresh host symbols");
+		await harness.session.prompt("/campaign-open");
+		await harness.session.prompt("/campaign-recent");
+		await harness.session.prompt("/campaign-search kernel");
+		await harness.session.prompt("/chain-detail chain-001");
+
+		const customTexts = getCustomTexts(harness.session.messages);
+		const campaignJsonPath = join(harness.tempDir, ".pire", "campaign.json");
+		const campaign = JSON.parse(readFileSync(campaignJsonPath, "utf-8")) as {
+			findings: Array<{ id: string; status: string; note?: string }>;
+			chains: Array<{ id: string; status: string; findingIds: string[]; note?: string }>;
+		};
+
+		expect(campaign.findings[0]).toMatchObject({
+			id: "find-001",
+			status: "blocked",
+		});
+		expect(campaign.findings[0]?.note).toContain("production image");
+		expect(campaign.chains[0]).toMatchObject({
+			id: "chain-001",
+			status: "parked",
+			findingIds: ["find-001"],
+		});
+		expect(campaign.chains[0]?.note).toContain("fresh host symbols");
+		expect(customTexts.some((text) => text.includes("blocked transitions require a note"))).toBe(false);
+		expect(customTexts.some((text) => text.includes("Pire Campaign Open Work"))).toBe(true);
+		expect(customTexts.some((text) => text.includes("Pire Campaign Recent Activity"))).toBe(true);
+		expect(customTexts.some((text) => text.includes("Pire Campaign Ledger") && text.includes("kernel"))).toBe(true);
+		expect(customTexts.some((text) => text.includes("Pire Campaign Chain") && text.includes("chain-001"))).toBe(true);
 	});
 });

@@ -7,14 +7,22 @@ import type { ArtifactRecord } from "../../../.pire/extensions/pire/artifacts.js
 import {
 	appendCampaignJournalEntry,
 	buildCampaignLedgerSummary,
+	campaignStatusRequiresNote,
+	createCampaignChain,
 	createEmptyCampaignLedger,
 	loadCampaignLedger,
 	mapFindingStatusToCampaignStatus,
+	renderCampaignChainDetail,
 	renderCampaignDetail,
 	saveCampaignLedger,
+	summarizeCampaignChains,
 	summarizeCampaignLedger,
+	summarizeOpenCampaignLedger,
+	summarizeRecentCampaignLedger,
+	updateCampaignChain,
 	updateCampaignFindingStatus,
 	upsertCampaignFinding,
+	validateCampaignStatusNote,
 } from "../../../.pire/extensions/pire/campaign.js";
 import {
 	addEvidence,
@@ -77,6 +85,9 @@ describe("pire campaign ledger helpers", () => {
 		});
 		expect(ledger.findings[0]?.relatedEvidenceIds).toEqual([evidence.id]);
 		expect(ledger.findings[0]?.relatedArtifactIds).toEqual(["/tmp/sample.bin"]);
+		expect(campaignStatusRequiresNote("blocked")).toBe(true);
+		expect(validateCampaignStatusNote("blocked", "")).toContain("require a note");
+		expect(validateCampaignStatusNote("confirmed", "")).toBeUndefined();
 
 		const changed = updateCampaignFindingStatus(ledger, {
 			id: finding.id,
@@ -85,6 +96,20 @@ describe("pire campaign ledger helpers", () => {
 		});
 		expect(changed?.status).toBe("de-escalated");
 		expect(changed?.note).toContain("Refuted");
+
+		const chain = createCampaignChain(ledger, {
+			title: "Parser trust-boundary chain",
+			summary: "Track parser state, candidate memory corruption, and eventual repro.",
+			findingIds: [finding.id],
+		});
+		expect(chain.id).toBe("chain-001");
+		const updatedChain = updateCampaignChain(ledger, {
+			id: chain.id,
+			status: "parked",
+			note: "Waiting on a device build with matching symbols.",
+		});
+		expect(updatedChain?.status).toBe("parked");
+		expect(updatedChain?.note).toContain("Waiting on a device build");
 
 		const journal = await appendCampaignJournalEntry(tempDir, ledger, {
 			findingId: finding.id,
@@ -101,10 +126,16 @@ describe("pire campaign ledger helpers", () => {
 		expect(paths.statusPath).toContain(".pire/STATUS.md");
 		expect(reloaded.findings[0]?.status).toBe("de-escalated");
 		expect(buildCampaignLedgerSummary(reloaded).deEscalatedFindings).toBe(1);
+		expect(buildCampaignLedgerSummary(reloaded).parkedChains).toBe(1);
 		expect(summarizeCampaignLedger(reloaded)).toContain("de-escalated: 1");
+		expect(summarizeOpenCampaignLedger(reloaded)).toContain("active or parked chains: 1");
+		expect(summarizeRecentCampaignLedger(reloaded)).toContain("Recent Chains:");
+		expect(summarizeCampaignChains(reloaded)).toContain("Parser trust-boundary chain");
+		expect(renderCampaignChainDetail(reloaded, chain.id)).toContain("Waiting on a device build");
 		expect(renderCampaignDetail(reloaded, finding.id)).toContain("Refuted after reproducer");
 		expect(statusMarkdown).toContain("Pire Campaign Status");
 		expect(statusMarkdown).toContain("de-escalated");
+		expect(statusMarkdown).toContain("## Chains");
 		expect(journalMarkdown).toContain("# Pire Campaign Journal");
 		expect(journalMarkdown).toContain("Set find-001 to de-escalated");
 	});

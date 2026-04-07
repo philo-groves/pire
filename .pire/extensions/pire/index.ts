@@ -85,16 +85,33 @@ import {
 	appendCampaignJournalEntry,
 	buildCampaignLedgerSummary,
 	buildCampaignPromptSummary,
+	campaignStatusRequiresNote,
+	createCampaignChain,
 	loadCampaignLedger,
+	renderCampaignChainDetail,
 	renderCampaignDetail,
 	saveCampaignLedger,
+	summarizeCampaignChains,
+	summarizeOpenCampaignLedger,
+	summarizeRecentCampaignLedger,
 	summarizeCampaignLedger,
+	type CampaignChainStatus,
 	type CampaignFindingStatus,
 	type CampaignLedger,
 	type CampaignLedgerSummary,
 	upsertCampaignFinding,
+	updateCampaignChain,
 	updateCampaignFindingStatus,
+	validateCampaignStatusNote,
 } from "./campaign.js";
+import {
+	runPlatformHyperv,
+	runPlatformMacos,
+	runPlatformPowershell,
+	runPlatformXcrun,
+	type PlatformArtifactObservation,
+	type PlatformToolDetails,
+} from "./platform.js";
 import {
 	ReproBundleAssessmentError,
 	buildNotebookDocument,
@@ -192,6 +209,10 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"find",
 		"ls",
 		"environment_inventory",
+		"platform_powershell",
+		"platform_hyperv",
+		"platform_macos",
+		"platform_xcrun",
 		"binary_file",
 		"binary_strings",
 		"binary_readelf",
@@ -217,6 +238,10 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"find",
 		"ls",
 		"environment_inventory",
+		"platform_powershell",
+		"platform_hyperv",
+		"platform_macos",
+		"platform_xcrun",
 		"binary_file",
 		"binary_strings",
 		"binary_readelf",
@@ -249,6 +274,10 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"find",
 		"ls",
 		"environment_inventory",
+		"platform_powershell",
+		"platform_hyperv",
+		"platform_macos",
+		"platform_xcrun",
 		"binary_file",
 		"binary_strings",
 		"binary_readelf",
@@ -281,6 +310,10 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 		"find",
 		"ls",
 		"environment_inventory",
+		"platform_powershell",
+		"platform_hyperv",
+		"platform_macos",
+		"platform_xcrun",
 		"binary_file",
 		"binary_strings",
 		"binary_readelf",
@@ -383,6 +416,13 @@ const SAFE_READ_ONLY_PATTERNS = [
 	/^\s*curl\b/,
 	/^\s*tcpdump\b/,
 	/^\s*tshark\b/,
+	/^\s*pwsh\b/i,
+	/^\s*powershell(\.exe)?\b/i,
+	/^\s*xcrun\b/,
+	/^\s*codesign\b/,
+	/^\s*otool\b/,
+	/^\s*plutil\b/,
+	/^\s*xattr\b/,
 ];
 
 const DYNAMIC_PATTERNS = [
@@ -536,7 +576,7 @@ function updateCampaignStatus(ctx: ExtensionContext, ledger: CampaignLedger): vo
 		"pire-campaign",
 		ctx.ui.theme.fg(
 			"accent",
-			`campaign:l${summary.leadFindings}/c${summary.confirmedFindings}/s${summary.submittedFindings}/x${summary.deEscalatedFindings + summary.blockedFindings}`,
+			`campaign:l${summary.leadFindings}/c${summary.confirmedFindings}/s${summary.submittedFindings}/x${summary.deEscalatedFindings + summary.blockedFindings}/ch${summary.activeChains}`,
 		),
 	);
 }
@@ -595,6 +635,13 @@ function getUnpackToolDetails(eventDetails: unknown): UnpackToolDetails | undefi
 	return eventDetails as UnpackToolDetails;
 }
 
+function getPlatformToolDetails(eventDetails: unknown): PlatformToolDetails | undefined {
+	if (!eventDetails || typeof eventDetails !== "object" || !("artifacts" in eventDetails)) {
+		return undefined;
+	}
+	return eventDetails as PlatformToolDetails;
+}
+
 function collectRecentActivityFromEntries(
 	entries: Array<{ type: string; customType?: string; data?: unknown }>,
 ): PireToolActivity[] {
@@ -635,7 +682,13 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	let currentInventory: EnvironmentInventory | undefined;
 	let currentFocus: FocusState = createEmptyFocusState();
 	let currentSafety: PireSafetyPosture = createDefaultSafetyPosture();
-	let campaignLedger: CampaignLedger = { version: 1, updatedAt: new Date().toISOString(), findings: [], nextIds: { journal: 1 } };
+	let campaignLedger: CampaignLedger = {
+		version: 1,
+		updatedAt: new Date().toISOString(),
+		findings: [],
+		chains: [],
+		nextIds: { journal: 1, chain: 1 },
+	};
 
 	const persistMode = (): void => {
 		pi.appendEntry<PersistedModeState>(MODE_ENTRY_TYPE, { mode: currentMode });
@@ -1510,6 +1563,115 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
+		name: "platform_powershell",
+		label: "Platform PowerShell",
+		description: "Run bounded, read-only PowerShell inspection for Windows host state.",
+		promptSnippet: "Use platform_powershell for structured Windows host inspection without ad-hoc shell parsing.",
+		promptGuidelines: ["Use platform_powershell for Windows host state, services, processes, or Defender posture."],
+		parameters: Type.Object({
+			view: Type.Optional(
+				Type.Union([
+					Type.Literal("system-summary"),
+					Type.Literal("services"),
+					Type.Literal("processes"),
+					Type.Literal("defender-status"),
+				]),
+			),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const details = await runPlatformPowershell(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				params.view ?? "system-summary",
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "platform_hyperv",
+		label: "Platform Hyper-V",
+		description: "Run bounded, read-only Hyper-V inventory commands via PowerShell.",
+		promptSnippet: "Use platform_hyperv for structured Hyper-V VM inventory and network state.",
+		promptGuidelines: ["Use platform_hyperv when Windows or Hyper-V campaign work depends on VM, switch, or snapshot state."],
+		parameters: Type.Object({
+			view: Type.Optional(Type.Union([Type.Literal("vm-list"), Type.Literal("vm-network"), Type.Literal("vm-checkpoints")])),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const details = await runPlatformHyperv(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				params.view ?? "vm-list",
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "platform_macos",
+		label: "Platform macOS",
+		description: "Run bounded macOS or iOS-adjacent inspection commands against a bundle, binary, or plist.",
+		promptSnippet: "Use platform_macos for codesign, entitlements, otool, plist, or xattr inspection.",
+		promptGuidelines: ["Use platform_macos to inspect app bundles, Mach-O binaries, plists, or signing state."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to a binary, bundle, or plist." }),
+			view: Type.Optional(
+				Type.Union([
+					Type.Literal("codesign"),
+					Type.Literal("entitlements"),
+					Type.Literal("otool-load-commands"),
+					Type.Literal("plist"),
+					Type.Literal("xattrs"),
+				]),
+			),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const details = await runPlatformMacos(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				resolveArtifactPath(ctx.cwd, params.path),
+				params.view ?? "codesign",
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "platform_xcrun",
+		label: "Platform Xcrun",
+		description: "Run bounded Xcode CLI inspection for simulator, device, or SDK state.",
+		promptSnippet: "Use platform_xcrun for structured simulator, device, or SDK inspection on Apple hosts.",
+		promptGuidelines: ["Use platform_xcrun for simctl, devicectl, and SDK-path inspection instead of raw bash."],
+		parameters: Type.Object({
+			view: Type.Optional(Type.Union([Type.Literal("simctl-list"), Type.Literal("devicectl-list"), Type.Literal("sdk-paths")])),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const details = await runPlatformXcrun(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				params.view ?? "simctl-list",
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
 		name: "binary_file",
 		label: "Binary File",
 		description: "Inspect binary metadata with file(1) and capture the target as a first-class artifact.",
@@ -2223,6 +2385,46 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("campaign-open", {
+		description: "Show open campaign findings and active or parked chains",
+		handler: async () => {
+			pi.sendMessage(
+				{
+					customType: "pire-campaign-open",
+					content: summarizeOpenCampaignLedger(campaignLedger),
+					display: true,
+				},
+				{ triggerTurn: false },
+			);
+		},
+	});
+
+	pi.registerCommand("campaign-recent", {
+		description: "Show the most recently updated campaign findings and chains",
+		handler: async () => {
+			pi.sendMessage(
+				{
+					customType: "pire-campaign-recent",
+					content: summarizeRecentCampaignLedger(campaignLedger),
+					display: true,
+				},
+				{ triggerTurn: false },
+			);
+		},
+	});
+
+	pi.registerCommand("campaign-search", {
+		description: "Search the campaign ledger by finding title, note, chain title, or ID: /campaign-search <query>",
+		handler: async (args, ctx) => {
+			const query = args.trim();
+			if (!query) {
+				ctx.ui.notify("Usage: /campaign-search <query>", "warning");
+				return;
+			}
+			showCampaign(query);
+		},
+	});
+
 	pi.registerCommand("campaign-detail", {
 		description: "Show one campaign finding with its current status, note, and linked evidence",
 		handler: async (args) => {
@@ -2243,17 +2445,17 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("campaign-status", {
-		description: "Update the campaign ledger status: /campaign-status <id> <lead|confirmed|submitted|de-escalated|blocked> :: <reason>",
+		description: "Update the campaign ledger status: /campaign-status <id> <lead|confirmed|submitted|de-escalated|blocked> [:: note]",
 		handler: async (args, ctx) => {
 			const trimmed = args.trim();
 			if (!trimmed) {
-				ctx.ui.notify("Usage: /campaign-status <id> <lead|confirmed|submitted|de-escalated|blocked> :: <reason>", "warning");
+				ctx.ui.notify("Usage: /campaign-status <id> <lead|confirmed|submitted|de-escalated|blocked> [:: note]", "warning");
 				return;
 			}
 			const [head, notePart] = trimmed.split(/\s*::\s*/, 2);
 			const [id, statusText] = head.trim().split(/\s+/, 2);
-			if (!id || !statusText || !notePart?.trim()) {
-				ctx.ui.notify("Usage: /campaign-status <id> <lead|confirmed|submitted|de-escalated|blocked> :: <reason>", "warning");
+			if (!id || !statusText) {
+				ctx.ui.notify("Usage: /campaign-status <id> <lead|confirmed|submitted|de-escalated|blocked> [:: note]", "warning");
 				return;
 			}
 			if (
@@ -2266,10 +2468,15 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				ctx.ui.notify(`Unknown campaign status: ${statusText}`, "error");
 				return;
 			}
+			const validationError = validateCampaignStatusNote(statusText as CampaignFindingStatus, notePart);
+			if (validationError) {
+				ctx.ui.notify(validationError, "warning");
+				return;
+			}
 			const record = updateCampaignFindingStatus(campaignLedger, {
 				id,
 				status: statusText as CampaignFindingStatus,
-				note: notePart,
+				note: notePart ?? "",
 			});
 			if (!record) {
 				ctx.ui.notify(`Unknown campaign finding: ${id}`, "error");
@@ -2279,11 +2486,14 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				findingId: record.id,
 				action: "status",
 				summary: `Set ${record.id} to ${record.status}`,
-				details: notePart.trim(),
+				details: notePart?.trim() || undefined,
 			});
 			await persistCampaign();
 			syncCampaignUI(ctx);
-			ctx.ui.notify(`Campaign ${record.id}: ${record.status}`, "info");
+			ctx.ui.notify(
+				`Campaign ${record.id}: ${record.status}${campaignStatusRequiresNote(record.status) ? " with note" : ""}`,
+				"info",
+			);
 		},
 	});
 
@@ -2302,6 +2512,129 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				await syncCampaignFinding(ctx, finding.id, `Synced ${finding.id} into the campaign ledger from /campaign-sync.`);
 			}
 			ctx.ui.notify(`Synced ${findings.length} finding(s) into the campaign ledger`, "info");
+		},
+	});
+
+	pi.registerCommand("chain", {
+		description: "Show campaign chains, optionally filtered by substring",
+		handler: async (args) => {
+			const filterText = args.trim();
+			pi.sendMessage(
+				{
+					customType: "pire-chain",
+					content: summarizeCampaignChains(campaignLedger, filterText.length > 0 ? filterText : undefined),
+					display: true,
+				},
+				{ triggerTurn: false },
+			);
+		},
+	});
+
+	pi.registerCommand("chain-detail", {
+		description: "Show one campaign chain with linked findings",
+		handler: async (args) => {
+			const id = args.trim();
+			if (!id) {
+				pi.sendMessage({ customType: "pire-chain-detail", content: "Usage: /chain-detail <chain-id>", display: true }, { triggerTurn: false });
+				return;
+			}
+			pi.sendMessage(
+				{
+					customType: "pire-chain-detail",
+					content: renderCampaignChainDetail(campaignLedger, id),
+					display: true,
+				},
+				{ triggerTurn: false },
+			);
+		},
+	});
+
+	pi.registerCommand("chain-create", {
+		description: "Create a campaign chain: /chain-create <title> :: <summary>",
+		handler: async (args, ctx) => {
+			const [titlePart, summaryPart] = args.trim().split(/\s*::\s*/, 2);
+			const title = titlePart?.trim();
+			const summary = summaryPart?.trim();
+			if (!title || !summary) {
+				ctx.ui.notify("Usage: /chain-create <title> :: <summary>", "warning");
+				return;
+			}
+			const chain = createCampaignChain(campaignLedger, { title, summary });
+			await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+				chainId: chain.id,
+				action: "chain",
+				summary: `Created ${chain.id}`,
+				details: chain.summary,
+			});
+			await persistCampaign();
+			syncCampaignUI(ctx);
+			ctx.ui.notify(`Created chain ${chain.id}`, "info");
+		},
+	});
+
+	pi.registerCommand("chain-link", {
+		description: "Link findings into a campaign chain: /chain-link <chain-id> <finding-id...>",
+		handler: async (args, ctx) => {
+			const parts = args.trim().split(/\s+/).filter((part) => part.length > 0);
+			if (parts.length < 2) {
+				ctx.ui.notify("Usage: /chain-link <chain-id> <finding-id...>", "warning");
+				return;
+			}
+			const [id, ...findingIds] = parts;
+			const unknownFindingId = findingIds.find((findingId) => !campaignLedger.findings.some((record) => record.id === findingId));
+			if (unknownFindingId) {
+				ctx.ui.notify(`Unknown campaign finding: ${unknownFindingId}`, "error");
+				return;
+			}
+			const chain = updateCampaignChain(campaignLedger, { id, addFindingIds: findingIds });
+			if (!chain) {
+				ctx.ui.notify(`Unknown chain: ${id}`, "error");
+				return;
+			}
+			await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+				chainId: chain.id,
+				action: "chain",
+				summary: `Linked findings into ${chain.id}`,
+				details: findingIds.join(", "),
+			});
+			await persistCampaign();
+			syncCampaignUI(ctx);
+			ctx.ui.notify(`Updated ${chain.id}`, "info");
+		},
+	});
+
+	pi.registerCommand("chain-status", {
+		description: "Update a campaign chain status: /chain-status <chain-id> <active|parked|closed> [:: note]",
+		handler: async (args, ctx) => {
+			const trimmed = args.trim();
+			if (!trimmed) {
+				ctx.ui.notify("Usage: /chain-status <chain-id> <active|parked|closed> [:: note]", "warning");
+				return;
+			}
+			const [head, notePart] = trimmed.split(/\s*::\s*/, 2);
+			const [id, statusText] = head.trim().split(/\s+/, 2);
+			if (!id || !statusText || (statusText !== "active" && statusText !== "parked" && statusText !== "closed")) {
+				ctx.ui.notify("Usage: /chain-status <chain-id> <active|parked|closed> [:: note]", "warning");
+				return;
+			}
+			const chain = updateCampaignChain(campaignLedger, {
+				id,
+				status: statusText as CampaignChainStatus,
+				note: notePart,
+			});
+			if (!chain) {
+				ctx.ui.notify(`Unknown chain: ${id}`, "error");
+				return;
+			}
+			await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+				chainId: chain.id,
+				action: "chain",
+				summary: `Set ${chain.id} to ${chain.status}`,
+				details: notePart?.trim() || undefined,
+			});
+			await persistCampaign();
+			syncCampaignUI(ctx);
+			ctx.ui.notify(`Chain ${chain.id}: ${chain.status}`, "info");
 		},
 	});
 
@@ -2941,8 +3274,8 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-			const unpackDetails = getUnpackToolDetails(event.details);
-			if (unpackDetails) {
+		const unpackDetails = getUnpackToolDetails(event.details);
+		if (unpackDetails) {
 			for (const artifact of unpackDetails.artifacts as UnpackArtifactObservation[]) {
 				await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
 					type: artifact.type as ArtifactType | undefined,
@@ -2955,6 +3288,24 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					target: unpackDetails.targetPath,
 					summary: unpackDetails.summary.split("\n")[0] ?? event.toolName,
 					artifacts: unpackDetails.artifacts.map((artifact) => artifact.path),
+				});
+				return;
+			}
+
+			const platformDetails = getPlatformToolDetails(event.details);
+			if (platformDetails) {
+				for (const artifact of platformDetails.artifacts as PlatformArtifactObservation[]) {
+					await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
+						type: artifact.type as ArtifactType | undefined,
+						command: artifact.command ?? platformDetails.commandString,
+						finding: artifact.finding,
+					});
+				}
+				recordToolActivity(ctx, {
+					tool: event.toolName,
+					target: platformDetails.target,
+					summary: platformDetails.summary.split("\n")[0] ?? event.toolName,
+					artifacts: platformDetails.artifacts.map((artifact) => artifact.path),
 				});
 				return;
 			}
@@ -2972,7 +3323,8 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				event.toolName.startsWith("decomp_") ||
 				event.toolName.startsWith("debug_") ||
 				event.toolName.startsWith("net_") ||
-				event.toolName.startsWith("unpack_")
+				event.toolName.startsWith("unpack_") ||
+				event.toolName.startsWith("platform_")
 			) {
 				if (inferredPathTarget) {
 					await observeArtifact(ctx, inferredPathTarget, `tool:${event.toolName}`);

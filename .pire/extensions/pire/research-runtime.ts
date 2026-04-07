@@ -248,6 +248,9 @@ export function buildResearchCompactionSummary(input: ResearchCompactionInput): 
 		campaignSummary
 			? `- campaign findings: ${campaignSummary.totalFindings} (${campaignSummary.leadFindings} lead, ${campaignSummary.confirmedFindings} confirmed, ${campaignSummary.submittedFindings} submitted, ${campaignSummary.deEscalatedFindings} de-escalated, ${campaignSummary.blockedFindings} blocked)`
 			: "- campaign findings: unavailable",
+		campaignSummary
+			? `- campaign chains: ${campaignSummary.totalChains} (${campaignSummary.activeChains} active, ${campaignSummary.parkedChains} parked, ${campaignSummary.closedChains} closed)`
+			: "- campaign chains: unavailable",
 		"",
 		"## Tracker Summary",
 		`- hypotheses: ${trackerSummary.totalHypotheses} (${trackerSummary.openHypotheses} open, ${trackerSummary.supportedHypotheses} supported, ${trackerSummary.refutedHypotheses} refuted)`,
@@ -271,6 +274,15 @@ export function buildResearchCompactionSummary(input: ResearchCompactionInput): 
 			}
 		} else {
 			lines.push("- no campaign findings recorded");
+		}
+		if (input.campaign?.chains.length) {
+			lines.push("Chains:");
+			for (const chain of [...input.campaign.chains].slice(-4).reverse()) {
+				lines.push(`- ${chain.id} [${chain.status}] ${chain.title}`);
+				if (chain.findingIds.length > 0) {
+					lines.push(`  findings: ${chain.findingIds.join(", ")}`);
+				}
+			}
 		}
 	}
 

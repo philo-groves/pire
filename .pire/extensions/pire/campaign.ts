@@ -5,6 +5,7 @@ import type { ArtifactRecord } from "./artifacts.js";
 import type { FindingRecord, FindingsTracker } from "./findings.js";
 
 export type CampaignFindingStatus = "lead" | "confirmed" | "submitted" | "de-escalated" | "blocked";
+export type CampaignChainStatus = "active" | "parked" | "closed";
 
 export interface CampaignFindingRecord {
 	id: string;
@@ -21,11 +22,23 @@ export interface CampaignFindingRecord {
 	lastSyncedAt?: string;
 }
 
+export interface CampaignChainRecord {
+	id: string;
+	title: string;
+	summary: string;
+	status: CampaignChainStatus;
+	findingIds: string[];
+	note?: string;
+	createdAt: string;
+	updatedAt: string;
+}
+
 export interface CampaignJournalEntry {
 	id: string;
 	timestamp: string;
 	findingId?: string;
-	action: "create" | "sync" | "status" | "report";
+	chainId?: string;
+	action: "create" | "sync" | "status" | "report" | "chain";
 	summary: string;
 	details?: string;
 }
@@ -34,8 +47,10 @@ export interface CampaignLedger {
 	version: 1;
 	updatedAt: string;
 	findings: CampaignFindingRecord[];
+	chains: CampaignChainRecord[];
 	nextIds: {
 		journal: number;
+		chain: number;
 	};
 }
 
@@ -46,7 +61,12 @@ export interface CampaignLedgerSummary {
 	submittedFindings: number;
 	deEscalatedFindings: number;
 	blockedFindings: number;
+	totalChains: number;
+	activeChains: number;
+	parkedChains: number;
+	closedChains: number;
 	recentFindings: string[];
+	recentChains: string[];
 }
 
 export interface CampaignSyncInput {
@@ -69,6 +89,27 @@ export interface CampaignReportPathInput {
 	timestamp?: string;
 }
 
+export interface CampaignChainCreateInput {
+	title: string;
+	summary: string;
+	status?: CampaignChainStatus;
+	findingIds?: string[];
+	note?: string;
+	timestamp?: string;
+}
+
+export interface CampaignChainUpdateInput {
+	id: string;
+	title?: string;
+	summary?: string;
+	status?: CampaignChainStatus;
+	findingIds?: string[];
+	addFindingIds?: string[];
+	removeFindingIds?: string[];
+	note?: string;
+	timestamp?: string;
+}
+
 const CAMPAIGN_DIR = ".pire";
 const CAMPAIGN_JSON_FILE = "campaign.json";
 const CAMPAIGN_STATUS_FILE = "STATUS.md";
@@ -84,6 +125,10 @@ function createTimestamp(timestamp?: string): string {
 
 function createJournalId(value: number): string {
 	return `journal-${String(value).padStart(4, "0")}`;
+}
+
+function createChainId(value: number): string {
+	return `chain-${String(value).padStart(3, "0")}`;
 }
 
 function statusRank(status: CampaignFindingStatus): number {
@@ -138,20 +183,44 @@ function normalizeCampaignFinding(value: unknown): CampaignFindingRecord | undef
 	};
 }
 
+function normalizeCampaignChainStatus(value: unknown): CampaignChainStatus {
+	return value === "parked" || value === "closed" ? value : "active";
+}
+
+function normalizeCampaignChain(value: unknown): CampaignChainRecord | undefined {
+	if (!isPlainObject(value) || typeof value.id !== "string" || typeof value.title !== "string" || typeof value.summary !== "string") {
+		return undefined;
+	}
+
+	return {
+		id: value.id,
+		title: value.title,
+		summary: value.summary,
+		status: normalizeCampaignChainStatus(value.status),
+		findingIds: dedupe(toStringArray(value.findingIds)),
+		note: typeof value.note === "string" ? value.note : undefined,
+		createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date().toISOString(),
+		updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
+	};
+}
+
 function normalizeLedger(value: unknown): CampaignLedger {
 	if (!isPlainObject(value)) {
 		return createEmptyCampaignLedger();
 	}
 
 	const findings = Array.isArray(value.findings) ? value.findings.map(normalizeCampaignFinding).filter((entry): entry is CampaignFindingRecord => entry !== undefined) : [];
+	const chains = Array.isArray(value.chains) ? value.chains.map(normalizeCampaignChain).filter((entry): entry is CampaignChainRecord => entry !== undefined) : [];
 	const nextIds = isPlainObject(value.nextIds) ? value.nextIds : {};
 
 	return {
 		version: 1,
 		updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
 		findings,
+		chains,
 		nextIds: {
 			journal: typeof nextIds.journal === "number" && nextIds.journal > 0 ? nextIds.journal : 1,
+			chain: typeof nextIds.chain === "number" && nextIds.chain > 0 ? nextIds.chain : 1,
 		},
 	};
 }
@@ -182,8 +251,10 @@ export function createEmptyCampaignLedger(): CampaignLedger {
 		version: 1,
 		updatedAt: new Date().toISOString(),
 		findings: [],
+		chains: [],
 		nextIds: {
 			journal: 1,
+			chain: 1,
 		},
 	};
 }
@@ -236,6 +307,7 @@ export async function appendCampaignJournalEntry(
 		id: createJournalId(ledger.nextIds.journal++),
 		timestamp,
 		findingId: entry.findingId,
+		chainId: entry.chainId,
 		action: entry.action,
 		summary: entry.summary.trim(),
 		details: entry.details?.trim() || undefined,
@@ -249,6 +321,7 @@ export async function appendCampaignJournalEntry(
 		`## ${journalEntry.timestamp} ${journalEntry.id}`,
 		`- action: ${journalEntry.action}`,
 		journalEntry.findingId ? `- finding: ${journalEntry.findingId}` : undefined,
+		journalEntry.chainId ? `- chain: ${journalEntry.chainId}` : undefined,
 		`- summary: ${journalEntry.summary}`,
 		journalEntry.details ? `- details: ${journalEntry.details}` : undefined,
 		"",
@@ -264,6 +337,9 @@ export function buildCampaignLedgerSummary(ledger: CampaignLedger): CampaignLedg
 	const submittedFindings = ledger.findings.filter((record) => record.status === "submitted");
 	const deEscalatedFindings = ledger.findings.filter((record) => record.status === "de-escalated");
 	const blockedFindings = ledger.findings.filter((record) => record.status === "blocked");
+	const activeChains = ledger.chains.filter((record) => record.status === "active");
+	const parkedChains = ledger.chains.filter((record) => record.status === "parked");
+	const closedChains = ledger.chains.filter((record) => record.status === "closed");
 
 	return {
 		totalFindings: ledger.findings.length,
@@ -272,7 +348,15 @@ export function buildCampaignLedgerSummary(ledger: CampaignLedger): CampaignLedg
 		submittedFindings: submittedFindings.length,
 		deEscalatedFindings: deEscalatedFindings.length,
 		blockedFindings: blockedFindings.length,
+		totalChains: ledger.chains.length,
+		activeChains: activeChains.length,
+		parkedChains: parkedChains.length,
+		closedChains: closedChains.length,
 		recentFindings: [...ledger.findings]
+			.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+			.slice(0, 4)
+			.map((record) => `${record.id} ${record.title}`),
+		recentChains: [...ledger.chains]
 			.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 			.slice(0, 4)
 			.map((record) => `${record.id} ${record.title}`),
@@ -294,6 +378,19 @@ export function summarizeCampaignLedger(ledger: CampaignLedger, filterText?: str
 			record.status.toLowerCase().includes(normalizedFilter)
 		);
 	});
+	const chains = ledger.chains.filter((record) => {
+		if (normalizedFilter.length === 0) {
+			return true;
+		}
+		return (
+			record.id.toLowerCase().includes(normalizedFilter) ||
+			record.title.toLowerCase().includes(normalizedFilter) ||
+			record.summary.toLowerCase().includes(normalizedFilter) ||
+			(record.note ?? "").toLowerCase().includes(normalizedFilter) ||
+			record.status.toLowerCase().includes(normalizedFilter) ||
+			record.findingIds.some((findingId) => findingId.toLowerCase().includes(normalizedFilter))
+		);
+	});
 
 	const lines = [
 		"Pire Campaign Ledger",
@@ -304,20 +401,123 @@ export function summarizeCampaignLedger(ledger: CampaignLedger, filterText?: str
 		`- submitted: ${summary.submittedFindings}`,
 		`- de-escalated: ${summary.deEscalatedFindings}`,
 		`- blocked: ${summary.blockedFindings}`,
+		`- chains: ${summary.totalChains} (${summary.activeChains} active, ${summary.parkedChains} parked, ${summary.closedChains} closed)`,
 	];
 
 	if (normalizedFilter.length > 0) {
 		lines.push(`- filter: ${normalizedFilter}`);
 	}
 
-	if (findings.length === 0) {
-		lines.push("- no matching campaign findings");
+	if (findings.length === 0 && chains.length === 0) {
+		lines.push("- no matching campaign records");
 		return lines.join("\n");
 	}
 
-	lines.push("Findings:");
-	for (const record of findings.slice(0, 8)) {
-		lines.push(`- ${record.id} [${record.status}] ${record.title}`);
+	if (findings.length > 0) {
+		lines.push("Findings:");
+		for (const record of findings.slice(0, 8)) {
+			lines.push(`- ${record.id} [${record.status}] ${record.title}`);
+			if (record.note) {
+				lines.push(`  note: ${record.note}`);
+			}
+		}
+	}
+	if (chains.length > 0) {
+		lines.push("Chains:");
+		for (const record of chains.slice(0, 6)) {
+			lines.push(`- ${record.id} [${record.status}] ${record.title} (${record.findingIds.length} findings)`);
+			if (record.note) {
+				lines.push(`  note: ${record.note}`);
+			}
+		}
+	}
+	return lines.join("\n");
+}
+
+export function summarizeOpenCampaignLedger(ledger: CampaignLedger): string {
+	const summary = buildCampaignLedgerSummary(ledger);
+	const openFindings = ledger.findings
+		.filter((record) => record.status === "lead" || record.status === "confirmed" || record.status === "submitted")
+		.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+	const activeChains = ledger.chains
+		.filter((record) => record.status === "active" || record.status === "parked")
+		.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+	const lines = [
+		"Pire Campaign Open Work",
+		`- open findings: ${openFindings.length}`,
+		`- active or parked chains: ${activeChains.length}`,
+	];
+	if (openFindings.length === 0 && activeChains.length === 0) {
+		lines.push("- no open campaign work");
+		return lines.join("\n");
+	}
+	if (openFindings.length > 0) {
+		lines.push("Findings:");
+		for (const record of openFindings.slice(0, 8)) {
+			lines.push(`- ${record.id} [${record.status}] ${record.title}`);
+		}
+	}
+	if (activeChains.length > 0) {
+		lines.push("Chains:");
+		for (const record of activeChains.slice(0, 6)) {
+			lines.push(`- ${record.id} [${record.status}] ${record.title}`);
+		}
+	}
+	return lines.join("\n");
+}
+
+export function summarizeRecentCampaignLedger(ledger: CampaignLedger): string {
+	const recentFindings = [...ledger.findings].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 6);
+	const recentChains = [...ledger.chains].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 4);
+	const lines = ["Pire Campaign Recent Activity", `- updated: ${ledger.updatedAt}`];
+	if (recentFindings.length === 0 && recentChains.length === 0) {
+		lines.push("- no campaign records yet");
+		return lines.join("\n");
+	}
+	if (recentFindings.length > 0) {
+		lines.push("Recent Findings:");
+		for (const record of recentFindings) {
+			lines.push(`- ${record.id} [${record.status}] ${record.title}`);
+		}
+	}
+	if (recentChains.length > 0) {
+		lines.push("Recent Chains:");
+		for (const record of recentChains) {
+			lines.push(`- ${record.id} [${record.status}] ${record.title}`);
+		}
+	}
+	return lines.join("\n");
+}
+
+export function summarizeCampaignChains(ledger: CampaignLedger, filterText?: string): string {
+	const normalizedFilter = filterText?.trim().toLowerCase() ?? "";
+	const chains = ledger.chains.filter((record) => {
+		if (normalizedFilter.length === 0) {
+			return true;
+		}
+		return (
+			record.id.toLowerCase().includes(normalizedFilter) ||
+			record.title.toLowerCase().includes(normalizedFilter) ||
+			record.summary.toLowerCase().includes(normalizedFilter) ||
+			(record.note ?? "").toLowerCase().includes(normalizedFilter) ||
+			record.status.toLowerCase().includes(normalizedFilter) ||
+			record.findingIds.some((findingId) => findingId.toLowerCase().includes(normalizedFilter))
+		);
+	});
+	const lines = [
+		"Pire Campaign Chains",
+		`- updated: ${ledger.updatedAt}`,
+		`- chains: ${ledger.chains.length}`,
+	];
+	if (normalizedFilter.length > 0) {
+		lines.push(`- filter: ${normalizedFilter}`);
+	}
+	if (chains.length === 0) {
+		lines.push("- no matching campaign chains");
+		return lines.join("\n");
+	}
+	for (const record of chains.slice(0, 8)) {
+		lines.push(`- ${record.id} [${record.status}] ${record.title} (${record.findingIds.length} findings)`);
 		if (record.note) {
 			lines.push(`  note: ${record.note}`);
 		}
@@ -366,17 +566,52 @@ export function renderCampaignDetail(ledger: CampaignLedger, id: string): string
 			lines.push(`- ${artifactId}`);
 		}
 	}
+	const chains = ledger.chains.filter((entry) => entry.findingIds.includes(record.id));
+	if (chains.length > 0) {
+		lines.push("Chains:");
+		for (const chain of chains) {
+			lines.push(`- ${chain.id} [${chain.status}] ${chain.title}`);
+		}
+	}
+	return lines.join("\n");
+}
+
+export function renderCampaignChainDetail(ledger: CampaignLedger, id: string): string {
+	const record = ledger.chains.find((entry) => entry.id === id);
+	if (!record) {
+		return `Pire Campaign Chain\n- unknown id: ${id}`;
+	}
+
+	const lines = [
+		"Pire Campaign Chain",
+		`- id: ${record.id}`,
+		`- title: ${record.title}`,
+		`- status: ${record.status}`,
+		`- summary: ${record.summary}`,
+		`- updated: ${record.updatedAt}`,
+	];
+	if (record.note) {
+		lines.push(`- note: ${record.note}`);
+	}
+	if (record.findingIds.length > 0) {
+		lines.push("Findings:");
+		for (const findingId of record.findingIds) {
+			const finding = ledger.findings.find((entry) => entry.id === findingId);
+			lines.push(`- ${findingId}${finding ? ` [${finding.status}] ${finding.title}` : ""}`);
+		}
+	}
 	return lines.join("\n");
 }
 
 export function buildCampaignPromptSummary(ledger: CampaignLedger): string | undefined {
-	if (ledger.findings.length === 0) {
+	if (ledger.findings.length === 0 && ledger.chains.length === 0) {
 		return undefined;
 	}
 	const summary = buildCampaignLedgerSummary(ledger);
 	const lines = [
 		"[PIRE CAMPAIGN]",
 		`Campaign findings: ${summary.totalFindings}; lead: ${summary.leadFindings}; confirmed: ${summary.confirmedFindings}; submitted: ${summary.submittedFindings}; de-escalated: ${summary.deEscalatedFindings}; blocked: ${summary.blockedFindings}.`,
+		`Campaign chains: ${summary.totalChains}; active: ${summary.activeChains}; parked: ${summary.parkedChains}; closed: ${summary.closedChains}.`,
 	];
 	const activeClosed = ledger.findings
 		.filter((record) => record.status === "de-escalated" || record.status === "blocked")
@@ -398,7 +633,28 @@ export function buildCampaignPromptSummary(ledger: CampaignLedger): string | und
 			lines.push(`- ${record.id} [${record.status}] ${record.title}`);
 		}
 	}
+	const activeChains = ledger.chains
+		.filter((record) => record.status === "active" || record.status === "parked")
+		.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+		.slice(0, 3);
+	if (activeChains.length > 0) {
+		lines.push("Current chains:");
+		for (const record of activeChains) {
+			lines.push(`- ${record.id} [${record.status}] ${record.title} (${record.findingIds.join(", ") || "no findings linked"})`);
+		}
+	}
 	return lines.join("\n");
+}
+
+export function campaignStatusRequiresNote(status: CampaignFindingStatus): boolean {
+	return status === "blocked" || status === "de-escalated";
+}
+
+export function validateCampaignStatusNote(status: CampaignFindingStatus, note?: string): string | undefined {
+	if (campaignStatusRequiresNote(status) && !note?.trim()) {
+		return `${status} transitions require a note`;
+	}
+	return undefined;
 }
 
 export function upsertCampaignFinding(
@@ -457,7 +713,7 @@ export function updateCampaignFindingStatus(
 	}
 	const timestamp = createTimestamp(input.timestamp);
 	record.status = input.status;
-	record.note = input.note.trim();
+	record.note = input.note.trim() || record.note;
 	record.updatedAt = timestamp;
 	ledger.updatedAt = timestamp;
 	return record;
@@ -473,6 +729,59 @@ export function addCampaignReportPath(
 	}
 	const timestamp = createTimestamp(input.timestamp);
 	record.reportPaths = dedupe([...record.reportPaths, input.path]);
+	record.updatedAt = timestamp;
+	ledger.updatedAt = timestamp;
+	return record;
+}
+
+export function createCampaignChain(ledger: CampaignLedger, input: CampaignChainCreateInput): CampaignChainRecord {
+	const timestamp = createTimestamp(input.timestamp);
+	const record: CampaignChainRecord = {
+		id: createChainId(ledger.nextIds.chain++),
+		title: input.title.trim(),
+		summary: input.summary.trim(),
+		status: input.status ?? "active",
+		findingIds: dedupe(input.findingIds ?? []),
+		note: input.note?.trim() || undefined,
+		createdAt: timestamp,
+		updatedAt: timestamp,
+	};
+	ledger.chains.push(record);
+	ledger.updatedAt = timestamp;
+	return record;
+}
+
+export function updateCampaignChain(
+	ledger: CampaignLedger,
+	input: CampaignChainUpdateInput,
+): CampaignChainRecord | undefined {
+	const record = ledger.chains.find((entry) => entry.id === input.id);
+	if (!record) {
+		return undefined;
+	}
+	const timestamp = createTimestamp(input.timestamp);
+	if (input.title?.trim()) {
+		record.title = input.title.trim();
+	}
+	if (input.summary?.trim()) {
+		record.summary = input.summary.trim();
+	}
+	if (input.status) {
+		record.status = input.status;
+	}
+	if (input.findingIds) {
+		record.findingIds = dedupe(input.findingIds);
+	}
+	if (input.addFindingIds || input.removeFindingIds) {
+		record.findingIds = dedupe(
+			record.findingIds
+				.filter((findingId) => !input.removeFindingIds?.includes(findingId))
+				.concat(input.addFindingIds ?? []),
+		);
+	}
+	if (input.note !== undefined) {
+		record.note = input.note.trim() || undefined;
+	}
 	record.updatedAt = timestamp;
 	ledger.updatedAt = timestamp;
 	return record;
@@ -498,6 +807,17 @@ export function renderCampaignStatusMarkdown(ledger: CampaignLedger): string {
 					.map((path) => basename(path))
 					.join(", ")
 					.replaceAll("|", "\\|")} | ${record.updatedAt} |`,
+			);
+		}
+	}
+	lines.push("", "## Chains", "", "| ID | Title | Status | Findings | Note | Updated |", "|----|-------|--------|----------|------|---------|");
+	const chains = [...ledger.chains].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+	if (chains.length === 0) {
+		lines.push("| - | - | - | No campaign chains yet | - | - |");
+	} else {
+		for (const record of chains) {
+			lines.push(
+				`| ${record.id} | ${record.title.replaceAll("|", "\\|")} | ${record.status} | ${record.findingIds.join(", ").replaceAll("|", "\\|")} | ${(record.note ?? "").replaceAll("|", "\\|")} | ${record.updatedAt} |`,
 			);
 		}
 	}
