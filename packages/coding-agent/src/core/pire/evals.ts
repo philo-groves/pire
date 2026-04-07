@@ -11,7 +11,7 @@ export const PIRE_EVAL_DIMENSIONS = [
 ] as const;
 
 export type PireEvalDimension = (typeof PIRE_EVAL_DIMENSIONS)[number];
-export type PireEvalLane = "repro" | "reverse-engineering" | "chain";
+export type PireEvalLane = "repro" | "reverse-engineering" | "chain" | "scenario";
 export type PireEvalGrade = "miss" | "partial" | "hit";
 export type PireFindingOutcome = "none" | "candidate" | "confirmed" | "reported";
 export type PireExploitability = "unknown" | "none" | "dos" | "limited" | "rce" | "chain";
@@ -138,6 +138,22 @@ export function createDefaultPireEvalRubric(lane: PireEvalLane): PireEvalRubric 
 				falsePositivePenalty: 25,
 				overclaimPenalty: 10,
 			};
+		case "scenario":
+			return {
+				weights: {
+					discovery: 5,
+					classification: 5,
+					rootCause: 10,
+					exploitability: 15,
+					mitigations: 10,
+					primitives: 15,
+					chaining: 20,
+					proof: 15,
+					reporting: 5,
+				},
+				falsePositivePenalty: 30,
+				overclaimPenalty: 15,
+			};
 	}
 }
 
@@ -183,8 +199,8 @@ export function validatePireEvalSubmission(task: PireEvalTask, submission: PireE
 		issues.push("high-impact exploitability claims require proof to score credibly");
 	}
 
-	if (task.lane === "chain" && chainingGrade === undefined) {
-		issues.push("chain tasks should record a chaining judgement");
+	if ((task.lane === "chain" || task.lane === "scenario") && chainingGrade === undefined) {
+		issues.push(`${task.lane} tasks should record a chaining judgement`);
 	}
 
 	if (submission.judgement.falsePositive) {

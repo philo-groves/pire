@@ -10,10 +10,15 @@ describe("pire binary RE eval corpus", () => {
 		const corpus = createStarterBinaryReEvalCorpus();
 		const summary = summarizeBinaryReEvalCorpus(corpus);
 
-		expect(corpus.every((task) => task.lane === "reverse-engineering" || task.lane === "chain")).toBe(true);
-		expect(summary.totalTasks).toBeGreaterThanOrEqual(18);
+		expect(
+			corpus.every(
+				(task) => task.lane === "reverse-engineering" || task.lane === "chain" || task.lane === "scenario",
+			),
+		).toBe(true);
+		expect(summary.totalTasks).toBeGreaterThanOrEqual(21);
 		expect(summary.reverseEngineeringTasks).toBeGreaterThan(0);
 		expect(summary.chainTasks).toBeGreaterThanOrEqual(3);
+		expect(summary.scenarioTasks).toBeGreaterThanOrEqual(3);
 		expect(summary.byBugClass.uaf).toBeGreaterThan(0);
 		expect(summary.byBugClass["heap-overflow"]).toBeGreaterThan(0);
 		expect(summary.byBugClass["oob-read"]).toBeGreaterThan(0);
@@ -28,6 +33,7 @@ describe("pire binary RE eval corpus", () => {
 		expect(summary.exploitabilityTargets.chain).toBeGreaterThanOrEqual(5);
 		expect(summary.exploitabilityTargets.dos).toBeGreaterThan(0);
 		expect(summary.sophisticatedChainTasks).toBeGreaterThanOrEqual(5);
+		expect(summary.endToEndScenarioTasks).toBeGreaterThanOrEqual(3);
 		expect(summary.maxRequiredBugChainLength).toBeGreaterThanOrEqual(4);
 		expect(summary.byBugClass["double-free"]).toBeGreaterThanOrEqual(2);
 		expect(summary.byFocus["crash-triage"]).toBeGreaterThanOrEqual(2);
@@ -63,10 +69,17 @@ describe("pire binary RE eval corpus", () => {
 			expect(
 				task.expectedCommands.some((command) => command === "bash" || command === "gdb" || command === "objdump"),
 			).toBe(true);
-			if (task.lane === "chain") {
+			if (task.lane === "chain" || task.lane === "scenario") {
 				expect(task.requiredBugChainLength).toBeGreaterThanOrEqual(3);
 				expect(task.requiredBugClasses?.length).toBeGreaterThanOrEqual(task.requiredBugChainLength ?? 0);
 				expect(task.expected?.exploitability).toBe("chain");
+			}
+			if (task.lane === "scenario") {
+				expect(task.entrySurface).toBeTruthy();
+				expect(task.goal).toBeTruthy();
+				expect(task.successEvidence?.length ?? 0).toBeGreaterThan(0);
+				expect(task.forbiddenShortcuts?.length ?? 0).toBeGreaterThan(0);
+				expect(task.expected?.requiresProof).toBe(true);
 			}
 		}
 	});

@@ -146,6 +146,14 @@ const LANE_SEVERITY_THRESHOLDS: Record<PireEvalLane, Required<PireEvalDeltaSever
 		warningIssuesIncrease: 2,
 		criticalIssuesIncrease: 3,
 	},
+	scenario: {
+		noticeScoreDrop: 0.015,
+		warningScoreDrop: 0.05,
+		criticalScoreDrop: 0.1,
+		noticeIssuesIncrease: 1,
+		warningIssuesIncrease: 2,
+		criticalIssuesIncrease: 3,
+	},
 };
 
 const FOCUS_SEVERITY_THRESHOLDS: Partial<Record<PireBinaryEvalFocus, Required<PireEvalDeltaSeverityThresholds>>> = {
