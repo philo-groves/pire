@@ -231,6 +231,7 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 const THINKING_LEVELS_WITH_XHIGH: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
 const MAX_IMPLICIT_CONTINUATIONS_PER_PROMPT = 1;
+const MAX_AUTOPILOT_CONTINUATIONS_PER_PROMPT = 12;
 const IMPLICIT_CONTINUATION_PREFIX =
 	/^(?:let me|i(?:'ll| will)\b|i am going to\b|next,?\s+i(?:'ll| will)\b|first,?\s+i(?:'ll| will)\b)/i;
 
@@ -614,7 +615,12 @@ export class AgentSession {
 	}
 
 	private _shouldImplicitlyContinue(message: AssistantMessage): boolean {
-		if (this._implicitContinuationCount >= MAX_IMPLICIT_CONTINUATIONS_PER_PROMPT) {
+		const autopilotEnabled = this.settingsManager.getAutopilotEnabled();
+		const maxContinuations = autopilotEnabled
+			? MAX_AUTOPILOT_CONTINUATIONS_PER_PROMPT
+			: MAX_IMPLICIT_CONTINUATIONS_PER_PROMPT;
+
+		if (this._implicitContinuationCount >= maxContinuations) {
 			return false;
 		}
 		if (this._retryPromise || this.agent.hasQueuedMessages()) {
@@ -627,6 +633,9 @@ export class AgentSession {
 			return false;
 		}
 		if (message.stopReason === "length") {
+			return true;
+		}
+		if (autopilotEnabled) {
 			return true;
 		}
 

@@ -68,6 +68,7 @@ export interface Settings {
 	transport?: TransportSetting; // default: "sse"
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
+	autopilotEnabled?: boolean;
 	theme?: string;
 	compaction?: CompactionSettings;
 	branchSummary?: BranchSummarySettings;
@@ -581,6 +582,16 @@ export class SettingsManager {
 	setFollowUpMode(mode: "all" | "one-at-a-time"): void {
 		this.globalSettings.followUpMode = mode;
 		this.markModified("followUpMode");
+		this.save();
+	}
+
+	getAutopilotEnabled(): boolean {
+		return this.settings.autopilotEnabled ?? false;
+	}
+
+	setAutopilotEnabled(enabled: boolean): void {
+		this.globalSettings.autopilotEnabled = enabled;
+		this.markModified("autopilotEnabled");
 		this.save();
 	}
 

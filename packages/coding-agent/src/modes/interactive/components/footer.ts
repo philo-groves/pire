@@ -32,6 +32,7 @@ function formatTokens(count: number): string {
  */
 export class FooterComponent implements Component {
 	private autoCompactEnabled = true;
+	private autopilotEnabled = false;
 
 	constructor(
 		private session: AgentSession,
@@ -44,6 +45,10 @@ export class FooterComponent implements Component {
 
 	setAutoCompactEnabled(enabled: boolean): void {
 		this.autoCompactEnabled = enabled;
+	}
+
+	setAutopilotEnabled(enabled: boolean): void {
+		this.autopilotEnabled = enabled;
 	}
 
 	/**
@@ -137,6 +142,7 @@ export class FooterComponent implements Component {
 			contextPercentStr = contextPercentDisplay;
 		}
 		statsParts.push(contextPercentStr);
+		statsParts.push(this.autopilotEnabled ? "ap:on" : "ap:off");
 
 		let statsLeft = statsParts.join(" ");
 
