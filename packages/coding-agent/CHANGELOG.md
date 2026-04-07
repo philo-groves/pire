@@ -24,6 +24,7 @@
 - Extended `pire-evals --baseline` to support multiple named baselines via repeated `name=path` arguments, so reports can compare current binary-RE results against references like `main`, `last-good`, and `best-known` at the same time.
 - Added baseline-aware expectation gates for `pire-evals`, so case and suite metadata can fail CI on excessive score drops or issue increases relative to named baselines such as `last-good`.
 - Added baseline delta severity labels (`notice`, `warning`, `critical`) to `pire-evals` outputs so CI artifacts can distinguish mild drift from hard binary-RE regressions.
+- Added configurable `severityThresholds` support in `case.json` and `cases.json`, so binary-RE evals can tune when baseline drift should be labeled as `notice`, `warning`, or `critical`.
 
 ### Changed
 

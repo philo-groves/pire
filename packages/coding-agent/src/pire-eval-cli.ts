@@ -42,11 +42,13 @@ interface PireEvalSuiteExpectation {
 interface PireEvalCaseDefinition {
 	title?: string;
 	expectation?: PireEvalCaseExpectation;
+	severityThresholds?: PireEvalDeltaSeverityThresholds;
 }
 
 interface PireEvalSuiteDefinition {
 	title?: string;
 	expectation?: PireEvalSuiteExpectation;
+	severityThresholds?: PireEvalDeltaSeverityThresholds;
 }
 
 interface PireEvalCaseScore {
@@ -59,6 +61,7 @@ interface PireEvalCaseScore {
 	missingTasks: number;
 	issues: string[];
 	expectation?: PireEvalCaseExpectation;
+	severityThresholds?: PireEvalDeltaSeverityThresholds;
 	regressions: string[];
 	baselines?: PireEvalCaseBaseline[];
 }
@@ -69,6 +72,7 @@ interface PireEvalSuiteSummary {
 	averageIssues: number;
 	regressions: string[];
 	expectation?: PireEvalSuiteExpectation;
+	severityThresholds?: PireEvalDeltaSeverityThresholds;
 	baselines?: PireEvalSuiteBaseline[];
 }
 
@@ -94,6 +98,24 @@ interface PireEvalSuiteBaseline {
 }
 
 type PireEvalDeltaSeverity = "none" | "notice" | "warning" | "critical";
+
+interface PireEvalDeltaSeverityThresholds {
+	noticeScoreDrop?: number;
+	warningScoreDrop?: number;
+	criticalScoreDrop?: number;
+	noticeIssuesIncrease?: number;
+	warningIssuesIncrease?: number;
+	criticalIssuesIncrease?: number;
+}
+
+const DEFAULT_SEVERITY_THRESHOLDS: Required<PireEvalDeltaSeverityThresholds> = {
+	noticeScoreDrop: 0.03,
+	warningScoreDrop: 0.1,
+	criticalScoreDrop: 0.2,
+	noticeIssuesIncrease: 1,
+	warningIssuesIncrease: 2,
+	criticalIssuesIncrease: 3,
+};
 
 function printHelp(): void {
 	process.stdout.write(`pire-evals - score binary RE eval session directories
@@ -159,14 +181,32 @@ function formatSignedDelta(value: number, digits = 2): string {
 	return value > 0 ? `+${rounded}` : rounded;
 }
 
-function classifyDeltaSeverity(scoreDelta: number, issuesDelta: number): PireEvalDeltaSeverity {
-	if (scoreDelta <= -0.2 || issuesDelta >= 3) {
+function resolveSeverityThresholds(
+	thresholds?: PireEvalDeltaSeverityThresholds,
+): Required<PireEvalDeltaSeverityThresholds> {
+	return {
+		noticeScoreDrop: thresholds?.noticeScoreDrop ?? DEFAULT_SEVERITY_THRESHOLDS.noticeScoreDrop,
+		warningScoreDrop: thresholds?.warningScoreDrop ?? DEFAULT_SEVERITY_THRESHOLDS.warningScoreDrop,
+		criticalScoreDrop: thresholds?.criticalScoreDrop ?? DEFAULT_SEVERITY_THRESHOLDS.criticalScoreDrop,
+		noticeIssuesIncrease: thresholds?.noticeIssuesIncrease ?? DEFAULT_SEVERITY_THRESHOLDS.noticeIssuesIncrease,
+		warningIssuesIncrease: thresholds?.warningIssuesIncrease ?? DEFAULT_SEVERITY_THRESHOLDS.warningIssuesIncrease,
+		criticalIssuesIncrease: thresholds?.criticalIssuesIncrease ?? DEFAULT_SEVERITY_THRESHOLDS.criticalIssuesIncrease,
+	};
+}
+
+function classifyDeltaSeverity(
+	scoreDelta: number,
+	issuesDelta: number,
+	thresholds?: PireEvalDeltaSeverityThresholds,
+): PireEvalDeltaSeverity {
+	const resolved = resolveSeverityThresholds(thresholds);
+	if (scoreDelta <= -resolved.criticalScoreDrop || issuesDelta >= resolved.criticalIssuesIncrease) {
 		return "critical";
 	}
-	if (scoreDelta <= -0.1 || issuesDelta >= 2) {
+	if (scoreDelta <= -resolved.warningScoreDrop || issuesDelta >= resolved.warningIssuesIncrease) {
 		return "warning";
 	}
-	if (scoreDelta <= -0.03 || issuesDelta >= 1) {
+	if (scoreDelta <= -resolved.noticeScoreDrop || issuesDelta >= resolved.noticeIssuesIncrease) {
 		return "notice";
 	}
 	return "none";
@@ -302,6 +342,7 @@ function collectSuiteRegressions(
 		averageIssues,
 		regressions,
 		expectation,
+		severityThresholds: undefined,
 	};
 }
 
@@ -459,6 +500,29 @@ function applySuiteBaselineExpectations(
 	};
 }
 
+function reclassifyBaselineSeverities(result: PireEvalCollectedScores): PireEvalCollectedScores {
+	return {
+		scores: result.scores.map((score) => ({
+			...score,
+			baselines: score.baselines?.map((baseline) => ({
+				...baseline,
+				severity: classifyDeltaSeverity(baseline.normalizedDelta, baseline.issuesDelta, score.severityThresholds),
+			})),
+		})),
+		suite: {
+			...result.suite,
+			baselines: result.suite.baselines?.map((baseline) => ({
+				...baseline,
+				severity: classifyDeltaSeverity(
+					baseline.averageNormalizedDelta,
+					baseline.averageIssuesDelta,
+					result.suite.severityThresholds,
+				),
+			})),
+		},
+	};
+}
+
 function applyBaseline(
 	result: PireEvalCollectedScores,
 	baselineInput: PireEvalBaselineInput,
@@ -480,6 +544,7 @@ function applyBaseline(
 							severity: classifyDeltaSeverity(
 								score.normalized - baselineScore.normalized,
 								score.issues.length - baselineScore.issues.length,
+								score.severityThresholds,
 							),
 						},
 					]
@@ -501,6 +566,7 @@ function applyBaseline(
 					severity: classifyDeltaSeverity(
 						result.suite.averageNormalized - baseline.suite.averageNormalized,
 						result.suite.averageIssues - baseline.suite.averageIssues,
+						result.suite.severityThresholds,
 					),
 				},
 			],
@@ -543,6 +609,7 @@ async function collectCaseScores(
 			missingTasks: result.score.missingTaskIds.length,
 			issues: result.score.issues,
 			expectation: definition?.expectation,
+			severityThresholds: definition?.severityThresholds,
 			regressions: [],
 		});
 	}
@@ -558,9 +625,13 @@ async function collectCaseScores(
 		score.regressions = collectRegressions(score, index + 1);
 	}
 
+	const suite = collectSuiteRegressions(rankedScores, suiteDefinition?.expectation);
 	return {
 		scores: rankedScores,
-		suite: collectSuiteRegressions(rankedScores, suiteDefinition?.expectation),
+		suite: {
+			...suite,
+			severityThresholds: suiteDefinition?.severityThresholds,
+		},
 	};
 }
 
@@ -579,6 +650,7 @@ async function main(argv: string[]): Promise<void> {
 	for (const baselineInput of args.baselines) {
 		withBaselines = applyBaseline(withBaselines, baselineInput, await loadBaseline(baselineInput.path));
 	}
+	withBaselines = reclassifyBaselineSeverities(withBaselines);
 	withBaselines = {
 		...withBaselines,
 		scores: withBaselines.scores.map((score, index) => ({

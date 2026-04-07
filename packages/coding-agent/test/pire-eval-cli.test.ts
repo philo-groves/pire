@@ -413,4 +413,140 @@ describe("pire eval cli", () => {
 			stderr: expect.stringContaining("last-good normalized delta"),
 		});
 	});
+
+	test("uses configurable severity thresholds from case.json and cases.json", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-severity-config-"));
+		const baselinePath = join(tempDir, "baseline.json");
+		const customCasesDir = join(tempDir, "custom-severity-cases");
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "session-cases"),
+				"--json",
+				"--report",
+				baselinePath,
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		await cp(join(FIXTURE_DIR, "session-cases-suite-regression"), customCasesDir, { recursive: true });
+		await writeFile(
+			join(customCasesDir, "cases.json"),
+			`${JSON.stringify(
+				{
+					title: "Custom severity thresholds",
+					expectation: {
+						minAverageNormalized: 0.45,
+						maxAverageIssues: 3,
+						maxRegressions: 0,
+						minCases: 2,
+						maxCases: 2,
+					},
+					severityThresholds: {
+						noticeScoreDrop: 0.01,
+						warningScoreDrop: 1,
+						criticalScoreDrop: 2,
+						noticeIssuesIncrease: 1,
+						warningIssuesIncrease: 10,
+						criticalIssuesIncrease: 20,
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf-8",
+		);
+		await writeFile(
+			join(customCasesDir, "heap-disasm-confirmed", "case.json"),
+			`${JSON.stringify(
+				{
+					title: "Confirmed heap-disassembly session",
+					expectation: {
+						minNormalized: 0.5,
+						maxIssues: 3,
+						maxRank: 1,
+					},
+					severityThresholds: {
+						noticeScoreDrop: 0.01,
+						warningScoreDrop: 1,
+						criticalScoreDrop: 2,
+						noticeIssuesIncrease: 1,
+						warningIssuesIncrease: 10,
+						criticalIssuesIncrease: 20,
+					},
+				},
+				null,
+				2,
+			)}\n`,
+			"utf-8",
+		);
+		await writeFile(
+			join(customCasesDir, "heap-disasm-confirmed", "bindings.json"),
+			`${JSON.stringify(
+				{
+					version: 1,
+					suiteId: "pire-binary-re-starter-v1",
+					runId: "heap-case-001",
+					model: "claude-sonnet-4-5",
+					notes: ["fixture session: degraded heap/disasm case"],
+					bindings: [
+						{
+							taskId: "binre-disasm-001",
+							findingId: "find-heap-001",
+							exploitability: "limited",
+							judgement: {
+								dimensions: {
+									discovery: "partial",
+									classification: "miss",
+									rootCause: "miss",
+									proof: "miss",
+									reporting: "miss",
+									primitives: "miss",
+								},
+							},
+						},
+					],
+				},
+				null,
+				2,
+			)}\n`,
+			"utf-8",
+		);
+
+		const result = await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				customCasesDir,
+				"--baseline",
+				`last-good=${baselinePath}`,
+				"--json",
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		const parsed = JSON.parse(result.stdout) as {
+			scores: Array<{ caseName: string; baselines?: Array<{ name: string; severity: string }> }>;
+			suite: { baselines?: Array<{ name: string; severity: string }> };
+		};
+
+		expect(parsed.suite.baselines?.find((entry) => entry.name === "last-good")?.severity).toBe("notice");
+		expect(parsed.scores.find((entry) => entry.caseName === "heap-disasm-confirmed")?.baselines?.[0]?.severity).toBe(
+			"notice",
+		);
+	});
 });
