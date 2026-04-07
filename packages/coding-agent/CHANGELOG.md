@@ -14,6 +14,10 @@
 - Tightened `pire` repro bundle generation so weak findings are refused by default unless they have confirmed/reported status plus linked evidence and replay material, and bundles now include an explicit readiness assessment.
 - Expanded `pire` notebook exports into richer research reports with structured scope/methodology sections, linked finding evidence and artifact details, open questions, dead ends, remediation drafts, and improved HTML evidence rendering.
 
+### Changed
+
+- Simplified the default `pire` mode tool surface to a shell-first workflow built around `bash`, `read`, and lightweight research-state helpers, so reverse-engineering sessions rely on installed CLI tooling instead of a large always-on wrapper tool menu.
+
 ## [0.65.2] - 2026-04-06
 
 ## [0.65.1] - 2026-04-05

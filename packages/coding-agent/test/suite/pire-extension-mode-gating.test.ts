@@ -61,49 +61,10 @@ function createToolSet(log: string[]): AgentTool[] {
 
 describe("pire extension mode and tool gating", () => {
 	const harnesses: Harness[] = [];
-	const expectedReconTools = [
-		"research_tracker",
-		"read",
-		"bash",
-		"environment_inventory",
-		"platform_powershell",
-		"platform_hyperv",
-		"platform_macos",
-		"platform_xcrun",
-		"binary_file",
-		"binary_strings",
-		"binary_readelf",
-		"binary_objdump",
-		"binary_nm",
-		"binary_xxd",
-		"disasm_rizin_info",
-		"disasm_rizin_functions",
-		"disasm_radare2_disassembly",
-		"decomp_ghidra_functions",
-		"decomp_ghidra_decompile",
-		"net_curl_head",
-		"net_tshark_summary",
-		"net_tshark_follow",
-		"unpack_binwalk_scan",
-		"unpack_archive_list",
-	];
-	const expectedDynamicOnlyTools = ["debug_gdb", "debug_lldb", "debug_strace", "debug_ltrace"];
-	const expectedDynamicTools = [...expectedReconTools, "unpack_binwalk_extract", ...expectedDynamicOnlyTools];
-	const expectedProofingTools = [
-		...expectedReconTools.slice(0, 3),
-		"edit",
-		"write",
-		...expectedReconTools.slice(3),
-		"unpack_binwalk_extract",
-		...expectedDynamicOnlyTools,
-	];
-	const expectedReportTools = [
-		...expectedReconTools.slice(0, 3),
-		"edit",
-		"write",
-		...expectedReconTools.slice(3),
-		"unpack_binwalk_extract",
-	];
+	const expectedReconTools = ["research_tracker", "read", "bash", "environment_inventory"];
+	const expectedDynamicTools = ["research_tracker", "read", "bash", "environment_inventory"];
+	const expectedProofingTools = ["research_tracker", "read", "bash", "edit", "write", "environment_inventory"];
+	const expectedReportTools = ["research_tracker", "read", "bash", "edit", "write", "environment_inventory"];
 
 	const getToolResultText = (messages: Message[]): string => {
 		const toolResult = [...messages]
@@ -212,7 +173,7 @@ describe("pire extension mode and tool gating", () => {
 		expect(log).toContain("edit:/tmp/proof.txt");
 	});
 
-	it("exposes debug tools only after switching to dynamic mode", async () => {
+	it("keeps recon and dynamic shell-first, and only adds mutation tools in proofing/report", async () => {
 		const log: string[] = [];
 		const harness = await createHarness({
 			tools: createToolSet(log),
@@ -231,7 +192,7 @@ describe("pire extension mode and tool gating", () => {
 		expect(harness.session.getActiveToolNames()).toEqual(expectedReportTools);
 	});
 
-	it("registers binary wrapper results as tracker evidence", async () => {
+	it("registers read results as tracker evidence", async () => {
 		const log: string[] = [];
 		const harness = await createHarness({
 			tools: createToolSet(log),
@@ -245,14 +206,14 @@ describe("pire extension mode and tool gating", () => {
 		await harness.session.bindExtensions({ shutdownHandler: () => {} });
 
 		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("binary_file", { path: samplePath })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxToolCall("read", { path: samplePath })], { stopReason: "toolUse" }),
 			(context) => fauxAssistantMessage(getToolResultText(context.messages)),
 		]);
 
-		await harness.session.prompt("inspect the sample binary");
+		await harness.session.prompt("inspect the sample");
 
-		expect(getAssistantTexts(harness).some((text) => text.includes("binary_file:"))).toBe(true);
-		expect(log).toEqual([]);
+		expect(getAssistantTexts(harness).some((text) => text.includes(`read ${samplePath}`))).toBe(true);
+		expect(log).toEqual([`read:${samplePath}`]);
 
 		const trackerPath = join(harness.tempDir, ".pire", "session", "findings.json");
 		expect(existsSync(trackerPath)).toBe(true);
@@ -262,7 +223,7 @@ describe("pire extension mode and tool gating", () => {
 		expect(
 			tracker.evidence.some(
 				(record) =>
-					record.commandId?.startsWith("tool:binary_file:") === true &&
+					record.commandId?.startsWith("tool:read:") === true &&
 					record.artifactIds.some((artifactId) => artifactId.includes(samplePath)),
 			),
 		).toBe(true);
@@ -306,13 +267,13 @@ describe("pire extension mode and tool gating", () => {
 				],
 				{ stopReason: "toolUse" },
 			),
-			fauxAssistantMessage([fauxToolCall("binary_file", { path: samplePath })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxToolCall("read", { path: samplePath })], { stopReason: "toolUse" }),
 			(context) => fauxAssistantMessage(getToolResultText(context.messages)),
 		]);
 
 		await harness.session.prompt("track the current reversing hypothesis and inspect the sample");
 
-		expect(getAssistantTexts(harness).some((text) => text.includes("binary_file:"))).toBe(true);
+		expect(getAssistantTexts(harness).some((text) => text.includes(`read ${samplePath}`))).toBe(true);
 
 		const trackerPath = join(harness.tempDir, ".pire", "session", "findings.json");
 		expect(existsSync(trackerPath)).toBe(true);
@@ -326,7 +287,7 @@ describe("pire extension mode and tool gating", () => {
 		expect(tracker.hypotheses[0]?.relatedArtifactIds.some((artifactId) => artifactId.includes(samplePath))).toBe(
 			true,
 		);
-		expect(tracker.evidence.some((record) => record.commandId?.startsWith("tool:binary_file:"))).toBe(true);
+		expect(tracker.evidence.some((record) => record.commandId?.startsWith("tool:read:"))).toBe(true);
 		expect(
 			tracker.evidence.some((record) => record.artifactIds.some((artifactId) => artifactId.includes(samplePath))),
 		).toBe(true);

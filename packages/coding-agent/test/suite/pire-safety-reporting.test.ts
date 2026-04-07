@@ -43,6 +43,17 @@ function getCustomTexts(messages: unknown[]): string[] {
 function createToolSet(log: string[]): AgentTool[] {
 	return [
 		{
+			name: "read",
+			label: "Read",
+			description: "Read a file",
+			parameters: Type.Object({ path: Type.String() }),
+			execute: async (_toolCallId, params) => {
+				const path = typeof params === "object" && params !== null && "path" in params ? String(params.path) : "";
+				log.push(`read:${path}`);
+				return { content: [{ type: "text", text: `read ${path}` }], details: { path } };
+			},
+		},
+		{
 			name: "bash",
 			label: "Bash",
 			description: "Run a shell command",
@@ -98,7 +109,9 @@ describe("pire safety and reporting commands", () => {
 	});
 
 	it("exports notebooks and generates repro bundles from session state", async () => {
+		const log: string[] = [];
 		const harness = await createHarness({
+			tools: createToolSet(log),
 			extensionFactories: [{ factory: pireExtension, path: PIRE_EXTENSION_PATH }],
 		});
 		harnesses.push(harness);
@@ -119,7 +132,7 @@ describe("pire safety and reporting commands", () => {
 				],
 				{ stopReason: "toolUse" },
 			),
-			fauxAssistantMessage([fauxToolCall("binary_file", { path: samplePath })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxToolCall("read", { path: samplePath })], { stopReason: "toolUse" }),
 			(context) => fauxAssistantMessage(getToolResultText(context.messages)),
 		]);
 		await harness.session.prompt("track the current reversing hypothesis and inspect the sample");

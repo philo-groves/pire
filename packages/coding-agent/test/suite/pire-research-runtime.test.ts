@@ -55,6 +55,8 @@ function createToolSet(): AgentTool[] {
 	];
 }
 
+const expectedResearchTools = ["research_tracker", "read", "bash", "environment_inventory"];
+
 describe("pire research runtime features", () => {
 	const harnesses: Harness[] = [];
 
@@ -104,9 +106,7 @@ describe("pire research runtime features", () => {
 		expect(injectedText).toContain("[PIRE SESSION TYPE: CRASH TRIAGE]");
 		expect(injectedText).toContain("[PIRE ROLE: REVIEWER]");
 		expect(injectedText).toContain("[PIRE MODE: DYNAMIC]");
-		expect(harness.session.getActiveToolNames()).toContain("debug_gdb");
-		expect(harness.session.getActiveToolNames()).toContain("platform_powershell");
-		expect(harness.session.getActiveToolNames()).toContain("platform_macos");
+		expect(harness.session.getActiveToolNames()).toEqual(expectedResearchTools);
 		expect(harness.session.getActiveToolNames()).not.toContain("edit");
 	});
 
@@ -204,7 +204,7 @@ describe("pire research runtime features", () => {
 				],
 				{ stopReason: "toolUse" },
 			),
-			fauxAssistantMessage([fauxToolCall("binary_file", { path: samplePath })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxToolCall("read", { path: samplePath })], { stopReason: "toolUse" }),
 			(context) => fauxAssistantMessage(getToolResultText(context.messages)),
 		]);
 

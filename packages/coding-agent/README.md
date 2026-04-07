@@ -105,6 +105,8 @@ Then just talk to pi. By default, pi gives the model four tools: `read`, `write`
 
 `pire` is a project-local reverse-engineering and security-research profile layered on top of pi. It is activated by placing a `.pire/` directory in your repo. Pi auto-discovers `.pire/SYSTEM.md`, `.pire/APPEND_SYSTEM.md`, `.pire/prompts/`, `.pire/skills/`, and `.pire/extensions/`.
 
+Pire keeps the default active tool surface intentionally small. Most analysis should happen through `bash` plus the CLI tools already present in the environment, while the extension mainly adds research state, guardrails, and reporting workflows.
+
 The starter `pire` profile in this repo provides:
 - A research-first base prompt via `.pire/SYSTEM.md`
 - Supplemental engagement and opsec guidance via `.pire/APPEND_SYSTEM.md`
