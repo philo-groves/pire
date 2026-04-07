@@ -1,4 +1,5 @@
 import { buildArtifactManifestSummary, type ArtifactManifest } from "./artifacts.js";
+import { buildCampaignLedgerSummary, type CampaignLedger } from "./campaign.js";
 import {
 	buildFindingsTrackerSummary,
 	type DeadEndRecord,
@@ -45,6 +46,7 @@ export interface ResearchCompactionInput {
 	mode: PireMode;
 	role?: PireRole;
 	sessionType?: PireSessionType;
+	campaign?: CampaignLedger;
 	tracker: FindingsTracker;
 	manifest: ArtifactManifest;
 	recentActivity: PireToolActivity[];
@@ -235,6 +237,7 @@ export function formatSessionTypePrompt(sessionType: PireSessionType): string {
 export function buildResearchCompactionSummary(input: ResearchCompactionInput): string {
 	const trackerSummary = buildFindingsTrackerSummary(input.tracker);
 	const artifactSummary = buildArtifactManifestSummary(input.manifest);
+	const campaignSummary = input.campaign ? buildCampaignLedgerSummary(input.campaign) : undefined;
 	const lines: string[] = [
 		"# Pire Research Compaction",
 		"",
@@ -242,6 +245,9 @@ export function buildResearchCompactionSummary(input: ResearchCompactionInput): 
 		`- mode: ${input.mode}`,
 		`- role: ${input.role ?? "unset"}`,
 		`- session type: ${input.sessionType ?? "unset"}`,
+		campaignSummary
+			? `- campaign findings: ${campaignSummary.totalFindings} (${campaignSummary.leadFindings} lead, ${campaignSummary.confirmedFindings} confirmed, ${campaignSummary.submittedFindings} submitted, ${campaignSummary.deEscalatedFindings} de-escalated, ${campaignSummary.blockedFindings} blocked)`
+			: "- campaign findings: unavailable",
 		"",
 		"## Tracker Summary",
 		`- hypotheses: ${trackerSummary.totalHypotheses} (${trackerSummary.openHypotheses} open, ${trackerSummary.supportedHypotheses} supported, ${trackerSummary.refutedHypotheses} refuted)`,
@@ -250,6 +256,23 @@ export function buildResearchCompactionSummary(input: ResearchCompactionInput): 
 		`- evidence: ${trackerSummary.totalEvidence}`,
 		`- dead ends: ${trackerSummary.totalDeadEnds}`,
 	];
+
+	if (campaignSummary) {
+		lines.push("", "## Campaign State");
+		if (input.campaign?.findings.length) {
+			for (const record of [...input.campaign.findings].slice(-6).reverse()) {
+				lines.push(`- ${record.id} [${record.status}] ${record.title}`);
+				if (record.note) {
+					lines.push(`  note: ${truncate(record.note, 180)}`);
+				}
+				if (record.reportPaths.length > 0) {
+					lines.push(`  reports: ${record.reportPaths.slice(0, 2).join(", ")}`);
+				}
+			}
+		} else {
+			lines.push("- no campaign findings recorded");
+		}
+	}
 
 	if (input.customInstructions?.trim()) {
 		lines.push("", "## Compaction Focus", `- ${input.customInstructions.trim()}`);

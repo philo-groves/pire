@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall, type Message, type TextContent } from "@mariozechner/pi-ai";
@@ -140,6 +140,9 @@ describe("pire safety and reporting commands", () => {
 			(context) => fauxAssistantMessage(getToolResultText(context.messages)),
 		]);
 		await harness.session.prompt("confirm the finding");
+		await harness.session.prompt(
+			"/campaign-status find-001 de-escalated :: parser guard exists on the live target build",
+		);
 		await harness.session.prompt("/notebook-export all");
 		await harness.session.prompt("/repro-bundle find-001 sample-oob");
 
@@ -150,6 +153,10 @@ describe("pire safety and reporting commands", () => {
 		expect(existsSync(join(reproDir, "README.md"))).toBe(true);
 		expect(existsSync(join(reproDir, "manifest.json"))).toBe(true);
 		expect(readFileSync(join(reproDir, "README.md"), "utf-8")).toContain("Out-of-bounds read");
+		const markdownExport = readdirSync(exportDir).find((entry) => entry.endsWith(".md"));
+		expect(markdownExport).toBeDefined();
+		expect(readFileSync(join(exportDir, markdownExport ?? ""), "utf-8")).toContain("## Campaign");
+		expect(readFileSync(join(exportDir, markdownExport ?? ""), "utf-8")).toContain("de-escalated");
 	});
 
 	it("refuses repro bundles for incomplete findings", async () => {

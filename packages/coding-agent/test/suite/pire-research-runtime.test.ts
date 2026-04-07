@@ -130,12 +130,22 @@ describe("pire research runtime features", () => {
 		]);
 
 		await harness.session.prompt("track the hypothesis and inspect the sample");
+		await harness.session.prompt("/support-hypothesis hyp-001 ev-001");
+		await harness.session.prompt(
+			"/promote-finding hyp-001 Parser loop candidate :: Copy loop may overrun parser state",
+		);
+		await harness.session.prompt(
+			"/campaign-status find-001 blocked :: parked until we can capture the production parser build for confirmation",
+		);
 
 		const result = await harness.session.compact("Preserve the current reversing state.");
 
 		expect(result.summary).toContain("# Pire Research Compaction");
 		expect(result.summary).toContain("- session type: binary-re");
 		expect(result.summary).toContain("- role: reverser");
+		expect(result.summary).toContain("- campaign findings: 1");
+		expect(result.summary).toContain("## Campaign State");
+		expect(result.summary).toContain("[blocked] Parser loop candidate");
 		expect(result.summary).toContain("## Tracker Summary");
 		expect(result.summary).toContain("## Artifact Registry");
 		expect(result.summary).toContain(samplePath);

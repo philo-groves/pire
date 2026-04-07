@@ -1,6 +1,7 @@
 import { copyFile, mkdir, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import type { ArtifactManifest, ArtifactRecord, ArtifactType } from "./artifacts.js";
+import type { CampaignLedger, CampaignLedgerSummary } from "./campaign.js";
 import type { FindingsTracker, FindingRecord, FindingsTrackerSummary } from "./findings.js";
 import type { EnvironmentInventory } from "./inventory.js";
 import type { PireMode, PireRole, PireSessionType, PireToolActivity } from "./research-runtime.js";
@@ -23,6 +24,8 @@ export interface NotebookDocument {
 	sessionType?: PireSessionType;
 	safety: PireSafetyPosture;
 	inventory?: EnvironmentInventory;
+	campaign?: CampaignLedger;
+	campaignSummary?: CampaignLedgerSummary;
 	tracker: FindingsTracker;
 	trackerSummary: FindingsTrackerSummary;
 	manifest: ArtifactManifest;
@@ -66,6 +69,8 @@ export interface GenerateNotebookOptions {
 	sessionType?: PireSessionType;
 	safety: PireSafetyPosture;
 	inventory?: EnvironmentInventory;
+	campaign?: CampaignLedger;
+	campaignSummary?: CampaignLedgerSummary;
 	tracker: FindingsTracker;
 	trackerSummary: FindingsTrackerSummary;
 	manifest: ArtifactManifest;
@@ -174,6 +179,8 @@ export function buildNotebookDocument(options: GenerateNotebookOptions): Noteboo
 		sessionType: options.sessionType,
 		safety: options.safety,
 		inventory: options.inventory,
+		campaign: options.campaign,
+		campaignSummary: options.campaignSummary,
 		tracker: options.tracker,
 		trackerSummary: options.trackerSummary,
 		manifest: options.manifest,
@@ -279,9 +286,31 @@ export function renderNotebookMarkdown(doc: NotebookDocument): string {
 		`- Commands recorded: ${doc.methodology.commandCount}`,
 		`- Artifacts recorded: ${doc.methodology.artifactCount}`,
 		"",
+		"## Campaign",
+		"",
 		"## Timeline of Actions",
 		"",
 	];
+
+	if (!doc.campaignSummary) {
+		lines.splice(lines.length - 2, 0, "- Campaign ledger not captured", "");
+	} else {
+		const campaignLines = [
+			`- Findings: ${doc.campaignSummary.totalFindings}`,
+			`- Lead: ${doc.campaignSummary.leadFindings}`,
+			`- Confirmed: ${doc.campaignSummary.confirmedFindings}`,
+			`- Submitted: ${doc.campaignSummary.submittedFindings}`,
+			`- De-escalated: ${doc.campaignSummary.deEscalatedFindings}`,
+			`- Blocked: ${doc.campaignSummary.blockedFindings}`,
+		];
+		if ((doc.campaign?.findings.length ?? 0) > 0) {
+			campaignLines.push("- Campaign findings:");
+			for (const record of doc.campaign!.findings.slice(0, 6)) {
+				campaignLines.push(`  - ${record.id} [${record.status}] ${record.title}`);
+			}
+		}
+		lines.splice(lines.length - 2, 0, ...campaignLines, "");
+	}
 
 	if (doc.activities.length === 0) {
 		lines.push("- No recorded activity");
@@ -436,6 +465,27 @@ ${artifactItemsForFinding}
 		.join("");
 	const deadEndItems = doc.deadEnds.map((deadEnd) => `<li>${escapeHtml(deadEnd.id)} ${escapeHtml(deadEnd.summary)}</li>`).join("");
 	const remediationItems = doc.remediationDraft.map((line) => `<li>${escapeHtml(line)}</li>`).join("");
+	const campaignSummaryItems = doc.campaignSummary
+		? [
+				`<li>Findings: ${doc.campaignSummary.totalFindings}</li>`,
+				`<li>Lead: ${doc.campaignSummary.leadFindings}</li>`,
+				`<li>Confirmed: ${doc.campaignSummary.confirmedFindings}</li>`,
+				`<li>Submitted: ${doc.campaignSummary.submittedFindings}</li>`,
+				`<li>De-escalated: ${doc.campaignSummary.deEscalatedFindings}</li>`,
+				`<li>Blocked: ${doc.campaignSummary.blockedFindings}</li>`,
+			].join("")
+		: "<li>Campaign ledger not captured</li>";
+	const campaignItems =
+		doc.campaign && doc.campaign.findings.length > 0
+			? doc.campaign.findings
+					.map(
+						(record) =>
+							`<li><strong>${escapeHtml(record.id)}</strong> [${escapeHtml(record.status)}] ${escapeHtml(record.title)}${
+								record.note ? `<br>${escapeHtml(record.note)}` : ""
+							}</li>`,
+					)
+					.join("")
+			: "<li>No campaign findings recorded</li>";
 
 	return `<!doctype html>
 <html lang="en">
@@ -455,6 +505,11 @@ details { margin: 0.5rem 0; padding: 0.5rem; background: #fffdf8; border: 1px so
 <p>Generated: ${escapeHtml(doc.generatedAt)}</p>
 <p>Mode: ${escapeHtml(doc.mode)} | Role: ${escapeHtml(doc.role ?? "unset")} | Session: ${escapeHtml(doc.sessionType ?? "unset")}</p>
 <p>Safety: ${escapeHtml(doc.safety.scope)} / ${escapeHtml(doc.safety.intent)}</p>
+</section>
+<section>
+<h2>Campaign</h2>
+<ul>${campaignSummaryItems}</ul>
+<ul>${campaignItems}</ul>
 </section>
 <section>
 <h2>Timeline of Actions</h2>

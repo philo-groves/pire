@@ -4,6 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { ArtifactManifest } from "../../../.pire/extensions/pire/artifacts.js";
+import {
+	buildCampaignLedgerSummary,
+	createEmptyCampaignLedger,
+	upsertCampaignFinding,
+} from "../../../.pire/extensions/pire/campaign.js";
 import { addEvidence, addFinding, createEmptyFindingsTracker } from "../../../.pire/extensions/pire/findings.js";
 import {
 	assessReproBundle,
@@ -60,6 +65,12 @@ describe("pire reporting helpers", () => {
 				},
 			],
 		};
+		const campaign = createEmptyCampaignLedger();
+		upsertCampaignFinding(campaign, {
+			finding: tracker.findings[0]!,
+			tracker,
+			artifacts: manifest.artifacts,
+		});
 
 		const doc = buildNotebookDocument({
 			cwd: "/tmp/project",
@@ -92,11 +103,16 @@ describe("pire reporting helpers", () => {
 					artifacts: ["/tmp/sample.bin"],
 				},
 			],
+			campaign,
+			campaignSummary: buildCampaignLedgerSummary(campaign),
 		});
 
+		expect(renderNotebookMarkdown(doc)).toContain("## Campaign");
+		expect(renderNotebookMarkdown(doc)).toContain("Bounds check missing");
 		expect(renderNotebookMarkdown(doc)).toContain("## Timeline of Actions");
 		expect(renderNotebookMarkdown(doc)).toContain("## Scope");
 		expect(renderNotebookMarkdown(doc)).toContain("## Findings");
+		expect(renderNotebookHtml(doc)).toContain("<h2>Campaign</h2>");
 		expect(renderNotebookHtml(doc)).toContain("<details>");
 		expect(renderNotebookHtml(doc)).toContain("Remediation Draft");
 

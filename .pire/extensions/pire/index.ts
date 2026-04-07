@@ -1056,6 +1056,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			sessionType: currentSessionType,
 			tracker: findingsTracker,
 			manifest: artifactManifest,
+			campaign: campaignLedger,
 			recentActivity: collectRecentActivityFromEntries(ctx.sessionManager.getEntries()),
 		});
 		pi.sendMessage(
@@ -1085,6 +1086,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			.slice(-64);
 
 	const exportNotebook = async (ctx: ExtensionContext, format: NotebookFormat | "all", outputPath?: string): Promise<void> => {
+		const campaignSummary = buildCampaignLedgerSummary(campaignLedger);
 		const doc = buildNotebookDocument({
 			cwd: ctx.cwd,
 			mode: currentMode,
@@ -1096,6 +1098,8 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			trackerSummary: buildFindingsTrackerSummary(findingsTracker),
 			manifest: artifactManifest,
 			activities: collectActivitiesForNotebook(ctx),
+			campaign: campaignLedger,
+			campaignSummary,
 		});
 		const formats: NotebookFormat[] = format === "all" ? ["markdown", "json", "html"] : [format];
 		const exports = [];
@@ -2679,6 +2683,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					sessionType: currentSessionType,
 					tracker: findingsTracker,
 					manifest: artifactManifest,
+					campaign: campaignLedger,
 					recentActivity,
 					customInstructions: event.customInstructions,
 					previousSummary: event.preparation.previousSummary,
@@ -2691,6 +2696,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					sessionType: currentSessionType,
 					trackerSummary: buildFindingsTrackerSummary(findingsTracker),
 					artifactSummary: buildArtifactManifestSummary(artifactManifest),
+					campaignSummary: buildCampaignLedgerSummary(campaignLedger),
 				},
 			},
 		};
