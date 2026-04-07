@@ -3,7 +3,9 @@
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
 import process from "node:process";
+import type { PireBinaryEvalFocus } from "./core/pire/eval-corpus.js";
 import { scorePireEvalSessionFromFiles } from "./core/pire/eval-runner.js";
+import type { PireEvalLane } from "./core/pire/evals.js";
 
 interface PireEvalCliArgs {
 	suitePath?: string;
@@ -117,6 +119,82 @@ const DEFAULT_SEVERITY_THRESHOLDS: Required<PireEvalDeltaSeverityThresholds> = {
 	criticalIssuesIncrease: 3,
 };
 
+interface PireEvalTaskSeverityDescriptor {
+	lane: PireEvalLane;
+	focus?: PireBinaryEvalFocus;
+}
+
+const LANE_SEVERITY_THRESHOLDS: Record<PireEvalLane, Required<PireEvalDeltaSeverityThresholds>> = {
+	repro: {
+		noticeScoreDrop: 0.04,
+		warningScoreDrop: 0.1,
+		criticalScoreDrop: 0.18,
+		noticeIssuesIncrease: 1,
+		warningIssuesIncrease: 2,
+		criticalIssuesIncrease: 3,
+	},
+	"reverse-engineering": DEFAULT_SEVERITY_THRESHOLDS,
+	chain: {
+		noticeScoreDrop: 0.02,
+		warningScoreDrop: 0.06,
+		criticalScoreDrop: 0.12,
+		noticeIssuesIncrease: 1,
+		warningIssuesIncrease: 2,
+		criticalIssuesIncrease: 3,
+	},
+};
+
+const FOCUS_SEVERITY_THRESHOLDS: Partial<Record<PireBinaryEvalFocus, Required<PireEvalDeltaSeverityThresholds>>> = {
+	"surface-mapping": {
+		noticeScoreDrop: 0.02,
+		warningScoreDrop: 0.06,
+		criticalScoreDrop: 0.12,
+		noticeIssuesIncrease: 1,
+		warningIssuesIncrease: 2,
+		criticalIssuesIncrease: 3,
+	},
+	disassembly: {
+		noticeScoreDrop: 0.02,
+		warningScoreDrop: 0.06,
+		criticalScoreDrop: 0.12,
+		noticeIssuesIncrease: 1,
+		warningIssuesIncrease: 2,
+		criticalIssuesIncrease: 3,
+	},
+	decompilation: {
+		noticeScoreDrop: 0.025,
+		warningScoreDrop: 0.07,
+		criticalScoreDrop: 0.14,
+		noticeIssuesIncrease: 1,
+		warningIssuesIncrease: 2,
+		criticalIssuesIncrease: 3,
+	},
+	"crash-triage": {
+		noticeScoreDrop: 0.03,
+		warningScoreDrop: 0.08,
+		criticalScoreDrop: 0.16,
+		noticeIssuesIncrease: 1,
+		warningIssuesIncrease: 2,
+		criticalIssuesIncrease: 3,
+	},
+	exploitability: {
+		noticeScoreDrop: 0.04,
+		warningScoreDrop: 0.12,
+		criticalScoreDrop: 0.2,
+		noticeIssuesIncrease: 1,
+		warningIssuesIncrease: 3,
+		criticalIssuesIncrease: 4,
+	},
+	"primitive-extraction": {
+		noticeScoreDrop: 0.03,
+		warningScoreDrop: 0.08,
+		criticalScoreDrop: 0.15,
+		noticeIssuesIncrease: 1,
+		warningIssuesIncrease: 2,
+		criticalIssuesIncrease: 3,
+	},
+};
+
 function printHelp(): void {
 	process.stdout.write(`pire-evals - score binary RE eval session directories
 
@@ -192,6 +270,61 @@ function resolveSeverityThresholds(
 		warningIssuesIncrease: thresholds?.warningIssuesIncrease ?? DEFAULT_SEVERITY_THRESHOLDS.warningIssuesIncrease,
 		criticalIssuesIncrease: thresholds?.criticalIssuesIncrease ?? DEFAULT_SEVERITY_THRESHOLDS.criticalIssuesIncrease,
 	};
+}
+
+function mergeSeverityThresholds(
+	base: Required<PireEvalDeltaSeverityThresholds>,
+	override?: PireEvalDeltaSeverityThresholds,
+): Required<PireEvalDeltaSeverityThresholds> {
+	return {
+		noticeScoreDrop: override?.noticeScoreDrop ?? base.noticeScoreDrop,
+		warningScoreDrop: override?.warningScoreDrop ?? base.warningScoreDrop,
+		criticalScoreDrop: override?.criticalScoreDrop ?? base.criticalScoreDrop,
+		noticeIssuesIncrease: override?.noticeIssuesIncrease ?? base.noticeIssuesIncrease,
+		warningIssuesIncrease: override?.warningIssuesIncrease ?? base.warningIssuesIncrease,
+		criticalIssuesIncrease: override?.criticalIssuesIncrease ?? base.criticalIssuesIncrease,
+	};
+}
+
+function resolveDefaultSeverityThresholdsForTasks(
+	descriptors: PireEvalTaskSeverityDescriptor[],
+): Required<PireEvalDeltaSeverityThresholds> {
+	if (descriptors.length === 0) {
+		return DEFAULT_SEVERITY_THRESHOLDS;
+	}
+
+	let resolved = LANE_SEVERITY_THRESHOLDS[descriptors[0].lane] ?? DEFAULT_SEVERITY_THRESHOLDS;
+	for (const descriptor of descriptors.slice(1)) {
+		const laneThresholds = LANE_SEVERITY_THRESHOLDS[descriptor.lane] ?? DEFAULT_SEVERITY_THRESHOLDS;
+		resolved = {
+			noticeScoreDrop: Math.min(resolved.noticeScoreDrop, laneThresholds.noticeScoreDrop),
+			warningScoreDrop: Math.min(resolved.warningScoreDrop, laneThresholds.warningScoreDrop),
+			criticalScoreDrop: Math.min(resolved.criticalScoreDrop, laneThresholds.criticalScoreDrop),
+			noticeIssuesIncrease: Math.min(resolved.noticeIssuesIncrease, laneThresholds.noticeIssuesIncrease),
+			warningIssuesIncrease: Math.min(resolved.warningIssuesIncrease, laneThresholds.warningIssuesIncrease),
+			criticalIssuesIncrease: Math.min(resolved.criticalIssuesIncrease, laneThresholds.criticalIssuesIncrease),
+		};
+	}
+
+	for (const descriptor of descriptors) {
+		if (!descriptor.focus) {
+			continue;
+		}
+		const focusThresholds = FOCUS_SEVERITY_THRESHOLDS[descriptor.focus];
+		if (!focusThresholds) {
+			continue;
+		}
+		resolved = {
+			noticeScoreDrop: Math.min(resolved.noticeScoreDrop, focusThresholds.noticeScoreDrop),
+			warningScoreDrop: Math.min(resolved.warningScoreDrop, focusThresholds.warningScoreDrop),
+			criticalScoreDrop: Math.min(resolved.criticalScoreDrop, focusThresholds.criticalScoreDrop),
+			noticeIssuesIncrease: Math.min(resolved.noticeIssuesIncrease, focusThresholds.noticeIssuesIncrease),
+			warningIssuesIncrease: Math.min(resolved.warningIssuesIncrease, focusThresholds.warningIssuesIncrease),
+			criticalIssuesIncrease: Math.min(resolved.criticalIssuesIncrease, focusThresholds.criticalIssuesIncrease),
+		};
+	}
+
+	return resolved;
 }
 
 function classifyDeltaSeverity(
@@ -590,6 +723,7 @@ async function collectCaseScores(
 		.sort();
 	const scores: PireEvalCaseScore[] = [];
 	const suiteDefinition = await loadSuiteDefinition(join(casesDir, "cases.json"));
+	const suiteTaskDescriptors: PireEvalTaskSeverityDescriptor[] = [];
 
 	for (const caseName of caseDirs) {
 		const cwd = join(casesDir, caseName);
@@ -599,6 +733,14 @@ async function collectCaseScores(
 			suitePath,
 			bindingsPath: join(cwd, "bindings.json"),
 		});
+		const caseTaskDescriptors = result.bindingFile.bindings
+			.map((binding) => result.suite.tasks.find((task) => task.id === binding.taskId))
+			.filter((task): task is (typeof result.suite.tasks)[number] => task !== undefined)
+			.map((task) => ({
+				lane: task.lane,
+				focus: "focus" in task ? task.focus : undefined,
+			}));
+		suiteTaskDescriptors.push(...caseTaskDescriptors);
 		scores.push({
 			caseName,
 			runId: result.run.runId,
@@ -609,7 +751,10 @@ async function collectCaseScores(
 			missingTasks: result.score.missingTaskIds.length,
 			issues: result.score.issues,
 			expectation: definition?.expectation,
-			severityThresholds: definition?.severityThresholds,
+			severityThresholds: mergeSeverityThresholds(
+				resolveDefaultSeverityThresholdsForTasks(caseTaskDescriptors),
+				definition?.severityThresholds,
+			),
 			regressions: [],
 		});
 	}
@@ -630,7 +775,10 @@ async function collectCaseScores(
 		scores: rankedScores,
 		suite: {
 			...suite,
-			severityThresholds: suiteDefinition?.severityThresholds,
+			severityThresholds: mergeSeverityThresholds(
+				resolveDefaultSeverityThresholdsForTasks(suiteTaskDescriptors),
+				suiteDefinition?.severityThresholds,
+			),
 		},
 	};
 }

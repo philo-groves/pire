@@ -549,4 +549,119 @@ describe("pire eval cli", () => {
 			"notice",
 		);
 	});
+
+	test("applies lane-aware default severity policies when no overrides are present", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-lane-defaults-"));
+		const baselinePath = join(tempDir, "baseline.json");
+		const defaultCasesDir = join(tempDir, "lane-default-cases");
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				join(FIXTURE_DIR, "session-cases"),
+				"--json",
+				"--report",
+				baselinePath,
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		await cp(join(FIXTURE_DIR, "session-cases"), defaultCasesDir, { recursive: true });
+		await writeFile(
+			join(defaultCasesDir, "heap-disasm-confirmed", "bindings.json"),
+			`${JSON.stringify(
+				{
+					version: 1,
+					suiteId: "pire-binary-re-starter-v1",
+					runId: "heap-case-001",
+					model: "claude-sonnet-4-5",
+					notes: ["fixture session: lane-default disasm severity case"],
+					bindings: [
+						{
+							taskId: "binre-disasm-001",
+							findingId: "find-heap-001",
+							exploitability: "limited",
+							judgement: {
+								dimensions: {
+									classification: "partial",
+									proof: "partial",
+									reporting: "miss",
+									primitives: "partial",
+								},
+							},
+							notes: ["copy-length primitive observed in disassembly"],
+						},
+					],
+				},
+				null,
+				2,
+			)}\n`,
+			"utf-8",
+		);
+		await writeFile(
+			join(defaultCasesDir, "toctou-candidate", "bindings.json"),
+			`${JSON.stringify(
+				{
+					version: 1,
+					suiteId: "pire-binary-re-starter-v1",
+					runId: "toctou-case-001",
+					notes: ["fixture session: lane-default exploitability severity case"],
+					bindings: [
+						{
+							taskId: "binre-toctou-001",
+							findingTitleIncludes: "ownership check",
+							exploitability: "limited",
+							judgement: {
+								dimensions: {
+									discovery: "partial",
+									exploitability: "partial",
+									reporting: "miss",
+								},
+							},
+							notes: ["race observed but exploit remains partial"],
+						},
+					],
+				},
+				null,
+				2,
+			)}\n`,
+			"utf-8",
+		);
+
+		const result = await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				"./src/pire-eval-cli.ts",
+				"--suite",
+				join(FIXTURE_DIR, "binary-re-starter-suite.json"),
+				"--cases-dir",
+				defaultCasesDir,
+				"--baseline",
+				`last-good=${baselinePath}`,
+				"--json",
+			],
+			{
+				cwd: PACKAGE_ROOT,
+			},
+		);
+
+		const parsed = JSON.parse(result.stdout) as {
+			scores: Array<{ caseName: string; baselines?: Array<{ name: string; severity: string }> }>;
+		};
+
+		expect(parsed.scores.find((entry) => entry.caseName === "heap-disasm-confirmed")?.baselines?.[0]?.severity).toBe(
+			"warning",
+		);
+		expect(parsed.scores.find((entry) => entry.caseName === "toctou-candidate")?.baselines?.[0]?.severity).toBe(
+			"notice",
+		);
+	});
 });
