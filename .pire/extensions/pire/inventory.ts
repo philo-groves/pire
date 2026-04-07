@@ -1,5 +1,5 @@
 import { accessSync, constants, existsSync, readFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExecResult } from "@mariozechner/pi-coding-agent";
 
@@ -16,11 +16,17 @@ export interface EnvironmentInventory {
 	platform: NodeJS.Platform;
 	arch: string;
 	release: string;
+	nodeVersion: string;
 	shell: string | undefined;
 	homeDir: string;
 	tempDir: string;
 	container: boolean;
 	writableDirs: string[];
+	networkInterfaces: string[];
+	dnsConfigured: boolean;
+	ptraceScope?: string;
+	seccompMode?: string;
+	tracerPid?: string;
 	networkPosture: string;
 	sandboxPosture: string;
 	tools: ToolProbe[];
@@ -76,6 +82,86 @@ function isContainerized(): boolean {
 	}
 }
 
+function readProcFile(path: string): string | undefined {
+	try {
+		return readFileSync(path, "utf-8");
+	} catch {
+		return undefined;
+	}
+}
+
+function detectNetworkPosture(): { networkInterfaces: string[]; dnsConfigured: boolean; posture: string } {
+	const interfaces = networkInterfaces();
+	const activeInterfaces = Object.entries(interfaces)
+		.filter(([, entries]) => (entries ?? []).some((entry) => entry.internal === false))
+		.map(([name]) => name)
+		.sort();
+	const resolvConf = readProcFile("/etc/resolv.conf") ?? "";
+	const dnsConfigured = resolvConf
+		.split("\n")
+		.some((line) => line.trim().startsWith("nameserver") && line.trim().length > "nameserver".length);
+
+	if (activeInterfaces.length === 0) {
+		return {
+			networkInterfaces: [],
+			dnsConfigured,
+			posture: dnsConfigured
+				? "No non-loopback interfaces detected, but DNS resolvers are configured. Treat connectivity as constrained until verified."
+				: "No non-loopback interfaces or DNS resolvers detected. Treat outbound access as unlikely until verified.",
+		};
+	}
+
+	return {
+		networkInterfaces: activeInterfaces,
+		dnsConfigured,
+		posture: dnsConfigured
+			? `Non-loopback interfaces detected (${activeInterfaces.join(", ")}) and DNS resolvers are configured. Outbound access may be available.`
+			: `Non-loopback interfaces detected (${activeInterfaces.join(", ")}), but no DNS resolvers were found in /etc/resolv.conf.`,
+	};
+}
+
+function detectSandboxPosture(container: boolean): {
+	ptraceScope?: string;
+	seccompMode?: string;
+	tracerPid?: string;
+	posture: string;
+} {
+	const ptraceScope = readProcFile("/proc/sys/kernel/yama/ptrace_scope")?.trim();
+	const status = readProcFile("/proc/self/status");
+	const seccompMode = status
+		?.split("\n")
+		.find((line) => line.startsWith("Seccomp:"))
+		?.split(":")[1]
+		?.trim();
+	const tracerPid = status
+		?.split("\n")
+		.find((line) => line.startsWith("TracerPid:"))
+		?.split(":")[1]
+		?.trim();
+
+	const postureParts: string[] = [];
+	postureParts.push(container ? "Container indicators detected." : "No container markers detected.");
+	if (ptraceScope !== undefined) {
+		postureParts.push(`ptrace_scope=${ptraceScope}.`);
+	}
+	if (seccompMode !== undefined) {
+		postureParts.push(`seccomp=${seccompMode}.`);
+	}
+	if (tracerPid !== undefined && tracerPid !== "0") {
+		postureParts.push(`TracerPid=${tracerPid}.`);
+	}
+	if (ptraceScope === undefined && seccompMode === undefined) {
+		postureParts.push("Kernel sandbox details were not directly readable.");
+	}
+
+	return {
+		ptraceScope,
+		seccompMode,
+		tracerPid,
+		posture: postureParts.join(" "),
+	};
+}
+
 function summarizeVersion(result: ExecResult): string | undefined {
 	const output = `${result.stdout}\n${result.stderr}`
 		.split("\n")
@@ -110,6 +196,8 @@ export async function collectEnvironmentInventory(cwd: string, exec: ExecFn): Pr
 	const writableCandidates = [cwd, join(cwd, ".pire"), join(cwd, ".pi"), tempDir, homeDir];
 	const writableDirs = writableCandidates.filter((path, index) => writableCandidates.indexOf(path) === index && isWritable(path));
 	const container = isContainerized();
+	const networkPosture = detectNetworkPosture();
+	const sandboxPosture = detectSandboxPosture(container);
 	const tools = await Promise.all(TOOL_PROBES.map((tool) => probeTool(exec, tool)));
 
 	return {
@@ -117,15 +205,19 @@ export async function collectEnvironmentInventory(cwd: string, exec: ExecFn): Pr
 		platform: process.platform,
 		arch: process.arch,
 		release: process.release.name,
+		nodeVersion: process.version,
 		shell: process.env.SHELL ?? process.env.ComSpec,
 		homeDir,
 		tempDir,
 		container,
 		writableDirs,
-		networkPosture: "Not directly introspectable. Assume network access is possible until you verify otherwise.",
-		sandboxPosture: container
-			? "Container indicators detected. Verify mount, ptrace, and network restrictions before deeper analysis."
-			: "No container markers detected. Verify filesystem, ptrace, and network restrictions before deeper analysis.",
+		networkInterfaces: networkPosture.networkInterfaces,
+		dnsConfigured: networkPosture.dnsConfigured,
+		ptraceScope: sandboxPosture.ptraceScope,
+		seccompMode: sandboxPosture.seccompMode,
+		tracerPid: sandboxPosture.tracerPid,
+		networkPosture: networkPosture.posture,
+		sandboxPosture: sandboxPosture.posture,
 		tools,
 	};
 }
@@ -139,10 +231,15 @@ export function formatInventorySummary(inventory: EnvironmentInventory): string 
 		`- platform: ${inventory.platform}`,
 		`- arch: ${inventory.arch}`,
 		`- runtime: ${inventory.release}`,
+		`- node: ${inventory.nodeVersion}`,
 		`- cwd: ${inventory.cwd}`,
 		`- shell: ${inventory.shell ?? "unknown"}`,
 		`- container: ${inventory.container ? "detected" : "not detected"}`,
 		`- writable dirs: ${inventory.writableDirs.join(", ") || "none detected"}`,
+		`- interfaces: ${inventory.networkInterfaces.join(", ") || "loopback only / none detected"}`,
+		`- dns: ${inventory.dnsConfigured ? "configured" : "not configured"}`,
+		`- ptrace scope: ${inventory.ptraceScope ?? "unknown"}`,
+		`- seccomp: ${inventory.seccompMode ?? "unknown"}`,
 		`- available tools: ${availableTools.length}/${inventory.tools.length}`,
 	];
 

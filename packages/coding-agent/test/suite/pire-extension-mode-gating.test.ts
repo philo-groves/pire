@@ -1,3 +1,5 @@
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { fauxAssistantMessage, fauxToolCall, type Message, type TextContent } from "@mariozechner/pi-ai";
 import { Type } from "@sinclair/typebox";
@@ -59,6 +61,18 @@ function createToolSet(log: string[]): AgentTool[] {
 
 describe("pire extension mode and tool gating", () => {
 	const harnesses: Harness[] = [];
+	const expectedReconTools = [
+		"read",
+		"bash",
+		"environment_inventory",
+		"binary_file",
+		"binary_strings",
+		"binary_readelf",
+		"binary_objdump",
+		"binary_nm",
+		"binary_xxd",
+	];
+	const expectedProofingTools = [...expectedReconTools.slice(0, 2), "edit", "write", ...expectedReconTools.slice(2)];
 
 	const getToolResultText = (messages: Message[]): string => {
 		const toolResult = [...messages]
@@ -91,7 +105,7 @@ describe("pire extension mode and tool gating", () => {
 
 		await harness.session.bindExtensions({ shutdownHandler: () => {} });
 
-		expect(harness.session.getActiveToolNames()).toEqual(["read", "bash", "environment_inventory"]);
+		expect(harness.session.getActiveToolNames()).toEqual(expectedReconTools);
 
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("bash", { command: "pwd" })], { stopReason: "toolUse" }),
@@ -129,7 +143,7 @@ describe("pire extension mode and tool gating", () => {
 		expect(log).toEqual([]);
 
 		await harness.session.prompt("/proofing");
-		expect(harness.session.getActiveToolNames()).toEqual(["read", "bash", "edit", "write", "environment_inventory"]);
+		expect(harness.session.getActiveToolNames()).toEqual(expectedProofingTools);
 
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("edit", { path: "/tmp/proof.txt", oldText: "before", newText: "after" })], {
@@ -142,5 +156,42 @@ describe("pire extension mode and tool gating", () => {
 
 		expect(getAssistantTexts(harness).some((text) => text.includes("edited /tmp/proof.txt"))).toBe(true);
 		expect(log).toContain("edit:/tmp/proof.txt");
+	});
+
+	it("registers binary wrapper results as artifacts", async () => {
+		const log: string[] = [];
+		const harness = await createHarness({
+			tools: createToolSet(log),
+			extensionFactories: [{ factory: pireExtension, path: PIRE_EXTENSION_PATH }],
+		});
+		harnesses.push(harness);
+
+		const samplePath = join(harness.tempDir, "sample.bin");
+		writeFileSync(samplePath, "hello pire\n", "utf-8");
+
+		await harness.session.bindExtensions({ shutdownHandler: () => {} });
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("binary_file", { path: samplePath })], { stopReason: "toolUse" }),
+			(context) => fauxAssistantMessage(getToolResultText(context.messages)),
+		]);
+
+		await harness.session.prompt("inspect the sample binary");
+
+		expect(getAssistantTexts(harness).some((text) => text.includes("binary_file:"))).toBe(true);
+		expect(log).toEqual([]);
+
+		const manifestPath = join(harness.tempDir, ".pire", "artifacts.json");
+		expect(existsSync(manifestPath)).toBe(true);
+		const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
+			artifacts: Array<{ path: string; provenance: string[]; relatedCommands: string[] }>;
+		};
+		expect(manifest.artifacts.some((artifact) => artifact.path === samplePath)).toBe(true);
+		expect(manifest.artifacts.find((artifact) => artifact.path === samplePath)?.provenance).toContain(
+			"tool:binary_file",
+		);
+		expect(manifest.artifacts.find((artifact) => artifact.path === samplePath)?.relatedCommands[0]).toContain(
+			"file -b",
+		);
 	});
 });

@@ -1,6 +1,16 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import {
+	runBinaryFile,
+	runBinaryHexdump,
+	runBinaryNm,
+	runBinaryObjdump,
+	runBinaryReadelf,
+	runBinaryStrings,
+	type BinaryArtifactObservation,
+	type BinaryToolDetails,
+} from "./binary.js";
+import {
 	loadArtifactManifest,
 	recordArtifact,
 	resolveArtifactPath,
@@ -21,10 +31,66 @@ const MODE_ENTRY_TYPE = "pire-mode";
 const ARTIFACT_ENTRY_TYPE = "pire-artifacts";
 const MODE_FLAG = "pire-mode";
 const MODE_TOOLS: Record<PireMode, string[]> = {
-	recon: ["read", "bash", "grep", "find", "ls", "environment_inventory"],
-	dynamic: ["read", "bash", "grep", "find", "ls", "environment_inventory"],
-	proofing: ["read", "bash", "edit", "write", "grep", "find", "ls", "environment_inventory"],
-	report: ["read", "bash", "edit", "write", "grep", "find", "ls", "environment_inventory"],
+	recon: [
+		"read",
+		"bash",
+		"grep",
+		"find",
+		"ls",
+		"environment_inventory",
+		"binary_file",
+		"binary_strings",
+		"binary_readelf",
+		"binary_objdump",
+		"binary_nm",
+		"binary_xxd",
+	],
+	dynamic: [
+		"read",
+		"bash",
+		"grep",
+		"find",
+		"ls",
+		"environment_inventory",
+		"binary_file",
+		"binary_strings",
+		"binary_readelf",
+		"binary_objdump",
+		"binary_nm",
+		"binary_xxd",
+	],
+	proofing: [
+		"read",
+		"bash",
+		"edit",
+		"write",
+		"grep",
+		"find",
+		"ls",
+		"environment_inventory",
+		"binary_file",
+		"binary_strings",
+		"binary_readelf",
+		"binary_objdump",
+		"binary_nm",
+		"binary_xxd",
+	],
+	report: [
+		"read",
+		"bash",
+		"edit",
+		"write",
+		"grep",
+		"find",
+		"ls",
+		"environment_inventory",
+		"binary_file",
+		"binary_strings",
+		"binary_readelf",
+		"binary_objdump",
+		"binary_nm",
+		"binary_xxd",
+	],
 };
 
 const DESTRUCTIVE_PATTERNS = [
@@ -177,6 +243,13 @@ function updateStatus(ctx: ExtensionContext, mode: PireMode): void {
 	ctx.ui.setStatus("pire-mode", ctx.ui.theme.fg("accent", `mode:${mode}`));
 }
 
+function getBinaryToolDetails(eventDetails: unknown): BinaryToolDetails | undefined {
+	if (!eventDetails || typeof eventDetails !== "object" || !("artifacts" in eventDetails)) {
+		return undefined;
+	}
+	return eventDetails as BinaryToolDetails;
+}
+
 export default function pireExtension(pi: ExtensionAPI): void {
 	let currentMode: PireMode = "recon";
 	let currentCwd = process.cwd();
@@ -263,6 +336,167 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			return {
 				content: [{ type: "text", text: formatInventorySummary(inventory) }],
 				details: inventory,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "binary_file",
+		label: "Binary File",
+		description: "Inspect binary metadata with file(1) and capture the target as a first-class artifact.",
+		promptSnippet: "Use binary_file to identify a binary before deeper analysis.",
+		promptGuidelines: ["Use binary_file early to normalize binary metadata and avoid ad-hoc shell parsing."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary or object file to inspect." }),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runBinaryFile((command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }), path, signal);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "binary_strings",
+		label: "Binary Strings",
+		description: "Extract a bounded preview of printable strings from a binary.",
+		promptSnippet: "Use binary_strings to extract bounded strings evidence from a binary.",
+		promptGuidelines: ["Prefer binary_strings over raw bash when triaging embedded text, URLs, or error messages."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary or object file to inspect." }),
+			minLength: Type.Optional(Type.Integer({ minimum: 1, maximum: 32, default: 4 })),
+			limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 200, default: 40 })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runBinaryStrings(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				path,
+				{ minLength: params.minLength ?? 4, limit: params.limit ?? 40 },
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "binary_readelf",
+		label: "Binary Readelf",
+		description: "Inspect ELF headers, sections, symbols, or dynamic metadata with structured command details.",
+		promptSnippet: "Use binary_readelf for ELF metadata instead of ad-hoc shell invocations.",
+		promptGuidelines: ["Use binary_readelf to inspect headers, sections, program headers, symbols, or dynamic entries."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the ELF binary to inspect." }),
+			view: Type.Optional(
+				Type.Union([
+					Type.Literal("file-header"),
+					Type.Literal("sections"),
+					Type.Literal("program-headers"),
+					Type.Literal("symbols"),
+					Type.Literal("dynamic"),
+				]),
+			),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runBinaryReadelf(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				path,
+				params.view ?? "file-header",
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "binary_objdump",
+		label: "Binary Objdump",
+		description: "Disassemble a binary with bounded preview output and normalized command metadata.",
+		promptSnippet: "Use binary_objdump when you need a bounded disassembly preview.",
+		promptGuidelines: ["Keep disassembly bounded. Use sections when possible to avoid massive output."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary or object file to disassemble." }),
+			section: Type.Optional(Type.String({ description: "Optional section name, for example .text" })),
+			lineLimit: Type.Optional(Type.Integer({ minimum: 5, maximum: 200, default: 80 })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runBinaryObjdump(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				path,
+				{ section: params.section, lineLimit: params.lineLimit ?? 80 },
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "binary_nm",
+		label: "Binary Nm",
+		description: "List symbols from a binary with normalized command metadata.",
+		promptSnippet: "Use binary_nm to enumerate symbols from a binary or object file.",
+		promptGuidelines: ["Use binary_nm when symbol presence matters; keep previews bounded."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary or object file to inspect." }),
+			demangle: Type.Optional(Type.Boolean({ default: true })),
+			definedOnly: Type.Optional(Type.Boolean({ default: false })),
+			lineLimit: Type.Optional(Type.Integer({ minimum: 5, maximum: 200, default: 80 })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runBinaryNm(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				path,
+				{
+					demangle: params.demangle ?? true,
+					definedOnly: params.definedOnly ?? false,
+					lineLimit: params.lineLimit ?? 80,
+				},
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "binary_xxd",
+		label: "Binary Hexdump",
+		description: "Read a bounded hexdump preview from a binary.",
+		promptSnippet: "Use binary_xxd for bounded byte-level inspection of a binary.",
+		promptGuidelines: ["Prefer binary_xxd over shelling out manually when you need offsets and byte previews."],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary or object file to inspect." }),
+			offset: Type.Optional(Type.Integer({ minimum: 0, default: 0 })),
+			length: Type.Optional(Type.Integer({ minimum: 1, maximum: 4096, default: 256 })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runBinaryHexdump(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				path,
+				{ offset: params.offset ?? 0, length: params.length ?? 256 },
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
 			};
 		},
 	});
@@ -388,6 +622,18 @@ export default function pireExtension(pi: ExtensionAPI): void {
 
 		if (event.toolName === "environment_inventory") {
 			await persistArtifacts();
+			return;
+		}
+
+		const binaryDetails = getBinaryToolDetails(event.details);
+		if (binaryDetails) {
+			for (const artifact of binaryDetails.artifacts as BinaryArtifactObservation[]) {
+				await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
+					type: artifact.type as ArtifactType | undefined,
+					command: artifact.command ?? binaryDetails.commandString,
+					finding: artifact.finding,
+				});
+			}
 		}
 	});
 }
