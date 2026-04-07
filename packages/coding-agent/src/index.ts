@@ -152,6 +152,24 @@ export type {
 	ResolvedResource,
 } from "./core/package-manager.js";
 export { DefaultPackageManager } from "./core/package-manager.js";
+export {
+	createDefaultPireEvalRubric,
+	type PireEvalDimension,
+	type PireEvalDimensionScore,
+	type PireEvalEvidenceRef,
+	type PireEvalExpectedOutcome,
+	type PireEvalGrade,
+	type PireEvalJudgement,
+	type PireEvalLane,
+	type PireEvalRubric,
+	type PireEvalScore,
+	type PireEvalSubmission,
+	type PireEvalTask,
+	resolvePireEvalRubric,
+	scorePireEvalSubmission,
+	summarizePireEvalScore,
+	validatePireEvalSubmission,
+} from "./core/pire/evals.js";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.js";
 export { DefaultResourceLoader } from "./core/resource-loader.js";
 // SDK for programmatic usage
