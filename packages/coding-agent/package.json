@@ -8,7 +8,8 @@
 		"configDir": ".pi"
 	},
 	"bin": {
-		"pi": "dist/cli.js"
+		"pi": "dist/cli.js",
+		"pire-evals": "dist/pire-eval-cli.js"
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
