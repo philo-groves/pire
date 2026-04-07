@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
-import { readdir, readFile, writeFile } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, extname, join, resolve } from "node:path";
 import process from "node:process";
 import type { PireBinaryEvalFocus } from "./core/pire/eval-corpus.js";
-import { scorePireEvalSessionFromFiles } from "./core/pire/eval-runner.js";
+import { resolvePireEvalStoredArtifactPath, scorePireEvalSessionFromFiles } from "./core/pire/eval-runner.js";
 import type { PireEvalLane } from "./core/pire/evals.js";
 
 interface PireEvalCliArgs {
@@ -15,6 +15,8 @@ interface PireEvalCliArgs {
 	enforce?: boolean;
 	json?: boolean;
 	reportPath?: string;
+	saveBaselineNames: string[];
+	saveReportNames: string[];
 }
 
 interface PireEvalBaselineInput {
@@ -199,12 +201,14 @@ function printHelp(): void {
 	process.stdout.write(`pire-evals - score binary RE eval session directories
 
 Usage:
-  pire-evals --suite <suite.json> --cases-dir <dir> [--baseline <report.json>|name=report.json>]... [--enforce] [--json] [--report <path>]
+  pire-evals --suite <suite.json> --cases-dir <dir> [--baseline <report.json>|@name|name=@name>]... [--save-baseline <name>]... [--save-report <name>]... [--enforce] [--json] [--report <path>]
 
 Options:
   --suite <path>      Path to a Pire eval task suite JSON file
   --cases-dir <path>  Directory containing case subdirectories with bindings.json and .pire state
-  --baseline <arg>    Prior JSON report from pire-evals for score deltas; use name=path for multiple named baselines
+  --baseline <arg>    Prior JSON report from pire-evals for score deltas; use @name or name=@name for stored baselines
+  --save-baseline <name> Save current JSON result to .pire/session/evals/baselines/<name>.json
+  --save-report <name>   Save current report set to .pire/session/evals/reports/<name>.json and .md
   --enforce           Exit non-zero when a case misses its expectation metadata
   --json              Emit JSON instead of a text leaderboard
   --report <path>     Write a report artifact (.md, .json, or .jsonl)
@@ -215,6 +219,8 @@ Options:
 function parseArgs(argv: string[]): PireEvalCliArgs {
 	const args: PireEvalCliArgs = {
 		baselines: [],
+		saveBaselineNames: [],
+		saveReportNames: [],
 	};
 
 	for (let index = 0; index < argv.length; index++) {
@@ -228,7 +234,7 @@ function parseArgs(argv: string[]): PireEvalCliArgs {
 			const separatorIndex = value.indexOf("=");
 			if (separatorIndex === -1) {
 				args.baselinePath = value;
-				args.baselines.push({ name: "baseline", path: value });
+				args.baselines.push({ name: value.startsWith("@") ? value.slice(1) : "baseline", path: value });
 			} else {
 				const name = value.slice(0, separatorIndex).trim();
 				const path = value.slice(separatorIndex + 1).trim();
@@ -237,6 +243,10 @@ function parseArgs(argv: string[]): PireEvalCliArgs {
 				}
 				args.baselines.push({ name, path });
 			}
+		} else if (arg === "--save-baseline" && index + 1 < argv.length) {
+			args.saveBaselineNames.push(argv[++index]);
+		} else if (arg === "--save-report" && index + 1 < argv.length) {
+			args.saveReportNames.push(argv[++index]);
 		} else if (arg === "--enforce") {
 			args.enforce = true;
 		} else if (arg === "--json") {
@@ -252,6 +262,20 @@ function parseArgs(argv: string[]): PireEvalCliArgs {
 	}
 
 	return args;
+}
+
+function resolveStoredBaselineReference(cwd: string, baseline: PireEvalBaselineInput): PireEvalBaselineInput {
+	const resolvedPath = baseline.path.startsWith("@")
+		? resolvePireEvalStoredArtifactPath(cwd, {
+				kind: "baselines",
+				name: baseline.path.slice(1),
+				ext: "json",
+			})
+		: baseline.path;
+	return {
+		...baseline,
+		path: resolvedPath,
+	};
 }
 
 function formatSignedDelta(value: number, digits = 2): string {
@@ -603,6 +627,24 @@ async function writeReport(reportPath: string, result: PireEvalCollectedScores):
 	await writeFile(targetPath, formatReport(result, targetPath), "utf-8");
 }
 
+async function writeStoredBaseline(cwd: string, name: string, result: PireEvalCollectedScores): Promise<string> {
+	const path = resolvePireEvalStoredArtifactPath(cwd, { kind: "baselines", name, ext: "json" });
+	await mkdir(dirname(path), { recursive: true });
+	await writeFile(path, `${JSON.stringify(result, null, 2)}\n`, "utf-8");
+	return path;
+}
+
+async function writeStoredReportSet(cwd: string, name: string, result: PireEvalCollectedScores): Promise<string[]> {
+	const jsonPath = resolvePireEvalStoredArtifactPath(cwd, { kind: "reports", name, ext: "json" });
+	const markdownPath = resolvePireEvalStoredArtifactPath(cwd, { kind: "reports", name, ext: "md" });
+	await mkdir(dirname(jsonPath), { recursive: true });
+	await Promise.all([
+		writeFile(jsonPath, `${JSON.stringify(result, null, 2)}\n`, "utf-8"),
+		writeFile(markdownPath, formatMarkdownReport(result), "utf-8"),
+	]);
+	return [jsonPath, markdownPath];
+}
+
 function applySuiteBaselineExpectations(
 	suite: PireEvalSuiteSummary,
 	expectation?: PireEvalSuiteExpectation,
@@ -796,7 +838,8 @@ async function main(argv: string[]): Promise<void> {
 	});
 	let withBaselines = result;
 	for (const baselineInput of args.baselines) {
-		withBaselines = applyBaseline(withBaselines, baselineInput, await loadBaseline(baselineInput.path));
+		const resolvedBaseline = resolveStoredBaselineReference(process.cwd(), baselineInput);
+		withBaselines = applyBaseline(withBaselines, resolvedBaseline, await loadBaseline(resolvedBaseline.path));
 	}
 	withBaselines = reclassifyBaselineSeverities(withBaselines);
 	withBaselines = {
@@ -826,6 +869,12 @@ async function main(argv: string[]): Promise<void> {
 
 	if (args.reportPath) {
 		await writeReport(args.reportPath, withBaselines);
+	}
+	for (const name of args.saveReportNames) {
+		await writeStoredReportSet(process.cwd(), name, withBaselines);
+	}
+	for (const name of args.saveBaselineNames) {
+		await writeStoredBaseline(process.cwd(), name, withBaselines);
 	}
 
 	if (args.enforce && withBaselines.suite.regressions.length > 0) {

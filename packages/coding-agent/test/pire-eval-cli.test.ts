@@ -664,4 +664,67 @@ describe("pire eval cli", () => {
 			"notice",
 		);
 	});
+
+	test("persists named reports and baselines under .pire/session/evals and reloads @baseline refs", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-eval-storage-layout-"));
+		const suitePath = join(FIXTURE_DIR, "binary-re-starter-suite.json");
+		const casesPath = join(FIXTURE_DIR, "session-cases");
+
+		await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				join(PACKAGE_ROOT, "src/pire-eval-cli.ts"),
+				"--suite",
+				suitePath,
+				"--cases-dir",
+				casesPath,
+				"--save-report",
+				"main",
+				"--save-baseline",
+				"last-good",
+			],
+			{
+				cwd: tempDir,
+			},
+		);
+
+		const storedReportJson = join(tempDir, ".pire", "session", "evals", "reports", "main.json");
+		const storedReportMd = join(tempDir, ".pire", "session", "evals", "reports", "main.md");
+		const storedBaseline = join(tempDir, ".pire", "session", "evals", "baselines", "last-good.json");
+
+		expect(await readFile(storedReportJson, "utf-8")).toContain('"suite"');
+		expect(await readFile(storedReportMd, "utf-8")).toContain("# Pire Eval Report");
+		expect(await readFile(storedBaseline, "utf-8")).toContain('"scores"');
+
+		const degradedCasesDir = join(tempDir, "degraded-cases");
+		await cp(join(FIXTURE_DIR, "session-cases-suite-regression"), degradedCasesDir, { recursive: true });
+
+		const rerun = await execFileAsync(
+			"npx",
+			[
+				"tsx",
+				join(PACKAGE_ROOT, "src/pire-eval-cli.ts"),
+				"--suite",
+				suitePath,
+				"--cases-dir",
+				degradedCasesDir,
+				"--baseline",
+				"@last-good",
+				"--save-report",
+				"regression",
+			],
+			{
+				cwd: tempDir,
+			},
+		);
+
+		expect(rerun.stdout).toContain("- vs baselines:");
+		expect(
+			await readFile(join(tempDir, ".pire", "session", "evals", "reports", "regression.json"), "utf-8"),
+		).toContain("last-good");
+		expect(await readFile(join(tempDir, ".pire", "session", "evals", "reports", "regression.md"), "utf-8")).toContain(
+			"Vs last-good",
+		);
+	});
 });

@@ -1,6 +1,11 @@
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
-import { formatPireEvalRunScoreReport, scorePireEvalRunFromFiles } from "../src/core/pire/eval-runner.js";
+import {
+	formatPireEvalRunScoreReport,
+	getPireEvalStorageDir,
+	resolvePireEvalStoredArtifactPath,
+	scorePireEvalRunFromFiles,
+} from "../src/core/pire/eval-runner.js";
 
 const FIXTURE_DIR = join(process.cwd(), "test", "fixtures", "pire-evals");
 
@@ -25,5 +30,24 @@ describe("pire eval runner", () => {
 		expect(report).toContain("binre-disasm-001");
 		expect(report).toContain("binre-heap-001");
 		expect(report).toContain("binre-toctou-001");
+	});
+
+	test("resolves conventional stored eval artifact paths under .pire/session/evals", () => {
+		const cwd = "/tmp/pire-project";
+		expect(getPireEvalStorageDir(cwd)).toBe("/tmp/pire-project/.pire/session/evals");
+		expect(
+			resolvePireEvalStoredArtifactPath(cwd, {
+				kind: "baselines",
+				name: "last-good",
+				ext: "json",
+			}),
+		).toBe("/tmp/pire-project/.pire/session/evals/baselines/last-good.json");
+		expect(
+			resolvePireEvalStoredArtifactPath(cwd, {
+				kind: "reports",
+				name: "nightly",
+				ext: "md",
+			}),
+		).toBe("/tmp/pire-project/.pire/session/evals/reports/nightly.md");
 	});
 });

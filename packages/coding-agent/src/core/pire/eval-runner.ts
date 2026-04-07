@@ -87,6 +87,14 @@ export interface CreatePireEvalRunBundleFromBindingFileOptions {
 	notes?: string[];
 }
 
+export type PireEvalStoredArtifactKind = "baselines" | "reports";
+
+export interface ResolvePireEvalStoredArtifactPathOptions {
+	kind: PireEvalStoredArtifactKind;
+	name: string;
+	ext: "json" | "jsonl" | "md";
+}
+
 function parseJsonFile<T>(text: string, fallback: T): T {
 	try {
 		return JSON.parse(text) as T;
@@ -109,6 +117,17 @@ function dedupeEvidenceRefs(evidence: PireEvalEvidenceRef[]): PireEvalEvidenceRe
 		seen.add(key);
 		return true;
 	});
+}
+
+function normalizeStoredArtifactName(name: string): string {
+	const trimmed = name.trim();
+	if (trimmed.length === 0) {
+		throw new Error("stored eval artifact name must not be empty");
+	}
+	if (trimmed.includes("/") || trimmed.includes("\\")) {
+		throw new Error(`stored eval artifact name must not contain path separators: ${name}`);
+	}
+	return trimmed;
 }
 
 function normalizeJudgement(base: PireEvalJudgement, override?: Partial<PireEvalJudgement>): PireEvalJudgement {
@@ -212,6 +231,17 @@ function extractEvidenceRefs(params: {
 
 export async function loadPireEvalTaskSuite(path: string): Promise<PireEvalTaskSuite> {
 	return parsePireEvalTaskSuite(await readFile(path, "utf-8"));
+}
+
+export function getPireEvalStorageDir(cwd: string): string {
+	return join(cwd, ".pire", "session", "evals");
+}
+
+export function resolvePireEvalStoredArtifactPath(
+	cwd: string,
+	options: ResolvePireEvalStoredArtifactPathOptions,
+): string {
+	return join(getPireEvalStorageDir(cwd), options.kind, `${normalizeStoredArtifactName(options.name)}.${options.ext}`);
 }
 
 export async function loadPireEvalRunBundle(path: string): Promise<PireEvalRunBundle> {
