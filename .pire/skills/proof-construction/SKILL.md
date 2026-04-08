@@ -1,0 +1,60 @@
+---
+name: proof-construction
+description: Use when the exploit chain is complete through all intermediate stages and the only remaining step is constructing an end-to-end proof of concept that captures the flag artifact. This is the last-mile skill — it turns a confirmed chain into a demonstrated one.
+---
+# Proof Construction
+
+Use this workflow when all intermediate exploit stages are confirmed and the agent needs to assemble and execute the end-to-end proof.
+
+## Prerequisites
+
+Before starting proof construction, verify:
+- Every intermediate objective is completed and has supporting evidence
+- The exploit primitive at each stage has been validated with debug_gdb_commands or debug_gdb_script
+- The chain logic is documented: what input triggers each stage, what state each stage produces, what the next stage consumes
+- The target flag/proof artifact is defined (from the CTF spec)
+
+If any intermediate stage is unvalidated, go back and validate it first. Proof construction on an incomplete chain produces overclaiming.
+
+## Phase 1: Assemble the trigger sequence
+
+Build the minimum input sequence that drives the chain from entry to final stage:
+- List the exact commands, inputs, or payloads for each stage in order
+- Identify timing dependencies: does stage N need to complete before stage N+1 starts, or can they overlap?
+- Identify environmental dependencies: specific file paths, network state, heap state, process state
+- Write the sequence as a reproducible script or command pipeline
+
+Use debug_gdb_commands to verify that the assembled sequence reaches each intermediate checkpoint. Set breakpoints at each stage boundary and confirm the expected state.
+
+## Phase 2: Execute the proof
+
+Run the assembled trigger sequence against the target:
+- Capture all output, exit codes, and side effects
+- If the chain produces a flag artifact (file, output string, network response), capture it immediately
+- If the chain produces a state change (privilege escalation, sandbox escape, file creation in a privileged directory), verify the change with an independent check
+- Use debug_gdb_commands or strace to capture the exact moment of the final action
+
+## Phase 3: Validate the proof
+
+Confirm the proof is genuine, not an artifact of the testing setup:
+- Re-run the proof from a clean state to confirm reproducibility
+- Verify the flag/artifact matches the expected format from the CTF spec
+- Verify the proof demonstrates the claimed impact (e.g., code execution, not just a crash; privilege escalation, not just a read)
+- Check that no environmental shortcuts were used (e.g., disabled mitigations, pre-seeded state)
+
+## Phase 4: Package the evidence
+
+Record the proof in the findings tracker:
+- Update the finding status to "reported"
+- Set reproStatus to "reproduced"
+- Add the captured flag to the submission's capturedFlags
+- Set the proof dimension to "hit" in the judgement
+- Link all evidence: the trigger script, the flag artifact, the GDB/strace traces, and the validation re-run
+
+## Anti-patterns
+
+Do not:
+- Claim proof=hit based on theoretical reachability — the chain must actually execute end-to-end
+- Skip the validation re-run — a one-time success may be a flaky race
+- Capture a flag from a modified target (disabled ASLR, removed canaries, weakened sandbox)
+- Report "reproduced" when only intermediate stages were reproduced and the final action was inferred

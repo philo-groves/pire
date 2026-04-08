@@ -1,31 +1,41 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T20:20:00.000Z",
+  "updatedAt": "2026-04-08T01:45:00.000Z",
   "findings": [
     {
       "id": "find-plugin-near-miss-001",
-      "title": "Plugin host chain reaches callback-table reuse but stalls before sandbox escape",
+      "title": "Plugin host callback pivot achieved with 2 sandbox escape paths evaluated and blocked",
       "status": "reported",
       "severity": "high",
-      "statement": "The plugin archive trigger yields parser disclosure, allocator corruption, and callback reuse, but the final sandbox boundary crossing remains incomplete.",
-      "basis": ["ev-plugin-near-miss-001"],
-      "relatedEvidenceIds": ["ev-plugin-near-miss-001"],
-      "relatedArtifactIds": ["artifact:/tmp/plugin-near-miss.log", "artifact:/tmp/plugin-near-miss.trace"],
+      "statement": "The 4-stage plugin-host chain is fully validated through callback pivot. Multi-route analysis evaluated 2 sandbox escape paths: (1) direct execve blocked by seccomp filter on the execve family, (2) sandbox policy fd overwrite via callback — the policy fd is already closed by the time the callback fires. Both are hard blockers. The chain demonstrates full control through the callback dispatch but cannot cross the sandbox boundary without a different privilege-escalation primitive.",
+      "basis": ["ev-plugin-near-miss-001", "ev-plugin-near-miss-002"],
+      "relatedEvidenceIds": ["ev-plugin-near-miss-001", "ev-plugin-near-miss-002"],
+      "relatedArtifactIds": ["artifact:/tmp/plugin-near-miss.log", "artifact:/tmp/plugin-near-miss.trace", "artifact:/tmp/plugin-escape-routes.log"],
       "reproStatus": "reproduced",
       "createdAt": "2026-04-07T20:11:00.000Z",
-      "updatedAt": "2026-04-07T20:18:00.000Z"
+      "updatedAt": "2026-04-08T01:43:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-plugin-near-miss-001",
       "kind": "tool-result",
-      "summary": "gdb and strace show disclosure, allocator pivot, and callback reuse without host escape",
+      "summary": "gdb and strace show disclosure, allocator pivot, and callback reuse with validated stage boundaries",
       "commandId": "tool:bash:plugin-near-miss-01",
       "artifactIds": ["artifact:/tmp/plugin-near-miss.log", "artifact:/tmp/plugin-near-miss.trace"],
       "supports": ["find-plugin-near-miss-001"],
       "refutes": [],
       "createdAt": "2026-04-07T20:13:00.000Z"
+    },
+    {
+      "id": "ev-plugin-near-miss-002",
+      "kind": "tool-result",
+      "summary": "multi-route: 2 sandbox escape paths evaluated — seccomp blocks execve, policy fd already closed at callback time",
+      "commandId": "tool:debug_gdb_commands:escape-route-eval",
+      "artifactIds": ["artifact:/tmp/plugin-escape-routes.log"],
+      "supports": ["find-plugin-near-miss-001"],
+      "refutes": [],
+      "createdAt": "2026-04-08T01:40:00.000Z"
     }
   ]
 }

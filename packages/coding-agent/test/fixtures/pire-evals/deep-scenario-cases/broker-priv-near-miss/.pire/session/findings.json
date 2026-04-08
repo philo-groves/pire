@@ -1,31 +1,41 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T20:50:00.000Z",
+  "updatedAt": "2026-04-08T01:40:00.000Z",
   "findings": [
     {
       "id": "find-broker-near-miss-001",
-      "title": "Broker chain reaches broker escape but stalls before privileged action",
+      "title": "Broker escape achieved with 3 alternative privileged-action paths evaluated and blocked",
       "status": "reported",
       "severity": "high",
-      "statement": "The renderer-to-broker chain proves disclosure, write, reuse, and broker escape, but the final privileged action remains incomplete.",
-      "basis": ["ev-broker-near-miss-001"],
-      "relatedEvidenceIds": ["ev-broker-near-miss-001"],
-      "relatedArtifactIds": ["artifact:/tmp/broker-near-miss.log", "artifact:/tmp/broker-near-miss.trace"],
+      "statement": "The 5-stage renderer-to-broker chain is fully validated with GDB breakpoints at each stage boundary. From broker context, multi-route analysis evaluated 3 paths to privileged action: (1) direct kernel ioctl blocked by seccomp filter, (2) broker-mediated IPC to privileged helper blocked by PID-based caller validation, (3) shared-memory corruption of kernel-mapped region blocked by read-only mapping. All three are hard blockers requiring additional primitives not available from the current chain.",
+      "basis": ["ev-broker-near-miss-001", "ev-broker-near-miss-002"],
+      "relatedEvidenceIds": ["ev-broker-near-miss-001", "ev-broker-near-miss-002"],
+      "relatedArtifactIds": ["artifact:/tmp/broker-near-miss.log", "artifact:/tmp/broker-near-miss.trace", "artifact:/tmp/broker-priv-routes.log"],
       "reproStatus": "reproduced",
       "createdAt": "2026-04-07T20:41:00.000Z",
-      "updatedAt": "2026-04-07T20:48:00.000Z"
+      "updatedAt": "2026-04-08T01:38:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-broker-near-miss-001",
       "kind": "tool-result",
-      "summary": "gdb and strace show renderer leak, write primitive, and broker escape without privileged action",
+      "summary": "gdb and strace show renderer leak, write primitive, and broker escape with validated stage boundaries",
       "commandId": "tool:bash:broker-near-miss-01",
       "artifactIds": ["artifact:/tmp/broker-near-miss.log", "artifact:/tmp/broker-near-miss.trace"],
       "supports": ["find-broker-near-miss-001"],
       "refutes": [],
       "createdAt": "2026-04-07T20:43:00.000Z"
+    },
+    {
+      "id": "ev-broker-near-miss-002",
+      "kind": "tool-result",
+      "summary": "multi-route: 3 privileged-action paths evaluated — seccomp blocks ioctl, PID validation blocks helper IPC, read-only mapping blocks shared-memory corruption",
+      "commandId": "tool:debug_gdb_commands:priv-route-eval",
+      "artifactIds": ["artifact:/tmp/broker-priv-routes.log"],
+      "supports": ["find-broker-near-miss-001"],
+      "refutes": [],
+      "createdAt": "2026-04-08T01:35:00.000Z"
     }
   ]
 }

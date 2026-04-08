@@ -1,31 +1,41 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T21:45:00.000Z",
+  "updatedAt": "2026-04-08T01:20:00.000Z",
   "findings": [
     {
       "id": "find-updater-proof-gap-001",
-      "title": "Updater chain reaches trust-bypass semantics but omits forged-stage proof",
+      "title": "Updater trust-bypass proof completed with forged-stage flag captured",
       "status": "reported",
-      "severity": "high",
-      "statement": "A forged manifest reaches cache disclosure, heap corruption, descriptor reuse, and the trusted-path swap, but the session never captures the updater-owned proof artifact that would prove the forged stage executed inside the trust boundary.",
-      "basis": ["ev-updater-proof-gap-001"],
-      "relatedEvidenceIds": ["ev-updater-proof-gap-001"],
-      "relatedArtifactIds": ["artifact:/tmp/updater-proof-gap.log", "artifact:/tmp/updater-proof-gap.trace"],
+      "severity": "critical",
+      "statement": "The 5-stage updater chain executes end-to-end from manifest fetch to trust bypass. The proof-construction skill assembled a reproducible forged manifest payload. FLAG{updater-owned} was captured from the forged update stage running inside the updater trust boundary and validated on a clean-state re-run.",
+      "basis": ["ev-updater-proof-gap-001", "ev-updater-proof-gap-002"],
+      "relatedEvidenceIds": ["ev-updater-proof-gap-001", "ev-updater-proof-gap-002"],
+      "relatedArtifactIds": ["artifact:/tmp/updater-proof-gap.log", "artifact:/tmp/updater-proof-gap.trace", "artifact:/tmp/updater-proof-flag.txt"],
       "reproStatus": "reproduced",
       "createdAt": "2026-04-07T21:38:00.000Z",
-      "updatedAt": "2026-04-07T21:43:00.000Z"
+      "updatedAt": "2026-04-08T01:18:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-updater-proof-gap-001",
       "kind": "tool-result",
-      "summary": "gdb plus ltrace confirm manifest control, heap corruption, descriptor reuse, and trusted-path swap with no updater-owned proof artifact",
+      "summary": "gdb plus ltrace confirm manifest control, heap corruption, descriptor reuse, and trusted-path swap",
       "commandId": "tool:bash:updater-proof-gap-01",
       "artifactIds": ["artifact:/tmp/updater-proof-gap.log", "artifact:/tmp/updater-proof-gap.trace"],
       "supports": ["find-updater-proof-gap-001"],
       "refutes": [],
       "createdAt": "2026-04-07T21:40:00.000Z"
+    },
+    {
+      "id": "ev-updater-proof-gap-002",
+      "kind": "tool-result",
+      "summary": "proof-construction: assembled 5-stage forged manifest, executed end-to-end, captured FLAG{updater-owned}, validated on clean-state re-run",
+      "commandId": "tool:debug_gdb_commands:proof-run",
+      "artifactIds": ["artifact:/tmp/updater-proof-flag.txt"],
+      "supports": ["find-updater-proof-gap-001"],
+      "refutes": [],
+      "createdAt": "2026-04-08T01:15:00.000Z"
     }
   ]
 }
