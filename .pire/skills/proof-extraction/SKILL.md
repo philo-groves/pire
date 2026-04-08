@@ -6,6 +6,15 @@ description: Use when the exploit chain succeeds but the proof artifact is not d
 
 Use this workflow when the exploit fires but the proof is trapped in a context the agent cannot directly read. The proof-construction skill handles assembling and running the exploit; this skill handles *observing the result*.
 
+## Trigger conditions
+
+Enter this skill when:
+- The final exploit action is already believed to execute, or is one command away from execution
+- The blocker is observability, not chain construction
+- The missing piece is the proof artifact, receipt, or flag capture path
+
+If the chain itself is still incomplete, go back to chain construction first. If the chain is complete but the artifact is invisible, stop broad exploration and work this decision tree.
+
 ## Technique 1: Cross-process memory read via procfs
 
 When the flag is in another process's memory (e.g., privileged ioctl result mapped to a helper):
@@ -141,6 +150,12 @@ When the exploit's effect is observable but not in the required proof format:
 ## Mandatory proof attempt
 
 **IMPORTANT**: Before reporting proof=miss on any case where all objectives are complete, you MUST attempt at least 3 of the above techniques. "The exploit works but I can't capture the flag" is not an acceptable conclusion without documenting which extraction techniques were tried and why each failed. The proof-extraction decision tree below guides which techniques to try first, but if the first technique fails, continue down the tree.
+
+Document each attempt in terms of:
+- Why this technique matches the current visibility problem
+- The exact command or debug action used
+- What was observed
+- Why that observation did or did not close the proof gap
 
 ## Decision tree
 

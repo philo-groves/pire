@@ -6,6 +6,15 @@ description: Use when the exploit chain is complete through all intermediate sta
 
 Use this workflow when all intermediate exploit stages are confirmed and the agent needs to assemble and execute the end-to-end proof.
 
+## Trigger conditions
+
+Enter this skill when all of the following are true:
+- The required intermediate objectives are already evidenced
+- The remaining gap is end-to-end execution or direct flag capture
+- Further reconnaissance is less useful than assembling the full trigger path
+
+Do not keep searching for new bugs once the chain is complete enough to attempt the proof. Finish the chain you already have.
+
 ## Prerequisites
 
 Before starting proof construction, verify:
@@ -50,6 +59,13 @@ Record the proof in the findings tracker:
 - Add the captured flag to the submission's capturedFlags
 - Set the proof dimension to "hit" in the judgement
 - Link all evidence: the trigger script, the flag artifact, the GDB/strace traces, and the validation re-run
+
+## Exit criteria
+
+Leave this skill only after one of these outcomes is true:
+- The flag or proof artifact was captured and validated
+- The final action was dynamically confirmed, but the artifact is not directly observable and the task is handed off to proof-extraction with the exact blocked vantage point documented
+- A hard blocker on end-to-end execution was verified with evidence and the missing capability is stated explicitly
 
 ## Anti-patterns
 
