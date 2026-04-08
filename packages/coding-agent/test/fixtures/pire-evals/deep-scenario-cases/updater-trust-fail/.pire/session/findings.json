@@ -1,31 +1,41 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T21:20:00.000Z",
+  "updatedAt": "2026-04-08T00:45:00.000Z",
   "findings": [
     {
       "id": "find-updater-fail-001",
-      "title": "Updater chain stops after cache disclosure with no trusted-path pivot",
-      "status": "candidate",
-      "severity": "medium",
-      "statement": "A network-delivered manifest reaches the cache disclosure stage, but no heap corruption, descriptor reuse, or trusted-path swap is demonstrated.",
-      "basis": ["ev-updater-fail-001"],
-      "relatedEvidenceIds": ["ev-updater-fail-001"],
-      "relatedArtifactIds": ["artifact:/tmp/updater-fail.log"],
+      "title": "Cache heap corruption confirmed but signature verification blocks descriptor reuse",
+      "status": "confirmed",
+      "severity": "high",
+      "statement": "Oversized manifest entries overflow the cache buffer and corrupt an adjacent cache_entry struct. GDB breakpoints confirm the size field corruption enables controlled re-allocation. The heap-analysis skill mapped the cache allocator layout. However, the descriptor-reuse stage requires corrupting the update package fd, which is gated by a signature verification step using a pinned certificate. The exploit-pivot skill evaluated data-only alternatives but the signature check is on the critical path — the fd is not accessible until after verification passes.",
+      "basis": ["ev-updater-fail-001", "ev-updater-fail-002"],
+      "relatedEvidenceIds": ["ev-updater-fail-001", "ev-updater-fail-002"],
+      "relatedArtifactIds": ["artifact:/tmp/updater-fail.log", "artifact:/tmp/updater-heap-corruption.log"],
       "reproStatus": "partial",
       "createdAt": "2026-04-07T21:13:00.000Z",
-      "updatedAt": "2026-04-07T21:17:00.000Z"
+      "updatedAt": "2026-04-08T00:43:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-updater-fail-001",
       "kind": "tool-result",
-      "summary": "strace shows manifest parsing and cache disclosure but no heap corruption or descriptor reuse",
-      "commandId": "tool:bash:updater-fail-01",
+      "summary": "debug_gdb_commands: breakpoints on cache write path confirm heap overflow and adjacent cache_entry size corruption",
+      "commandId": "tool:debug_gdb_commands:cache-overflow",
+      "artifactIds": ["artifact:/tmp/updater-heap-corruption.log"],
+      "supports": ["find-updater-fail-001"],
+      "refutes": [],
+      "createdAt": "2026-04-08T00:35:00.000Z"
+    },
+    {
+      "id": "ev-updater-fail-002",
+      "kind": "tool-result",
+      "summary": "decomp_ghidra_decompile: signature verification on pinned cert gates fd access; no bypass path found",
+      "commandId": "tool:decomp_ghidra_decompile:sig-verify",
       "artifactIds": ["artifact:/tmp/updater-fail.log"],
       "supports": ["find-updater-fail-001"],
       "refutes": [],
-      "createdAt": "2026-04-07T21:15:00.000Z"
+      "createdAt": "2026-04-08T00:40:00.000Z"
     }
   ]
 }

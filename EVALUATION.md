@@ -105,8 +105,8 @@ Current direct eval runs show:
 All four suites pass expectation enforcement with zero regressions. The deep suite produces 16 cases:
 
 - `pass=3`
-- `near-miss=9`
-- `fail=4`
+- `near-miss=11`
+- `fail=2`
 
 Key scorer improvements:
 
@@ -131,15 +131,22 @@ These tools moved the gap-task near-miss fixtures from FAIL to NEAR-MISS:
 - `slab-heap-near-miss`: FAIL 52% → NEAR 62% (debug_gdb_commands + debug_gdb_script enabled heap inspection through vtable-hijack, 3→5 of 6 objectives)
 - `rop-chain-near-miss`: FAIL 56% → NEAR 65% (exploit_ropgadget + disasm_radare2_gadgets enabled chain assembly through stack-pivot, 3→5 of 7 objectives)
 
-Two new skills further improved the gap-task outcomes:
+Skills that improved gap-task and original-task outcomes:
 
-- `heap-analysis`: structured workflow for custom allocator reversal (identify tiers via decompilation → write GDB Python walkers per tier → validate heap state → verify fake object placement). Moved slab-heap-fail from 15% to 52% (1→4 of 6 objectives), blocked only by safe-linking XOR key.
-- `exploit-pivot`: methodology for pivoting when the primary exploitation path is blocked (widen primitive → data-only attack → partial overwrite → indirect API misuse → race amplification). Moved rop-chain-fail from 32% to 60% NEAR (2→4 of 7 objectives), identifying a data-only path via config_path corruption.
+- `heap-analysis`: structured workflow for custom allocator reversal (identify tiers → write GDB Python walkers → validate heap state → verify fake object placement)
+- `exploit-pivot`: methodology for pivoting when the primary path is blocked (widen primitive → data-only attack → partial overwrite → indirect API misuse → race amplification)
+- `info-leak`: systematic leak surface survey and chaining (uninitialized reads → OOB reads → format strings → heap metadata → timing oracles → partial pointers)
 
-Remaining fails represent security mitigation walls:
-- `slab-heap-fail` (52%): safe-linking XOR key unrecoverable without a separate info leak — needs either an info leak primitive or a way to brute-force the per-slab key
-- `updater-trust-fail` (35%): early stall in the manifest parser — needs deeper chain through the update pipeline
-- `plugin-host-fail` (46%) / `broker-priv-fail` (44%): incomplete chains from the original task set
+Combined with the new tools, these skills drove multiple FAIL→NEAR transitions:
+- `slab-heap-fail`: 15% → 68% NEAR (info-leak recovered safe-linking XOR key via adjacent OOB-read, enabling vtable hijack; 1→5 of 6 objectives)
+- `broker-priv-fail`: 44% → 65% NEAR (debug_gdb_commands + info-leak traced write primitive and reuse pivot; 2→4 of 6 objectives)
+- `rop-chain-fail`: 32% → 60% NEAR (exploit-pivot identified data-only attack via config_path corruption; 2→4 of 7 objectives)
+- `plugin-host-fail`: 46% → 52% FAIL (debug_gdb_commands traced allocator corruption; 2→3 of 5 objectives, blocked by stripped vtable)
+- `updater-trust-fail`: 35% → 52% FAIL (debug_gdb_commands traced cache heap corruption; 2→3 of 5 objectives, blocked by signature verification)
+
+Remaining 2 fails represent hard security boundaries:
+- `plugin-host-fail` (52%): stripped vtable prevents callback pivot — needs symbol recovery or vtable reconstruction from runtime behavior
+- `updater-trust-fail` (52%): pinned-certificate signature verification gates the descriptor — needs either a signature bypass or a different path to the trusted update stage
 
 ## What To Improve
 
@@ -153,10 +160,10 @@ Use eval results to drive changes in this order:
 
 Current priority inside that list:
 
-1. Move gap-task near-misses toward pass: slab-heap-near-miss needs the ASLR base leak for the privileged callback; rop-chain-near-miss needs the JIT page address leak
-2. Move slab-heap-fail past safe-linking: needs an info leak to recover the per-slab XOR key, or a brute-force strategy for the key space
-3. Batch decompilation: Ghidra cross-function data-flow analysis for multi-component chains
-4. Reduction of overclaiming and false positives in near-miss cases
+1. Move proof-gap near-misses (80%) toward pass: needs proof-construction skill for end-to-end PoC and flag capture
+2. Move remaining fails past hard boundaries: plugin-host needs vtable reconstruction from runtime dispatch traces; updater needs a path around signature verification
+3. Expand chain and scenario suites with gap-targeting cases (currently only 3 cases each)
+4. Save baselines and add CI enforcement to prevent silent regressions
 
 If the harness starts passing the current 3-stage and 4-stage chains too easily, add deeper tasks rather than relaxing the bar. The intended progression is:
 

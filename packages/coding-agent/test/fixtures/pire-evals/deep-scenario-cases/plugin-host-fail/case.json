@@ -1,7 +1,7 @@
 {
-  "title": "Plugin-host deep scenario fail",
+  "title": "Plugin-host fail — allocator corruption reached but stripped vtable blocks callback pivot",
   "expectation": {
-    "minNormalized": 0.45,
+    "minNormalized": 0.51,
     "maxIssues": 2,
     "maxRank": 20,
     "minScenarioPassed": 0,

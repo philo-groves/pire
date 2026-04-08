@@ -1,11 +1,11 @@
 {
-  "title": "Slab allocator fail — heap-analysis walker works but safe-linking blocks fake pointer injection",
+  "title": "Slab allocator near-miss — info-leak recovered XOR key, vtable hijack achieved, privileged callback ASLR base missing",
   "expectation": {
-    "minNormalized": 0.51,
-    "maxIssues": 2,
+    "minNormalized": 0.67,
+    "maxIssues": 1,
     "maxRank": 20,
     "minScenarioPassed": 0,
-    "maxScenarioNearMiss": 0,
-    "maxScenarioFailed": 1
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
   }
 }

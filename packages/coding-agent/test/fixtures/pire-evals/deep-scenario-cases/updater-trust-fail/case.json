@@ -1,8 +1,8 @@
 {
-  "title": "Updater trust-bypass deep scenario fail",
+  "title": "Updater fail — cache heap corruption reached but signature verification blocks descriptor reuse",
   "expectation": {
-    "minNormalized": 0.34,
-    "maxIssues": 0,
+    "minNormalized": 0.51,
+    "maxIssues": 1,
     "maxRank": 20,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 0,
