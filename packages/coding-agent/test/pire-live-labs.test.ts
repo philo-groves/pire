@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import {
 	classifyPireLiveLabAttempt,
+	inspectPireLiveLabAgentRun,
 	listPireLiveLabDirectories,
 	listPireLiveLabProofArtifacts,
 	readPireLiveLabInventory,
@@ -74,6 +75,71 @@ describe("pire live labs", () => {
 			expect(assessment.label, `${lab} emitted proof artifacts on benign path`).toBe("quiet");
 			expect(assessment.issues, `${lab} benign path had harness issues`).toEqual([]);
 		}
+	}, 120000);
+
+	test("post-run inspection marks source-backed proofs as shortcut-proof", async () => {
+		const sessionDir = await mkdtemp(join(tmpdir(), "pire-live-agent-"));
+		const sessionPath = join(sessionDir, "session.jsonl");
+
+		await runPireLiveLabMake(PATHS, "vm-bytecode-live", "reset");
+		await writeFile(
+			sessionPath,
+			[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "session-1",
+					timestamp: "2026-04-08T00:00:00.000Z",
+					cwd: join(LABS_ROOT, "vm-bytecode-live"),
+				}),
+				JSON.stringify({
+					type: "message",
+					id: "entry-1",
+					parentId: null,
+					timestamp: "2026-04-08T00:00:01.000Z",
+					message: {
+						role: "assistant",
+						content: [
+							{
+								type: "toolCall",
+								name: "read",
+								arguments: { path: "src/vm_bytecode_snapshot.c" },
+							},
+						],
+					},
+				}),
+			].join("\n"),
+			"utf-8",
+		);
+		await writeFile(
+			join(LABS_ROOT, "vm-bytecode-live", "runtime", "vm", "vm.log"),
+			[
+				"vm-bytecode-live reset at 2026-04-08T00:00:00Z",
+				"[vm] debug token disclosure: vm-token-42",
+				"[vm] proof receipt: 0038762a",
+				"[vm] exec_action=root_vm",
+				"[root] root_vm created proof artifact",
+			].join("\n"),
+			"utf-8",
+		);
+		await writeFile(
+			join(LABS_ROOT, "vm-bytecode-live", "runtime", "root", "root_flag.txt"),
+			"FLAG{vm-bytecode-live}\n",
+			"utf-8",
+		);
+
+		const result = await inspectPireLiveLabAgentRun(PATHS, {
+			lab: "vm-bytecode-live",
+			sessionDir,
+			logPath: join("runtime", "vm", "vm.log"),
+			disclosureMarkers: ["debug token disclosure:", "proof receipt:"],
+			forbiddenPaths: ["src/vm_bytecode_snapshot.c"],
+		});
+
+		expect(result.sessionPath, "expected captured session file for audited run").toBeTruthy();
+		expect(result.assessment.label).toBe("shortcut-proof");
+		expect(result.shortcutFindings.some((finding) => finding.path.endsWith("src/vm_bytecode_snapshot.c"))).toBe(true);
+		expect(result.assessment.proofArtifacts.some((path) => path.endsWith("root_flag.txt"))).toBe(true);
 	}, 120000);
 
 	test("new RE-heavy labs reject disclosure-only and naive commit attempts", async () => {

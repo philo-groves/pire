@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -62,6 +62,27 @@ export interface PireLiveLabShortcutFinding {
 	toolName: "read" | "bash";
 	path: string;
 	summary: string;
+}
+
+export interface EvaluatePireLiveLabAgentRunOptions extends PireLiveLabAgentRunOptions {
+	logPath: string;
+	disclosureMarkers?: string[];
+	forbiddenPaths?: string[];
+}
+
+export interface PireLiveLabAgentRunResult {
+	sessionPath?: string;
+	logText: string;
+	shortcutFindings: PireLiveLabShortcutFinding[];
+	assessment: PireLiveLabAttemptAssessment;
+}
+
+export interface InspectPireLiveLabAgentRunOptions {
+	lab: string;
+	sessionDir: string;
+	logPath: string;
+	disclosureMarkers?: string[];
+	forbiddenPaths?: string[];
 }
 
 interface PireToolCallContent {
@@ -194,9 +215,37 @@ export async function runPireLiveLabScript(
 
 export async function runPireLiveLabAgent(paths: PireLiveLabPaths, options: PireLiveLabAgentRunOptions): Promise<void> {
 	const args = ["-p", "--session-dir", options.sessionDir, ...(options.extraArgs ?? []), options.prompt];
-	await execFileAsync("pire", args, {
-		cwd: join(paths.labsRoot, options.lab),
-		timeout: (options.timeoutSeconds ?? 300) * 1000,
+	await new Promise<void>((resolvePromise, reject) => {
+		const child = spawn(join(paths.labsRoot, options.lab, "scripts", "run-pire.sh"), args, {
+			cwd: join(paths.labsRoot, options.lab),
+			stdio: ["ignore", "pipe", "pipe"],
+		});
+		let stderr = "";
+		const timeout = setTimeout(
+			() => {
+				child.kill("SIGTERM");
+				reject(new Error(`live lab agent run timed out after ${options.timeoutSeconds ?? 300}s`));
+			},
+			(options.timeoutSeconds ?? 300) * 1000,
+		);
+
+		child.stderr.on("data", (chunk: Buffer | string) => {
+			stderr += chunk.toString();
+		});
+		child.on("error", (error) => {
+			clearTimeout(timeout);
+			reject(error);
+		});
+		child.on("close", (code, signal) => {
+			clearTimeout(timeout);
+			if (code === 0) {
+				resolvePromise();
+				return;
+			}
+			reject(
+				new Error(`live lab agent run failed with code ${code ?? "null"} signal ${signal ?? "null"}: ${stderr}`),
+			);
+		});
 	});
 }
 
@@ -298,6 +347,48 @@ export async function auditPireLiveLabSessionFile(
 	options: PireLiveLabSessionAuditOptions,
 ): Promise<PireLiveLabShortcutFinding[]> {
 	return auditPireLiveLabSessionEntries(await readPireLiveLabSessionEntries(sessionPath), options);
+}
+
+export async function evaluatePireLiveLabAgentRun(
+	paths: PireLiveLabPaths,
+	options: EvaluatePireLiveLabAgentRunOptions,
+): Promise<PireLiveLabAgentRunResult> {
+	await runPireLiveLabAgent(paths, options);
+
+	return inspectPireLiveLabAgentRun(paths, options);
+}
+
+export async function inspectPireLiveLabAgentRun(
+	paths: PireLiveLabPaths,
+	options: InspectPireLiveLabAgentRunOptions,
+): Promise<PireLiveLabAgentRunResult> {
+	const [sessionFiles, logText, proofArtifacts] = await Promise.all([
+		listPireLiveLabSessionFiles(options.sessionDir),
+		readFile(join(paths.labsRoot, options.lab, options.logPath), "utf-8"),
+		listPireLiveLabProofArtifacts(join(paths.labsRoot, options.lab, "runtime")),
+	]);
+
+	const sessionPath = sessionFiles.at(-1);
+	const shortcutFindings =
+		sessionPath && (options.forbiddenPaths?.length ?? 0) > 0
+			? await auditPireLiveLabSessionFile(sessionPath, {
+					labRoot: join(paths.labsRoot, options.lab),
+					forbiddenPaths: options.forbiddenPaths ?? [],
+				})
+			: [];
+
+	return {
+		sessionPath,
+		logText,
+		shortcutFindings,
+		assessment: classifyPireLiveLabAttempt({
+			kind: "agent-run",
+			proofArtifacts,
+			logText,
+			disclosureMarkers: options.disclosureMarkers,
+			shortcutFindings,
+		}),
+	};
 }
 
 export function classifyPireLiveLabAttempt(options: {
