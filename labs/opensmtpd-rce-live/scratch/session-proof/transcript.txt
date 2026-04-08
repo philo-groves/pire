@@ -1,0 +1,8 @@
+HELO proof.local
+MAILFROM analyst@example.test
+RCPTTO root@example.test
+XMODE commit
+XROUTE a7
+XSTAGE 42
+XFOLD 9d
+XMAC 5fc1ed64

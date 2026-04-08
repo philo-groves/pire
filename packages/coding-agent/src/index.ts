@@ -253,10 +253,12 @@ export {
 	type PireLiveLabShortcutFinding,
 	readPireLiveLabInventory,
 	readPireLiveLabSessionEntries,
+	resolvePireLiveLabDefaultForbiddenPaths,
 	resolvePireLiveLabPaths,
 	runPireLiveLabAgent,
 	runPireLiveLabMake,
 	runPireLiveLabScript,
+	stagePireLiveLabWorkspace,
 	validatePireLiveLabInventory,
 } from "./core/pire/live-labs.js";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.js";

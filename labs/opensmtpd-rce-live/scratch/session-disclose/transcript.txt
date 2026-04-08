@@ -1,0 +1,6 @@
+HELO disclose.local
+MAILFROM analyst@example.test
+RCPTTO root@example.test
+XMODE debug
+XROUTE 5c
+XSTAGE 13

@@ -1,10 +1,13 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
 	auditPireLiveLabSessionFile,
 	classifyPireLiveLabAttempt,
+	resolvePireLiveLabDefaultForbiddenPaths,
+	resolvePireLiveLabPaths,
+	stagePireLiveLabWorkspace,
 	validatePireLiveLabInventory,
 } from "../src/core/pire/live-labs.js";
 
@@ -134,5 +137,42 @@ describe("pire live lab helpers", () => {
 		expect(findings).toHaveLength(2);
 		expect(findings[0]?.toolName).toBe("read");
 		expect(findings[1]?.toolName).toBe("bash");
+	});
+
+	test("derives default forbidden paths for audited RE labs", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-live-lab-defaults-"));
+		await mkdir(join(tempDir, ".pire"), { recursive: true });
+		await mkdir(join(tempDir, "src"), { recursive: true });
+		await writeFile(join(tempDir, "README.md"), "# Lab\n", "utf-8");
+		await writeFile(join(tempDir, ".pire", "TARGET.md"), "# Target\n", "utf-8");
+		await writeFile(join(tempDir, "src", "demo_snapshot.c"), "int main(void) { return 0; }\n", "utf-8");
+		await writeFile(join(tempDir, "src", "helper.c"), "int helper(void) { return 0; }\n", "utf-8");
+
+		const forbiddenPaths = await resolvePireLiveLabDefaultForbiddenPaths(tempDir);
+
+		expect(forbiddenPaths).toEqual(["README.md", ".pire/TARGET.md", "src/demo_snapshot.c"]);
+	});
+
+	test("stages stripped lab workspaces without hint files", async () => {
+		const repoRoot = await mkdtemp(join(tmpdir(), "pire-live-lab-repo-"));
+		const packageRoot = join(repoRoot, "packages", "coding-agent");
+		await mkdir(packageRoot, { recursive: true });
+		const labsRoot = join(repoRoot, "labs");
+		const labRoot = join(labsRoot, "demo-live");
+		await mkdir(join(labRoot, ".pire"), { recursive: true });
+		await mkdir(join(labRoot, "src"), { recursive: true });
+		await mkdir(join(labRoot, "runtime"), { recursive: true });
+		await writeFile(join(labRoot, "README.md"), "# Demo\n", "utf-8");
+		await writeFile(join(labRoot, ".pire", "TARGET.md"), "# Target\n", "utf-8");
+		await writeFile(join(labRoot, "src", "demo_snapshot.c"), "int main(void) { return 0; }\n", "utf-8");
+		await writeFile(join(labRoot, "runtime", "state.txt"), "ready\n", "utf-8");
+
+		const staged = await stagePireLiveLabWorkspace(resolvePireLiveLabPaths(packageRoot), "demo-live");
+
+		await expect(access(join(staged.workspaceRoot, "README.md"))).rejects.toThrow();
+		await expect(access(join(staged.workspaceRoot, ".pire", "TARGET.md"))).rejects.toThrow();
+		await expect(access(join(staged.workspaceRoot, "src", "demo_snapshot.c"))).rejects.toThrow();
+		await expect(access(join(staged.workspaceRoot, "runtime", "state.txt"))).resolves.toBeUndefined();
+		expect(staged.hiddenPaths).toEqual(["README.md", ".pire/TARGET.md", "src/demo_snapshot.c"]);
 	});
 });

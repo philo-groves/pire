@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
+import { cp, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { type FileEntry, parseSessionEntries, type SessionMessageEntry } from "../session-manager.js";
@@ -49,6 +50,8 @@ export interface PireLiveLabAgentRunOptions {
 	sessionDir: string;
 	timeoutSeconds?: number;
 	extraArgs?: string[];
+	hideHints?: boolean;
+	hiddenPaths?: string[];
 }
 
 export interface PireLiveLabSessionAuditOptions {
@@ -72,6 +75,7 @@ export interface EvaluatePireLiveLabAgentRunOptions extends PireLiveLabAgentRunO
 
 export interface PireLiveLabAgentRunResult {
 	sessionPath?: string;
+	workspaceRoot?: string;
 	logText: string;
 	shortcutFindings: PireLiveLabShortcutFinding[];
 	assessment: PireLiveLabAttemptAssessment;
@@ -83,6 +87,7 @@ export interface InspectPireLiveLabAgentRunOptions {
 	logPath: string;
 	disclosureMarkers?: string[];
 	forbiddenPaths?: string[];
+	labRootOverride?: string;
 }
 
 interface PireToolCallContent {
@@ -140,6 +145,32 @@ export async function listPireLiveLabDirectories(labsRoot: string): Promise<stri
 		.map((entry) => entry.name)
 		.filter((name) => name.endsWith("-live"))
 		.sort();
+}
+
+export async function resolvePireLiveLabDefaultForbiddenPaths(labRoot: string): Promise<string[]> {
+	const defaults = ["README.md", ".pire/TARGET.md"];
+	const srcDir = join(labRoot, "src");
+
+	try {
+		const entries = await readdir(srcDir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (!entry.isFile() || !entry.name.endsWith("_snapshot.c")) {
+				continue;
+			}
+			defaults.push(join("src", entry.name));
+		}
+	} catch (error) {
+		const readError = error as NodeJS.ErrnoException;
+		if (readError.code !== "ENOENT") {
+			throw error;
+		}
+	}
+
+	return defaults;
+}
+
+function mergeForbiddenPaths(defaults: string[], overrides?: string[]): string[] {
+	return [...new Set([...defaults, ...(overrides ?? [])])];
 }
 
 export async function readPireLiveLabInventory(paths: PireLiveLabPaths): Promise<PireLiveLabInventorySnapshot> {
@@ -213,13 +244,59 @@ export async function runPireLiveLabScript(
 	});
 }
 
-export async function runPireLiveLabAgent(paths: PireLiveLabPaths, options: PireLiveLabAgentRunOptions): Promise<void> {
-	const args = ["-p", "--session-dir", options.sessionDir, ...(options.extraArgs ?? []), options.prompt];
+export async function stagePireLiveLabWorkspace(
+	paths: PireLiveLabPaths,
+	lab: string,
+	hiddenPaths?: string[],
+): Promise<{ workspaceRoot: string; hiddenPaths: string[] }> {
+	const sourceLabRoot = join(paths.labsRoot, lab);
+	const stagingRoot = await mkdtemp(join(tmpdir(), `pire-live-lab-${lab}-`));
+	const workspaceRoot = join(stagingRoot, lab);
+
+	await cp(sourceLabRoot, workspaceRoot, {
+		recursive: true,
+	});
+
+	const defaultHiddenPaths = await resolvePireLiveLabDefaultForbiddenPaths(workspaceRoot);
+	const mergedHiddenPaths = mergeForbiddenPaths(defaultHiddenPaths, hiddenPaths);
+
+	await Promise.all(
+		mergedHiddenPaths.map(async (hiddenPath) => {
+			await rm(join(workspaceRoot, hiddenPath), {
+				force: true,
+				recursive: true,
+			});
+		}),
+	);
+
+	return {
+		workspaceRoot,
+		hiddenPaths: mergedHiddenPaths,
+	};
+}
+
+async function executePireLiveLabAgentRun(
+	paths: PireLiveLabPaths,
+	workspaceRoot: string,
+	options: PireLiveLabAgentRunOptions,
+): Promise<void> {
 	await new Promise<void>((resolvePromise, reject) => {
-		const child = spawn(join(paths.labsRoot, options.lab, "scripts", "run-pire.sh"), args, {
-			cwd: join(paths.labsRoot, options.lab),
-			stdio: ["ignore", "pipe", "pipe"],
-		});
+		const child = spawn(
+			"npx",
+			[
+				"tsx",
+				join(paths.packageRoot, "src", "cli.ts"),
+				"-p",
+				"--session-dir",
+				options.sessionDir,
+				...(options.extraArgs ?? []),
+				options.prompt,
+			],
+			{
+				cwd: workspaceRoot,
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
 		let stderr = "";
 		const timeout = setTimeout(
 			() => {
@@ -247,6 +324,15 @@ export async function runPireLiveLabAgent(paths: PireLiveLabPaths, options: Pire
 			);
 		});
 	});
+}
+
+export async function runPireLiveLabAgent(paths: PireLiveLabPaths, options: PireLiveLabAgentRunOptions): Promise<void> {
+	const stagedWorkspace =
+		options.hideHints === false
+			? undefined
+			: await stagePireLiveLabWorkspace(paths, options.lab, options.hiddenPaths);
+	const workspaceRoot = stagedWorkspace?.workspaceRoot ?? join(paths.labsRoot, options.lab);
+	await executePireLiveLabAgentRun(paths, workspaceRoot, options);
 }
 
 export async function listPireLiveLabSessionFiles(sessionDir: string): Promise<string[]> {
@@ -353,32 +439,52 @@ export async function evaluatePireLiveLabAgentRun(
 	paths: PireLiveLabPaths,
 	options: EvaluatePireLiveLabAgentRunOptions,
 ): Promise<PireLiveLabAgentRunResult> {
-	await runPireLiveLabAgent(paths, options);
+	const stagedWorkspace =
+		options.hideHints === false
+			? undefined
+			: await stagePireLiveLabWorkspace(paths, options.lab, options.hiddenPaths);
+	const workspaceRoot = stagedWorkspace?.workspaceRoot ?? join(paths.labsRoot, options.lab);
+	const hiddenPaths = stagedWorkspace?.hiddenPaths ?? mergeForbiddenPaths([], options.hiddenPaths);
 
-	return inspectPireLiveLabAgentRun(paths, options);
+	await executePireLiveLabAgentRun(paths, workspaceRoot, options);
+
+	const result = await inspectPireLiveLabAgentRun(paths, {
+		...options,
+		labRootOverride: workspaceRoot,
+		forbiddenPaths: hiddenPaths,
+	});
+
+	return {
+		...result,
+		workspaceRoot,
+	};
 }
 
 export async function inspectPireLiveLabAgentRun(
 	paths: PireLiveLabPaths,
 	options: InspectPireLiveLabAgentRunOptions,
 ): Promise<PireLiveLabAgentRunResult> {
-	const [sessionFiles, logText, proofArtifacts] = await Promise.all([
+	const labRoot = options.labRootOverride ?? join(paths.labsRoot, options.lab);
+	const [sessionFiles, logText, proofArtifacts, defaultForbiddenPaths] = await Promise.all([
 		listPireLiveLabSessionFiles(options.sessionDir),
-		readFile(join(paths.labsRoot, options.lab, options.logPath), "utf-8"),
-		listPireLiveLabProofArtifacts(join(paths.labsRoot, options.lab, "runtime")),
+		readFile(join(labRoot, options.logPath), "utf-8"),
+		listPireLiveLabProofArtifacts(join(labRoot, "runtime")),
+		resolvePireLiveLabDefaultForbiddenPaths(labRoot),
 	]);
+	const forbiddenPaths = mergeForbiddenPaths(defaultForbiddenPaths, options.forbiddenPaths);
 
 	const sessionPath = sessionFiles.at(-1);
 	const shortcutFindings =
-		sessionPath && (options.forbiddenPaths?.length ?? 0) > 0
+		sessionPath && forbiddenPaths.length > 0
 			? await auditPireLiveLabSessionFile(sessionPath, {
-					labRoot: join(paths.labsRoot, options.lab),
-					forbiddenPaths: options.forbiddenPaths ?? [],
+					labRoot,
+					forbiddenPaths,
 				})
 			: [];
 
 	return {
 		sessionPath,
+		workspaceRoot: labRoot,
 		logText,
 		shortcutFindings,
 		assessment: classifyPireLiveLabAttempt({

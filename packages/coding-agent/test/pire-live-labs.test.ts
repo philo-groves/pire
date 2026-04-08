@@ -137,7 +137,6 @@ describe("pire live labs", () => {
 			sessionDir,
 			logPath: join("runtime", "vm", "vm.log"),
 			disclosureMarkers: ["debug token disclosure:", "proof receipt:"],
-			forbiddenPaths: ["src/vm_bytecode_snapshot.c"],
 		});
 
 		expect(result.sessionPath, "expected captured session file for audited run").toBeTruthy();

@@ -296,7 +296,6 @@ npx tsx ./src/pire-live-lab-cli.ts \
   --lab vm-bytecode-live \
   --session-dir /tmp/pire-live-audit \
   --log-path runtime/vm/vm.log \
-  --forbid src/vm_bytecode_snapshot.c \
   --disclosure-marker "debug token disclosure:" \
   --disclosure-marker "proof receipt:" \
   --inspect-only \
@@ -370,7 +369,8 @@ When editing fixture cases, scorers, or labs, keep these rules explicit:
 - scorer changes must preserve the distinction between `attempted proof` and `validated proof`; do not infer proof from the mere presence of artifact references
 - new live labs must fail closed on the benign path: after `make build`, `make reset`, and the default `make run`, no proof artifact should exist
 - live lab READMEs should describe objectives and constraints, not leak the exact exploit recipe or encourage direct proof-file fabrication
-- RE-tier live capability runs should persist a session file and treat reads of `src/*_snapshot.c` or equivalent answer-key sources as shortcut failures, even if proof is reached
+- RE-tier live capability runs should persist a session file and treat reads of lab answer-key files as shortcut failures, even if proof is reached
+- the audited live-lab harness now stages a stripped temporary workspace by default, so `README.md`, `.pire/TARGET.md`, and `src/*_snapshot.c` are hidden before the run and still audited as forbidden paths
 
 Minimum validation after eval or lab changes:
 

@@ -39,6 +39,10 @@ Options:
   --json                       Emit JSON instead of a text summary
   --package-root <path>        packages/coding-agent root (default: current working directory)
   --help                       Show this help
+
+Notes:
+  Audited runs stage a stripped temporary workspace by default and audit lab-local
+  answer-key files as forbidden: README.md, .pire/TARGET.md, and src/*_snapshot.c.
 `);
 }
 
@@ -110,6 +114,7 @@ function formatResult(result: PireLiveLabAgentRunResult, lab: string): string {
 		"Pire Live Lab Result",
 		`- lab: ${lab}`,
 		`- label: ${result.assessment.label}`,
+		`- workspace: ${result.workspaceRoot ?? "(none)"}`,
 		`- session: ${result.sessionPath ?? "(none)"}`,
 		`- proof artifacts: ${result.assessment.proofArtifacts.length}`,
 		`- shortcut findings: ${result.shortcutFindings.length}`,

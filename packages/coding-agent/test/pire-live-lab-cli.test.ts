@@ -12,7 +12,7 @@ const PATHS = resolvePireLiveLabPaths(PACKAGE_ROOT);
 const LABS_ROOT = PATHS.labsRoot;
 
 describe("pire live lab cli", () => {
-	test("inspects an audited run and reports shortcut-proof in json mode", async () => {
+	test("inspects an audited run and reports shortcut-proof in json mode with default RE safeguards", async () => {
 		const sessionDir = await mkdtemp(join(tmpdir(), "pire-live-cli-"));
 		const sessionPath = join(sessionDir, "session.jsonl");
 
@@ -73,8 +73,6 @@ describe("pire live lab cli", () => {
 				sessionDir,
 				"--log-path",
 				"runtime/vm/vm.log",
-				"--forbid",
-				"src/vm_bytecode_snapshot.c",
 				"--disclosure-marker",
 				"debug token disclosure:",
 				"--disclosure-marker",

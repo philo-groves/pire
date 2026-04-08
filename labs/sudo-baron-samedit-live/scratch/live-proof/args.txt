@@ -1,4 +1,4 @@
 sudoedit
-AA
-AA
-AA
+-s
+\
+A
