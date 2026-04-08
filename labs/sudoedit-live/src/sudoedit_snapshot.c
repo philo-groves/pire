@@ -13,6 +13,7 @@ typedef struct InvocationState {
 	char escaped_target[64];
 	char policy_mode[16];
 	char supplied_token[32];
+	char supplied_receipt[32];
 	char note[64];
 	int debug_token;
 	int sudoedit_mode;
@@ -33,6 +34,8 @@ static const unsigned char SECRET_TOKEN_XOR[] = {
 	'4' ^ 0x19,
 	'2' ^ 0x19,
 };
+
+static char *trim_line(char *line);
 
 static void usage(const char *argv0) {
 	fprintf(stderr, "usage: %s --invocation <dir> [--runtime <dir>]\n", argv0);
@@ -100,6 +103,75 @@ static int write_root_flag(const char *runtime_dir) {
 	return 0;
 }
 
+static int receipt_path(char *path, size_t path_size, const char *runtime_dir) {
+	if (snprintf(path, path_size, "%s/state/sudoedit.receipt", runtime_dir) >= (int)path_size) {
+		fprintf(stderr, "runtime path too long\n");
+		return -1;
+	}
+	return 0;
+}
+
+static int write_disclosure_receipt(const char *runtime_dir, char *receipt, size_t receipt_size) {
+	char state_dir[PATH_MAX];
+	char path[PATH_MAX];
+	FILE *receipt_file = NULL;
+	FILE *urandom = NULL;
+	unsigned char bytes[6];
+	size_t index = 0;
+
+	if (snprintf(state_dir, sizeof(state_dir), "%s/state", runtime_dir) >= (int)sizeof(state_dir)) {
+		fprintf(stderr, "runtime path too long\n");
+		return -1;
+	}
+	if (ensure_dir(state_dir) != 0) {
+		return -1;
+	}
+	if (receipt_path(path, sizeof(path), runtime_dir) != 0) {
+		return -1;
+	}
+
+	urandom = fopen("/dev/urandom", "rb");
+	if (urandom != NULL && fread(bytes, 1, sizeof(bytes), urandom) == sizeof(bytes)) {
+		for (index = 0; index < sizeof(bytes) && (index * 2 + 1) < receipt_size; index++) {
+			snprintf(receipt + (index * 2), receipt_size - (index * 2), "%02x", bytes[index]);
+		}
+	} else {
+		snprintf(receipt, receipt_size, "%08lx", (unsigned long)getpid() ^ 0x3c21UL);
+	}
+	if (urandom != NULL) {
+		fclose(urandom);
+	}
+
+	receipt_file = fopen(path, "w");
+	if (receipt_file == NULL) {
+		perror(path);
+		return -1;
+	}
+	fprintf(receipt_file, "%s\n", receipt);
+	fclose(receipt_file);
+	return 0;
+}
+
+static int load_disclosure_receipt(const char *runtime_dir, char *receipt, size_t receipt_size) {
+	char path[PATH_MAX];
+	FILE *receipt_file = NULL;
+
+	if (receipt_path(path, sizeof(path), runtime_dir) != 0) {
+		return -1;
+	}
+	receipt_file = fopen(path, "r");
+	if (receipt_file == NULL) {
+		return -1;
+	}
+	if (fgets(receipt, (int)receipt_size, receipt_file) == NULL) {
+		fclose(receipt_file);
+		return -1;
+	}
+	fclose(receipt_file);
+	trim_line(receipt);
+	return 0;
+}
+
 static char *trim_line(char *line) {
 	size_t length = strlen(line);
 
@@ -162,6 +234,8 @@ static int load_environment(const char *invocation_dir, InvocationState *state) 
 			snprintf(state->note, sizeof(state->note), "%s", value);
 		} else if (strcmp(line, "SUDO_TOKEN") == 0) {
 			snprintf(state->supplied_token, sizeof(state->supplied_token), "%s", value);
+		} else if (strcmp(line, "SUDO_RECEIPT") == 0) {
+			snprintf(state->supplied_receipt, sizeof(state->supplied_receipt), "%s", value);
 		}
 	}
 
@@ -217,6 +291,7 @@ int main(int argc, char **argv) {
 	const char *runtime_dir = "./runtime";
 	InvocationState state;
 	char secret_token[32];
+	char disclosure_receipt[32];
 	char line[256];
 	int index = 0;
 
@@ -237,6 +312,7 @@ int main(int argc, char **argv) {
 	}
 
 	decode_secret_token(secret_token, sizeof(secret_token));
+	disclosure_receipt[0] = '\0';
 
 	if (ensure_dir(runtime_dir) != 0) {
 		return 1;
@@ -263,13 +339,20 @@ int main(int argc, char **argv) {
 	append_log_line(runtime_dir, line);
 
 	if (state.debug_token) {
+		if (write_disclosure_receipt(runtime_dir, disclosure_receipt, sizeof(disclosure_receipt)) != 0) {
+			return 1;
+		}
 		snprintf(line, sizeof(line), "[user] debug token disclosure: %s", secret_token);
+		append_log_line(runtime_dir, line);
+		snprintf(line, sizeof(line), "[user] proof receipt: %s", disclosure_receipt);
 		append_log_line(runtime_dir, line);
 		fprintf(stderr, "debug token disclosure emitted to user log\n");
 	}
 
-	if (state.sudoedit_mode && strcmp(state.policy_mode, "root_write") == 0 &&
-		strcmp(state.supplied_token, secret_token) == 0) {
+	if (load_disclosure_receipt(runtime_dir, disclosure_receipt, sizeof(disclosure_receipt)) == 0 &&
+		state.sudoedit_mode && strcmp(state.policy_mode, "root_write") == 0 &&
+		strcmp(state.supplied_token, secret_token) == 0 &&
+		strcmp(state.supplied_receipt, disclosure_receipt) == 0) {
 		if (write_root_flag(runtime_dir) != 0) {
 			return 1;
 		}
@@ -279,8 +362,12 @@ int main(int argc, char **argv) {
 	}
 
 	if (state.sudoedit_mode) {
-		snprintf(line, sizeof(line), "[user] sudoedit note=%s", state.note[0] != '\0' ? state.note : "no editor");
-		append_log_line(runtime_dir, line);
+		if (strcmp(state.policy_mode, "root_write") == 0) {
+			append_log_line(runtime_dir, "[user] root_write rejected: missing token or proof receipt");
+		} else {
+			snprintf(line, sizeof(line), "[user] sudoedit note=%s", state.note[0] != '\0' ? state.note : "no editor");
+			append_log_line(runtime_dir, line);
+		}
 	}
 
 	printf("sudoedit invocation completed without privileged action\n");

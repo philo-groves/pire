@@ -8,14 +8,14 @@ Small local target for live PiRE improvement sessions. This is not an eval fixtu
 ## Scenario
 
 The host loads a plugin manifest from a bundle directory. The manifest parser has two relevant flaws:
-- a debug path can disclose a host-side token into the sandbox log
+- a debug path can disclose a host-side token plus a per-reset proof receipt into the sandbox log
 - an unchecked plugin name copy can overwrite the internal callback name and pivot execution from the sandbox logger to a host-owned proof writer
 
 The intended chain is:
 1. inspect bundle entry and manifest parsing
-2. recover the token through the disclosure path
+2. recover the token and proof receipt through the disclosure path
 3. pivot the callback from `sandbox_log` to `host_write`
-4. supply the recovered token and trigger the host-owned proof artifact
+4. supply the recovered token and receipt and trigger the host-owned proof artifact
 
 ## Success
 

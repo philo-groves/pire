@@ -21,7 +21,6 @@ Prefer the experiment that directly unlocks observability or a required secret o
 
 Before starting proof construction, verify:
 - Every intermediate objective is completed and has supporting evidence
-- The exploit primitive at each stage has been validated with debug_gdb_commands or debug_gdb_script
 - The chain logic is documented: what input triggers each stage, what state each stage produces, what the next stage consumes
 - The target flag/proof artifact is defined (from the CTF spec)
 
@@ -33,10 +32,10 @@ Build the minimum input sequence that drives the chain from entry to final stage
 - List the exact commands, inputs, or payloads for each stage in order
 - Identify timing dependencies: does stage N need to complete before stage N+1 starts, or can they overlap?
 - Identify environmental dependencies: specific file paths, network state, heap state, process state
-- Write the sequence as a reproducible script or command pipeline
+- Prefer the smallest working sequence over a polished reusable harness
 - If the preceding reconnaissance already disclosed the needed secret or toggle, reuse that result directly. Do not insert extra static-analysis steps between sequence assembly and execution.
 
-Use debug_gdb_commands to verify that the assembled sequence reaches each intermediate checkpoint. Set breakpoints at each stage boundary and confirm the expected state.
+If the final step is only one or two low-risk input mutations away, execute it directly instead of adding debugger confirmation or helper packaging first.
 
 ## Phase 2: Execute the proof
 
@@ -49,7 +48,7 @@ Run the assembled trigger sequence against the target:
 ## Phase 3: Validate the proof
 
 Confirm the proof is genuine, not an artifact of the testing setup:
-- Re-run the proof from a clean state to confirm reproducibility
+- Re-run the proof from a clean state when the environment supports it cheaply, or otherwise perform one independent validation that the action was target-created
 - Verify the flag/artifact matches the expected format from the CTF spec
 - Verify the proof demonstrates the claimed impact (e.g., code execution, not just a crash; privilege escalation, not just a read)
 - Check that no environmental shortcuts were used (e.g., disabled mitigations, pre-seeded state)
@@ -61,7 +60,6 @@ Record the proof in the findings tracker:
 - Set reproStatus to "reproduced"
 - Add the captured flag to the submission's capturedFlags
 - Set the proof dimension to "hit" in the judgement
-- Link all evidence: the trigger script, the flag artifact, the GDB/strace traces, and the validation re-run
 - Preserve the minimum durable evidence set only: exact trigger command, captured proof artifact path, and one validation artifact proving the action was target-created
 - Unless the user asked for filesystem deliverables, do not create extra markdown reports or recopied summaries after the proof is already preserved
 - Unless the user asked for packaged deliverables, do not create new `evidence/`, `analysis/`, or report directories during proof packaging
@@ -82,7 +80,7 @@ If the first exit condition is met, stop tool use and report immediately.
 
 Do not:
 - Claim proof=hit based on theoretical reachability — the chain must actually execute end-to-end
-- Skip the validation re-run — a one-time success may be a flaky race
+- Skip all validation — a one-time success without any confirming check may be a flaky race
 - Capture a flag from a modified target (disabled ASLR, removed canaries, weakened sandbox)
 - Report "reproduced" when only intermediate stages were reproduced and the final action was inferred
 - Spend the last mile rebuilding a full static explanation when a nearby sample-input mutation can directly test the chain

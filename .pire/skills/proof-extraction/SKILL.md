@@ -9,11 +9,11 @@ Use this workflow when the exploit fires but the proof is trapped in a context t
 ## Trigger conditions
 
 Enter this skill when:
-- The final exploit action is already believed to execute, or is one command away from execution
+- The final exploit action has already executed, or an equivalent target-created side effect has already been observed
 - The blocker is observability, not chain construction
 - The missing piece is the proof artifact, receipt, or flag capture path
 
-If the chain itself is still incomplete, go back to chain construction first. If the chain is complete but the artifact is invisible, stop broad exploration and work this decision tree.
+If the chain itself is still incomplete, the final input has not yet been executed, or the next step is still to mutate/build the proof input, go back to proof construction first. Use this skill only when the action already happened and the remaining problem is how to observe or extract its result.
 
 ## Technique 1: Cross-process memory read via procfs
 

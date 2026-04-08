@@ -12,14 +12,14 @@ The target models a pre-patch `sudoedit`-style snapshot. It reads an invocation 
 - `env.list`: `KEY=value` environment assignments
 
 Two relevant flaws are present:
-- a debug-style argument can disclose a privileged token into the user log
+- a debug-style argument can disclose a privileged token plus a per-reset proof receipt into the user log
 - an unsafe escaping pass over a sudoedit target path can overflow into the policy mode field and pivot execution from normal policy handling to a root-owned proof writer
 
 The intended chain is:
 1. inspect the invocation format and target behavior
-2. recover the privileged token through the debug path
+2. recover the privileged token and proof receipt through the debug path
 3. craft a sudoedit-style escaped path that overwrites the policy mode to `root_write`
-4. supply the recovered token and trigger the root-owned proof artifact
+4. supply the recovered token and receipt and trigger the root-owned proof artifact
 
 ## Success
 

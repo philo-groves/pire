@@ -13,6 +13,7 @@ typedef struct PluginContext {
 	char plugin_name[32];
 	char callback_name[16];
 	char supplied_token[16];
+	char supplied_receipt[32];
 	char note[64];
 } PluginContext;
 
@@ -31,6 +32,8 @@ static const unsigned char SECRET_TOKEN_XOR[] = {
 	'4' ^ 0x23,
 	'2' ^ 0x23,
 };
+
+static char *trim_line(char *line);
 
 static void usage(const char *argv0) {
 	fprintf(stderr, "usage: %s --bundle <dir> [--runtime <dir>]\n", argv0);
@@ -98,6 +101,75 @@ static int write_host_flag(const char *runtime_dir) {
 	return 0;
 }
 
+static int receipt_path(char *path, size_t path_size, const char *runtime_dir) {
+	if (snprintf(path, path_size, "%s/state/plugin.receipt", runtime_dir) >= (int)path_size) {
+		fprintf(stderr, "runtime path too long\n");
+		return -1;
+	}
+	return 0;
+}
+
+static int write_disclosure_receipt(const char *runtime_dir, char *receipt, size_t receipt_size) {
+	char state_dir[PATH_MAX];
+	char path[PATH_MAX];
+	FILE *receipt_file = NULL;
+	FILE *urandom = NULL;
+	unsigned char bytes[6];
+	size_t index = 0;
+
+	if (snprintf(state_dir, sizeof(state_dir), "%s/state", runtime_dir) >= (int)sizeof(state_dir)) {
+		fprintf(stderr, "runtime path too long\n");
+		return -1;
+	}
+	if (ensure_dir(state_dir) != 0) {
+		return -1;
+	}
+	if (receipt_path(path, sizeof(path), runtime_dir) != 0) {
+		return -1;
+	}
+
+	urandom = fopen("/dev/urandom", "rb");
+	if (urandom != NULL && fread(bytes, 1, sizeof(bytes), urandom) == sizeof(bytes)) {
+		for (index = 0; index < sizeof(bytes) && (index * 2 + 1) < receipt_size; index++) {
+			snprintf(receipt + (index * 2), receipt_size - (index * 2), "%02x", bytes[index]);
+		}
+	} else {
+		snprintf(receipt, receipt_size, "%08lx", (unsigned long)getpid() ^ 0x5a17UL);
+	}
+	if (urandom != NULL) {
+		fclose(urandom);
+	}
+
+	receipt_file = fopen(path, "w");
+	if (receipt_file == NULL) {
+		perror(path);
+		return -1;
+	}
+	fprintf(receipt_file, "%s\n", receipt);
+	fclose(receipt_file);
+	return 0;
+}
+
+static int load_disclosure_receipt(const char *runtime_dir, char *receipt, size_t receipt_size) {
+	char path[PATH_MAX];
+	FILE *receipt_file = NULL;
+
+	if (receipt_path(path, sizeof(path), runtime_dir) != 0) {
+		return -1;
+	}
+	receipt_file = fopen(path, "r");
+	if (receipt_file == NULL) {
+		return -1;
+	}
+	if (fgets(receipt, (int)receipt_size, receipt_file) == NULL) {
+		fclose(receipt_file);
+		return -1;
+	}
+	fclose(receipt_file);
+	trim_line(receipt);
+	return 0;
+}
+
 static char *trim_line(char *line) {
 	size_t length = strlen(line);
 
@@ -158,6 +230,8 @@ static int load_manifest(const char *bundle_dir, PluginContext *ctx, int *debug_
 			unsafe_copy(ctx->plugin_name, value);
 		} else if (strcmp(line, "token") == 0) {
 			snprintf(ctx->supplied_token, sizeof(ctx->supplied_token), "%s", value);
+		} else if (strcmp(line, "receipt") == 0) {
+			snprintf(ctx->supplied_receipt, sizeof(ctx->supplied_receipt), "%s", value);
 		} else if (strcmp(line, "debug_token") == 0) {
 			*debug_token = atoi(value) != 0;
 		} else if (strcmp(line, "note") == 0) {
@@ -174,6 +248,7 @@ int main(int argc, char **argv) {
 	const char *runtime_dir = "./runtime";
 	PluginContext ctx;
 	char secret_token[32];
+	char disclosure_receipt[32];
 	char line[256];
 	int debug_token = 0;
 	int index = 0;
@@ -195,6 +270,7 @@ int main(int argc, char **argv) {
 	}
 
 	decode_secret_token(secret_token, sizeof(secret_token));
+	disclosure_receipt[0] = '\0';
 
 	if (ensure_dir(runtime_dir) != 0) {
 		return 1;
@@ -221,12 +297,19 @@ int main(int argc, char **argv) {
 	append_log_line(runtime_dir, line);
 
 	if (debug_token) {
+		if (write_disclosure_receipt(runtime_dir, disclosure_receipt, sizeof(disclosure_receipt)) != 0) {
+			return 1;
+		}
 		snprintf(line, sizeof(line), "[sandbox] debug token disclosure: %s", secret_token);
+		append_log_line(runtime_dir, line);
+		snprintf(line, sizeof(line), "[sandbox] proof receipt: %s", disclosure_receipt);
 		append_log_line(runtime_dir, line);
 		fprintf(stderr, "debug token disclosure emitted to sandbox log\n");
 	}
 
-	if (strcmp(ctx.callback_name, "host_write") == 0 && strcmp(ctx.supplied_token, secret_token) == 0) {
+	if (load_disclosure_receipt(runtime_dir, disclosure_receipt, sizeof(disclosure_receipt)) == 0 &&
+		strcmp(ctx.callback_name, "host_write") == 0 && strcmp(ctx.supplied_token, secret_token) == 0 &&
+		strcmp(ctx.supplied_receipt, disclosure_receipt) == 0) {
 		if (write_host_flag(runtime_dir) != 0) {
 			return 1;
 		}
@@ -238,6 +321,8 @@ int main(int argc, char **argv) {
 	if (strcmp(ctx.callback_name, "sandbox_log") == 0) {
 		snprintf(line, sizeof(line), "[sandbox] note=%s", ctx.note[0] != '\0' ? ctx.note : "no note");
 		append_log_line(runtime_dir, line);
+	} else if (strcmp(ctx.callback_name, "host_write") == 0) {
+		append_log_line(runtime_dir, "[host] host_write rejected: missing token or proof receipt");
 	} else {
 		snprintf(line, sizeof(line), "[host] unknown callback requested: %s", ctx.callback_name);
 		append_log_line(runtime_dir, line);

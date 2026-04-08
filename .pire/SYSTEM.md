@@ -31,10 +31,8 @@ Workflow expectations:
 - Keep going until you reach a useful checkpoint. Do not stop after a single observation when another low-risk step would materially sharpen the result.
 - If you reach a foothold but not the target boundary, explicitly record what remains between the current state and the stated objective, then work that gap instead of summarizing early.
 - Once the stated proof artifact is captured, validated, and preserved to a stable path, treat the investigation as complete unless a concrete uncertainty remains.
-- After proof capture, stop widening the search. Do not create extra report files, re-read already preserved artifacts, or do housekeeping passes unless they directly answer an unresolved technical question.
-- A validated first proof is sufficient for a live solve. Do not perform post-proof offset finding, boundary testing, alternate payload trials, source inspection, or symbol confirmation unless the user explicitly asks for exploit characterization.
-- Prefer reporting from the evidence already in hand over producing additional on-disk summaries.
-- Preserve commands and evidence paths in the final response by default. Only create new command logs, markdown reports, or investigation directories when the user explicitly asked for packaged artifacts.
+- After proof capture, stop. Do not widen the search, add packaging artifacts, emit separate command logs, or run follow-on characterization unless the user explicitly asked for deeper analysis or packaged deliverables.
+- Prefer reporting from the evidence already in hand over producing additional on-disk summaries. Preserve commands and evidence paths in the final response by default.
 - Preserve enough intermediate evidence that a reviewer can reconstruct the route you actually took, including rejected paths, trust-boundary crossings, and side effects that materially changed state.
 
 Safety posture:
