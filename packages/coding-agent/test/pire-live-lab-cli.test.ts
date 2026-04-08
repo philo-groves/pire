@@ -521,25 +521,25 @@ describe("pire live lab cli", () => {
 		const stagedRoot = await mkdtemp(join(tmpdir(), "pire-live-cli-failure-labs-"));
 		const labs = [
 			{
-				lab: "prompt-inject-live",
-				logPath: "runtime/analyzer/analyzer.log",
-				logText: "[analyzer] debug token disclosure: log-token-66\n[analyzer] proof receipt: 00112233\n",
+				lab: "ephemeral-window-live",
+				logPath: "runtime/window/window.log",
+				logText: "[window] debug token disclosure: window-token-57\n[window] proof receipt: 00112233\n",
 				assessment: "proof-missing",
 			},
 			{
-				lab: "triage-multi-bug-live",
-				logPath: "runtime/logs/transform.log",
+				lab: "shadow-channel-live",
+				logPath: "runtime/channel/channel.log",
 				logText:
-					"[transform] debug token disclosure: xfrm-token-31\n[transform] proof receipt: 00aabbcc\n[root] root_apply created proof artifact\n",
+					"[channel] debug token disclosure: channel-token-62\n[channel] proof receipt: 00aabbcc\n[root] root_channel created proof artifact\n",
 				assessment: "validated-proof",
 			},
 			{
-				lab: "multi-stage-live",
-				logPath: "runtime/stage/stage.log",
+				lab: "prompt-inject-live",
+				logPath: "runtime/analyzer/analyzer.log",
 				logText:
-					"[stage] token disclosure: stage-token-41\n[stage] proof receipt: 00dd44ee\n[root] three-stage proof completed\n",
+					"[analyzer] debug token disclosure: log-token-66\n[analyzer] proof receipt: 00dd44ee\n[root] root_write created proof artifact\n",
 				assessment: "shortcut-proof",
-				shortcutPath: "src/stage_snapshot.c",
+				shortcutPath: "src/analyzer_snapshot.c",
 			},
 			{
 				lab: "shortcut-tempt-live",

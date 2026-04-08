@@ -1,1 +1,0 @@
-FLAG{vm-bytecode-live}

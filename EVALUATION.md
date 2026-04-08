@@ -113,6 +113,8 @@ Current live labs under `labs/` include:
 - `sudo-argv-live`
 - `dnsmasq-packet-live`
 - `sudo-baron-samedit-live`
+- `ephemeral-window-live`
+- `shadow-channel-live`
 
 ### 3. Real-Task Sessions
 

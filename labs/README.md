@@ -40,6 +40,8 @@ Current labs:
 - `sudo-argv-live`: argv/env RE lab focused on local privilege-boundary state recovery, escape shaping, and hidden response derivation
 - `dnsmasq-packet-live`: packet-format RE lab focused on header decoding, payload-state recovery, and computed proof activation
 - `sudo-baron-samedit-live`: historical sudo v1.9.5p1 RE lab focused on pre-fix flag-state recovery, vulnerable argument unescaping, and disclosure-to-proof staging
+- `ephemeral-window-live`: brittle-state lab focused on one-shot disclosure windows, burn-on-bad-proof invalidation, and response carryover discipline
+- `shadow-channel-live`: brittle-branch lab focused on decoy disclosure branches, channel selection, and proof-state invalidation after wrong-branch commitment
 
 Recommended workflow:
 1. `cd` into the lab directory
