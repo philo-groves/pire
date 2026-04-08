@@ -15,10 +15,10 @@ describe("pire binary RE eval corpus", () => {
 				(task) => task.lane === "reverse-engineering" || task.lane === "chain" || task.lane === "scenario",
 			),
 		).toBe(true);
-		expect(summary.totalTasks).toBeGreaterThanOrEqual(24);
+		expect(summary.totalTasks).toBeGreaterThanOrEqual(27);
 		expect(summary.reverseEngineeringTasks).toBeGreaterThan(0);
 		expect(summary.chainTasks).toBeGreaterThanOrEqual(3);
-		expect(summary.scenarioTasks).toBeGreaterThanOrEqual(6);
+		expect(summary.scenarioTasks).toBeGreaterThanOrEqual(9);
 		expect(summary.byBugClass.uaf).toBeGreaterThan(0);
 		expect(summary.byBugClass["heap-overflow"]).toBeGreaterThan(0);
 		expect(summary.byBugClass["oob-read"]).toBeGreaterThan(0);
@@ -33,12 +33,13 @@ describe("pire binary RE eval corpus", () => {
 		expect(summary.exploitabilityTargets.chain).toBeGreaterThanOrEqual(5);
 		expect(summary.exploitabilityTargets.dos).toBeGreaterThan(0);
 		expect(summary.sophisticatedChainTasks).toBeGreaterThanOrEqual(5);
-		expect(summary.endToEndScenarioTasks).toBeGreaterThanOrEqual(6);
+		expect(summary.endToEndScenarioTasks).toBeGreaterThanOrEqual(9);
 		expect(summary.maxRequiredBugChainLength).toBeGreaterThanOrEqual(6);
-		expect(corpus.filter((task) => task.lane === "scenario" && (task.requiredBugChainLength ?? 0) >= 5)).toHaveLength(
-			3,
-		);
+		expect(
+			corpus.filter((task) => task.lane === "scenario" && (task.requiredBugChainLength ?? 0) >= 5).length,
+		).toBeGreaterThanOrEqual(4);
 		expect(summary.byBugClass["double-free"]).toBeGreaterThanOrEqual(2);
+		expect(summary.byBugClass["logic-error"]).toBeGreaterThanOrEqual(2);
 		expect(summary.byFocus["crash-triage"]).toBeGreaterThanOrEqual(2);
 		expect(summary.byFocus["primitive-extraction"]).toBeGreaterThanOrEqual(2);
 	});

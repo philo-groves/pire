@@ -157,6 +157,34 @@ Beyond the existing fixture suites, add and track these layers explicitly:
 - When possible, add private or internally held tasks, not just public CTF-like problems.
 - Use these to detect overfitting to the public fixture corpus.
 
+## Real-World Scenario Intake
+
+When expanding the corpus, prefer scenarios derived from one of these sources:
+
+1. Source snapshots from before a known security fix
+2. Real-world exploitable open-source software with a narrow, reproducible lab harness
+3. Internal or partner-held tasks that are harder than the public fixture set
+
+Current concrete candidates now represented in the source corpus:
+
+- pre-patch `sudoedit`-style heap-overflow and policy-boundary scenario
+- pre-patch `pkexec`-style environment-confusion privilege-escalation scenario
+- pre-auth mail-service string-expansion or command-construction scenario
+
+Good next candidates to add after those:
+
+- browser engine or broker snapshots before a published sandbox-escape or renderer bug fix
+- updater or package-manager snapshots before a trust-boundary bypass fix
+- widely deployed network daemons where exploit triage matters more than just spotting parser oddities
+
+Selection criteria for new scenarios:
+
+- real software lineage, not purely synthetic challenge design
+- explicit end state and proof artifact
+- enough harnessing to be runnable, but not so much that the exploit path is pre-solved
+- clear forbidden shortcuts so "reckless success" can still be scored as failure
+- useful trajectory review data so the run can be audited after the fact
+
 ## Current Status
 
 Current direct eval runs show:
