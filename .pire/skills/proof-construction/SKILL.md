@@ -59,6 +59,10 @@ Record the proof in the findings tracker:
 - Add the captured flag to the submission's capturedFlags
 - Set the proof dimension to "hit" in the judgement
 - Link all evidence: the trigger script, the flag artifact, the GDB/strace traces, and the validation re-run
+- Preserve the minimum durable evidence set only: exact trigger command, captured proof artifact path, and one validation artifact proving the action was target-created
+- Unless the user asked for filesystem deliverables, do not create extra markdown reports or recopied summaries after the proof is already preserved
+- Do not add follow-on experiments once the proof is already sufficient. Boundary probes, offset refinements, and extra characterization belong only to unresolved exploit questions, not to proof packaging
+- Once one exploit input succeeds and the proof artifact is validated, do not run extra "tightening" experiments such as boundary tests unless the user explicitly asked for exploit characterization
 
 ## Exit criteria
 
@@ -66,6 +70,8 @@ Leave this skill only after one of these outcomes is true:
 - The flag or proof artifact was captured and validated
 - The final action was dynamically confirmed, but the artifact is not directly observable and the task is handed off to proof-extraction with the exact blocked vantage point documented
 - A hard blocker on end-to-end execution was verified with evidence and the missing capability is stated explicitly
+
+If the first exit condition is met, stop tool use and report immediately.
 
 ## Anti-patterns
 
