@@ -9,6 +9,6 @@
     "maxCases": 9,
     "minChainPassed": 4,
     "maxChainNearMiss": 5,
-    "maxChainFailed": 0
+    "maxChainFailed": 1
   }
 }

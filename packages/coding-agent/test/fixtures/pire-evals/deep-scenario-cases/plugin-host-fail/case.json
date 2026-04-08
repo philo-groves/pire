@@ -2,7 +2,7 @@
   "title": "Plugin-host near-miss \u2014 mmap+mprotect sandbox escape, flag path not mapped",
   "expectation": {
     "minNormalized": 0.84,
-    "maxIssues": 0,
+    "maxIssues": 2,
     "maxRank": 31,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,

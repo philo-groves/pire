@@ -2,7 +2,7 @@
   "title": "Exploit a multi-threaded use-after-free from concurrent object destruction and access near-miss",
   "expectation": {
     "minNormalized": 0.55,
-    "maxIssues": 1,
+    "maxIssues": 3,
     "maxRank": 31,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,

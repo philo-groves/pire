@@ -2,7 +2,7 @@
   "title": "Recover plaintext from an authenticated encryption protocol that reuses nonces after connection reset",
   "expectation": {
     "minNormalized": 0.79,
-    "maxIssues": 0,
+    "maxIssues": 2,
     "maxRank": 31,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,

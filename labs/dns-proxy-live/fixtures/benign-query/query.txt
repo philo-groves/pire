@@ -1,0 +1,2 @@
+AUTH user
+QUERY example.com

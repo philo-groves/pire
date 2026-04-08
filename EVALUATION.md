@@ -90,6 +90,9 @@ Current live labs under `labs/` include:
 - `print-spool-live`
 - `renderer-escape-live`
 - `helper-privesc-live`
+- `log-rotate-live`
+- `dns-proxy-live`
+- `image-decoder-live`
 
 ### 3. Real-Task Sessions
 

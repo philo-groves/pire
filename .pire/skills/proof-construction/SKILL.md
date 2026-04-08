@@ -67,11 +67,13 @@ Record the proof in the active task system:
 ## Exit criteria
 
 Leave this skill only after one of these outcomes is true:
-- The flag or proof artifact was captured and validated
+- The flag or proof artifact was captured and validated — include the literal flag value in your submission's capturedFlags array
 - The final action was dynamically confirmed, but the artifact is not directly observable and the task is handed off to proof-extraction with the exact blocked vantage point documented
 - A hard blocker on end-to-end execution was verified with evidence and the missing capability is stated explicitly
 
 If the first exit condition is met, stop tool use and report immediately.
+
+Critical: claiming exploitability="chain" or "rce" without a captured flag is the most penalized outcome in the scorer. A near-miss with captured proof scores higher than a "complete" analysis without it. When in doubt, run the proof attempt — a failed attempt with evidence is better than no attempt at all.
 
 ## Anti-patterns
 
