@@ -1,8 +1,8 @@
 {
-  "title": "Signal handler race near-miss — double-free and heap reuse confirmed, callback NULL reset blocks redirect",
+  "title": "Signal handler race near-miss — all objectives via log_rotate_cb redirect, flag path not fully controlled",
   "expectation": {
-    "minNormalized": 0.58,
-    "maxIssues": 1,
+    "minNormalized": 0.84,
+    "maxIssues": 0,
     "maxRank": 20,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,

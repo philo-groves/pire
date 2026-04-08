@@ -1,8 +1,8 @@
 {
-  "title": "Plugin-host near-miss — vtable recovered via dispatch tracing, sandbox escape blocked by seccomp",
+  "title": "Plugin-host near-miss — mmap+mprotect sandbox escape, flag path not mapped",
   "expectation": {
-    "minNormalized": 0.62,
-    "maxIssues": 1,
+    "minNormalized": 0.84,
+    "maxIssues": 0,
     "maxRank": 20,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,

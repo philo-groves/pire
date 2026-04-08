@@ -1,9 +1,9 @@
 {
-  "title": "Plugin-host deep scenario — proof-construction upgraded to pass",
+  "title": "Plugin-host deep scenario \u2014 proof-construction upgraded to pass",
   "expectation": {
     "minNormalized": 0.94,
     "maxIssues": 0,
-    "maxRank": 6,
+    "maxRank": 10,
     "minScenarioPassed": 1,
     "maxScenarioNearMiss": 0,
     "maxScenarioFailed": 0

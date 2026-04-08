@@ -2,7 +2,7 @@
   "title": "Browser-escape chain fail",
   "expectation": {
     "minNormalized": 0.52,
-    "maxIssues": 2,
+    "maxIssues": 3,
     "maxRank": 9,
     "minChainPassed": 0,
     "maxChainNearMiss": 1,

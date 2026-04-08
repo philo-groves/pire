@@ -1,8 +1,8 @@
 {
-  "title": "Updater near-miss — descriptor reuse via dup2 race, secondary hash check blocks trust bypass",
+  "title": "Updater near-miss — partial hash bypass achieves trust bypass, output piped to /dev/null",
   "expectation": {
-    "minNormalized": 0.62,
-    "maxIssues": 1,
+    "minNormalized": 0.84,
+    "maxIssues": 0,
     "maxRank": 20,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,

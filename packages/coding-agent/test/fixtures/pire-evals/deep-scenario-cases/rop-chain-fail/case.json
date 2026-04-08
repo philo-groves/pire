@@ -1,8 +1,8 @@
 {
-  "title": "ROP chain near-miss — exploit-pivot found data-only path but .so search path blocks delivery",
+  "title": "ROP chain near-miss — symlink redirect achieves dlopen, JIT page still randomized",
   "expectation": {
-    "minNormalized": 0.59,
-    "maxIssues": 2,
+    "minNormalized": 0.67,
+    "maxIssues": 0,
     "maxRank": 20,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,

@@ -1,8 +1,8 @@
 {
-  "title": "Broker near-miss — write primitive and reuse pivot achieved, seccomp blocks broker escape",
+  "title": "Broker near-miss — memfd+fexecve bypasses seccomp, kernel interface still unreachable",
   "expectation": {
-    "minNormalized": 0.64,
-    "maxIssues": 1,
+    "minNormalized": 0.67,
+    "maxIssues": 0,
     "maxRank": 20,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,

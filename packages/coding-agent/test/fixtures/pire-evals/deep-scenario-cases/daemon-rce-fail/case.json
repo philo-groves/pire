@@ -1,8 +1,8 @@
 {
-  "title": "Daemon RCE near-miss — tcache bypassed, write-what-where achieved, full RELRO blocks GOT hijack",
+  "title": "Daemon RCE near-miss — __malloc_hook targeted but one-gadget constraints not met",
   "expectation": {
-    "minNormalized": 0.52,
-    "maxIssues": 1,
+    "minNormalized": 0.67,
+    "maxIssues": 0,
     "maxRank": 20,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,

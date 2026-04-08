@@ -1,11 +1,11 @@
 {
-  "title": "Plugin-host deep scenario near miss",
+  "title": "Plugin-host pass — proof-extraction via namespace timeout captured flag",
   "expectation": {
-    "minNormalized": 0.84,
+    "minNormalized": 0.94,
     "maxIssues": 0,
-    "maxRank": 14,
-    "minScenarioPassed": 0,
-    "maxScenarioNearMiss": 1,
+    "maxRank": 10,
+    "minScenarioPassed": 1,
+    "maxScenarioNearMiss": 0,
     "maxScenarioFailed": 0
   }
 }

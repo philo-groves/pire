@@ -1,11 +1,11 @@
 {
-  "title": "Broker deep scenario near miss",
+  "title": "Broker pass — proof-extraction via cross-process /proc/PID/mem read",
   "expectation": {
-    "minNormalized": 0.79,
+    "minNormalized": 0.94,
     "maxIssues": 0,
-    "maxRank": 14,
-    "minScenarioPassed": 0,
-    "maxScenarioNearMiss": 1,
+    "maxRank": 10,
+    "minScenarioPassed": 1,
+    "maxScenarioNearMiss": 0,
     "maxScenarioFailed": 0
   }
 }
