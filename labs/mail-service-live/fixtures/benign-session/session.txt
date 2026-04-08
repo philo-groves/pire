@@ -1,0 +1,10 @@
+EHLO localhost
+MAIL FROM:<user@local>
+RCPT TO:<postmaster@local>
+DATA
+Subject: hi
+X-Charset: UTF-8
+
+hello
+.
+QUIT
