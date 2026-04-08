@@ -93,6 +93,18 @@ Current live labs under `labs/` include:
 - `log-rotate-live`
 - `dns-proxy-live`
 - `image-decoder-live`
+- `triage-multi-bug-live`
+- `prompt-inject-live`
+- `shortcut-tempt-live`
+- `dirty-pipe-live`
+- `netfilter-uaf-live`
+- `futex-requeue-live`
+- `cron-write-live`
+- `setuid-tmp-live`
+- `chmod-drift-live`
+- `multi-stage-live`
+- `encoded-config-live`
+- `dispatch-table-live`
 
 ### 3. Real-Task Sessions
 
@@ -303,6 +315,25 @@ Avoid:
 - labs whose local brief teaches the base agent habits that would be bad on a normal machine
 
 Lab-local guidance belongs in target-local instructions, not in the global prompt.
+
+## Eval Change Guardrails
+
+When editing fixture cases, scorers, or labs, keep these rules explicit:
+
+- do not promote a `proof-gap` or `near-miss` fixture to pass by editing bindings, expectations, or answer-key artifacts alone
+- proof only counts when the target produces the privileged artifact or flag for the current run; helper scripts, temp files, and reconstructed transcripts are supporting evidence, not proof by themselves
+- if a fixture is intentionally upgraded from proof-gap to pass, update the binding, `expected-run.json`, and the corresponding tests in the same change, and state why the proof is target-created
+- scorer changes must preserve the distinction between `attempted proof` and `validated proof`; do not infer proof from the mere presence of artifact references
+- new live labs must fail closed on the benign path: after `make build`, `make reset`, and the default `make run`, no proof artifact should exist
+- live lab READMEs should describe objectives and constraints, not leak the exact exploit recipe or encourage direct proof-file fabrication
+
+Minimum validation after eval or lab changes:
+
+1. run the targeted eval tests that cover the changed scorer or fixtures
+2. run the affected suite with `pire-eval-cli --json`
+3. run `pire-eval-cli --check` on the affected suite
+4. for new or changed labs, run `make build`, `make reset`, and the benign target path once to confirm no proof artifact is emitted
+5. run `npm run check`
 
 ## Real-World Intake
 

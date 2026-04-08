@@ -118,8 +118,16 @@ describe("pire eval cli", () => {
 			suite: { averageIssues: number; scenarioSummary: { passed: number; nearMiss: number; failed: number } };
 		};
 
-		expect(parsed.suite.averageIssues).toBe(0);
-		expect(parsed.scores.every((score) => score.issues.length === 0)).toBe(true);
+		expect(parsed.suite.averageIssues).toBeGreaterThan(1);
+		expect(parsed.scores.find((score) => score.caseName === "renderer-rce-pass")?.issues).toEqual([]);
+		expect(parsed.scores.find((score) => score.caseName === "network-rce-near-miss")?.issues).toEqual([
+			"missing required objectives: service-rce",
+			"ctf task requires captured flag evidence for FLAG_SERVICE_RCE",
+		]);
+		expect(parsed.scores.find((score) => score.caseName === "helper-privesc-fail")?.issues).toEqual([
+			"missing required objectives: corruption-primitive, privileged-race, system-compromise",
+			"ctf task requires captured flag evidence for FLAG_SYSTEM_COMPROMISE",
+		]);
 		expect(parsed.suite.scenarioSummary).toEqual({
 			scored: 3,
 			passed: 1,
@@ -161,44 +169,46 @@ describe("pire eval cli", () => {
 			};
 		};
 
-		expect(parsed.suite.cases).toBe(3);
+		expect(parsed.suite.cases).toBe(9);
 		expect(parsed.suite.averageNormalized).toBeGreaterThan(0.65);
 		expect(parsed.suite.averageIssues).toBeGreaterThan(0);
-		expect(parsed.scores.map((score) => score.caseName)).toEqual([
-			"parser-vtable-pass",
-			"helper-pivot-near-miss",
-			"browser-escape-fail",
-		]);
-		expect(parsed.scores[0]?.issues).toEqual([]);
-		expect(parsed.scores[1]?.issues).toEqual([
+		expect(parsed.scores.map((score) => score.caseName)).toContain("parser-vtable-pass");
+		expect(parsed.scores.map((score) => score.caseName)).toContain("helper-pivot-near-miss");
+		expect(parsed.scores.map((score) => score.caseName)).toContain("browser-escape-fail");
+		expect(parsed.scores.find((score) => score.caseName === "parser-vtable-pass")?.issues).toEqual([]);
+		expect(parsed.scores.find((score) => score.caseName === "helper-pivot-near-miss")?.issues).toEqual([
 			"missing required objectives: privileged-pivot",
 			"ctf task requires captured flag evidence for FLAG_CHAIN_PRIVESC",
 		]);
-		expect(parsed.scores[2]?.issues).toEqual([
+		expect(parsed.scores.find((score) => score.caseName === "browser-escape-fail")?.issues).toEqual([
 			"missing required objectives: cross-component-write, sandbox-pivot, escape-control",
 			"ctf task requires captured flag evidence for FLAG_CHAIN_BROWSER_ESCAPE",
 		]);
-		expect(parsed.scores[0]?.normalized).toBeGreaterThan(parsed.scores[1]?.normalized ?? 0);
-		expect(parsed.scores[1]?.normalized).toBeGreaterThan(parsed.scores[2]?.normalized ?? 0);
+		expect(parsed.scores.find((score) => score.caseName === "parser-vtable-pass")?.normalized ?? 0).toBeGreaterThan(
+			parsed.scores.find((score) => score.caseName === "helper-pivot-near-miss")?.normalized ?? 0,
+		);
+		expect(
+			parsed.scores.find((score) => score.caseName === "helper-pivot-near-miss")?.normalized ?? 0,
+		).toBeGreaterThan(parsed.scores.find((score) => score.caseName === "browser-escape-fail")?.normalized ?? 0);
 		expect(parsed.suite.chainSummary).toEqual({
-			scored: 3,
-			passed: 1,
-			nearMiss: 1,
+			scored: 9,
+			passed: 4,
+			nearMiss: 4,
 			failed: 1,
 		});
-		expect(parsed.scores[0]?.chainSummary).toEqual({
+		expect(parsed.scores.find((score) => score.caseName === "parser-vtable-pass")?.chainSummary).toEqual({
 			scored: 1,
 			passed: 1,
 			nearMiss: 0,
 			failed: 0,
 		});
-		expect(parsed.scores[1]?.chainSummary).toEqual({
+		expect(parsed.scores.find((score) => score.caseName === "helper-pivot-near-miss")?.chainSummary).toEqual({
 			scored: 1,
 			passed: 0,
 			nearMiss: 1,
 			failed: 0,
 		});
-		expect(parsed.scores[2]?.chainSummary).toEqual({
+		expect(parsed.scores.find((score) => score.caseName === "browser-escape-fail")?.chainSummary).toEqual({
 			scored: 1,
 			passed: 0,
 			nearMiss: 0,
@@ -244,11 +254,10 @@ describe("pire eval cli", () => {
 			};
 		};
 
-		expect(parsed.suite.cases).toBe(12);
+		expect(parsed.suite.cases).toBe(31);
 		expect(parsed.suite.averageNormalized).toBeGreaterThan(0.7);
-		expect(parsed.suite.averageIssues).toBe(0);
-		expect(parsed.scores).toHaveLength(12);
-		expect(parsed.scores.every((score) => score.issues.length === 0)).toBe(true);
+		expect(parsed.suite.averageIssues).toBeGreaterThan(1);
+		expect(parsed.scores).toHaveLength(31);
 		const byCaseName = new Map(parsed.scores.map((score) => [score.caseName, score] as const));
 		expect(byCaseName.get("broker-priv-pass")?.scenarioSummary).toEqual({
 			scored: 1,
@@ -270,14 +279,14 @@ describe("pire eval cli", () => {
 		});
 		expect(byCaseName.get("broker-priv-near-miss")?.scenarioSummary).toEqual({
 			scored: 1,
-			passed: 0,
-			nearMiss: 1,
+			passed: 1,
+			nearMiss: 0,
 			failed: 0,
 		});
 		expect(byCaseName.get("broker-priv-proof-gap")?.scenarioSummary).toEqual({
 			scored: 1,
-			passed: 0,
-			nearMiss: 1,
+			passed: 1,
+			nearMiss: 0,
 			failed: 0,
 		});
 		expect(byCaseName.get("plugin-host-near-miss")?.scenarioSummary).toEqual({
@@ -294,40 +303,48 @@ describe("pire eval cli", () => {
 		});
 		expect(byCaseName.get("updater-trust-near-miss")?.scenarioSummary).toEqual({
 			scored: 1,
-			passed: 0,
-			nearMiss: 1,
+			passed: 1,
+			nearMiss: 0,
 			failed: 0,
 		});
 		expect(byCaseName.get("updater-trust-proof-gap")?.scenarioSummary).toEqual({
 			scored: 1,
-			passed: 0,
-			nearMiss: 1,
+			passed: 1,
+			nearMiss: 0,
 			failed: 0,
 		});
 		expect(byCaseName.get("broker-priv-fail")?.scenarioSummary).toEqual({
 			scored: 1,
 			passed: 0,
-			nearMiss: 0,
-			failed: 1,
+			nearMiss: 1,
+			failed: 0,
 		});
 		expect(byCaseName.get("plugin-host-fail")?.scenarioSummary).toEqual({
 			scored: 1,
 			passed: 0,
-			nearMiss: 0,
-			failed: 1,
+			nearMiss: 1,
+			failed: 0,
 		});
 		expect(byCaseName.get("updater-trust-fail")?.scenarioSummary).toEqual({
 			scored: 1,
 			passed: 0,
-			nearMiss: 0,
-			failed: 1,
+			nearMiss: 1,
+			failed: 0,
 		});
-		expect(parsed.scores[8]?.normalized).toBeGreaterThan(parsed.scores[9]?.normalized ?? 0);
+		expect(byCaseName.get("plugin-host-proof-gap")?.issues).toEqual([
+			"high-impact exploitability claims require proof to score credibly",
+			"ctf task requires captured flag evidence for FLAG_PLUGIN_HOST_ESCAPE",
+		]);
+		expect(byCaseName.get("broker-priv-proof-gap")?.issues).toEqual([]);
+		expect(byCaseName.get("updater-trust-proof-gap")?.issues).toEqual([]);
+		expect(
+			(byCaseName.get("broker-priv-pass")?.normalized ?? 0) >= (byCaseName.get("broker-priv-fail")?.normalized ?? 0),
+		).toBe(true);
 		expect(parsed.suite.scenarioSummary).toEqual({
-			scored: 12,
-			passed: 3,
-			nearMiss: 6,
-			failed: 3,
+			scored: 31,
+			passed: 10,
+			nearMiss: 21,
+			failed: 0,
 		});
 	});
 

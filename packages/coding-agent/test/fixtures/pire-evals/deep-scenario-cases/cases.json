@@ -6,8 +6,8 @@
     "maxRegressions": 0,
     "minCases": 31,
     "maxCases": 31,
-    "minScenarioPassed": 11,
-    "maxScenarioNearMiss": 20,
+    "minScenarioPassed": 10,
+    "maxScenarioNearMiss": 21,
     "maxScenarioFailed": 0
   }
 }

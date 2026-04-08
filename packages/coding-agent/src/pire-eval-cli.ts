@@ -14,6 +14,8 @@ interface PireEvalCliArgs {
 	baselinePath?: string;
 	baselines: PireEvalBaselineInput[];
 	checkExpectedRuns?: boolean;
+	checkExpectations?: boolean;
+	fixExpectations?: boolean;
 	enforce?: boolean;
 	json?: boolean;
 	reportPath?: string;
@@ -361,6 +363,8 @@ Options:
   --cases-dir <path>  Directory containing case subdirectories with bindings.json and .pire state
   --baseline <arg>    Prior JSON report from pire-evals for score deltas; use @name or name=@name for stored baselines
   --check-expected-runs Verify each case's extracted run against expected-run.json when present
+  --check              Score all cases and report where expectations are stale (expectation-drift detection)
+  --fix                Like --check, but auto-update case.json expectations to match current scores
   --promote-baseline <name> Promote current JSON result to .pire/session/evals/baselines/<name>.json only if regressions=0
   --promote-report <name> Promote current report set to .pire/session/evals/reports/<name>.{json,md} only if regressions=0
   --save-baseline <name> Save current JSON result to .pire/session/evals/baselines/<name>.json
@@ -411,6 +415,11 @@ function parseArgs(argv: string[]): PireEvalCliArgs {
 			args.saveReportNames.push(argv[++index]);
 		} else if (arg === "--check-expected-runs") {
 			args.checkExpectedRuns = true;
+		} else if (arg === "--check") {
+			args.checkExpectations = true;
+		} else if (arg === "--fix") {
+			args.checkExpectations = true;
+			args.fixExpectations = true;
 		} else if (arg === "--enforce") {
 			args.enforce = true;
 		} else if (arg === "--json") {
@@ -1228,6 +1237,120 @@ async function collectCaseScores(
 	};
 }
 
+interface ExpectationDrift {
+	caseName: string;
+	field: string;
+	expected: number;
+	actual: number;
+}
+
+function detectExpectationDrift(scores: PireEvalCaseScore[]): ExpectationDrift[] {
+	const drifts: ExpectationDrift[] = [];
+	for (const score of scores) {
+		const expectation = score.expectation;
+		if (!expectation) {
+			continue;
+		}
+		if (expectation.minNormalized !== undefined && score.normalized < expectation.minNormalized) {
+			drifts.push({
+				caseName: score.caseName,
+				field: "minNormalized",
+				expected: expectation.minNormalized,
+				actual: score.normalized,
+			});
+		}
+		if (expectation.maxIssues !== undefined && score.issues.length > expectation.maxIssues) {
+			drifts.push({
+				caseName: score.caseName,
+				field: "maxIssues",
+				expected: expectation.maxIssues,
+				actual: score.issues.length,
+			});
+		}
+		if (expectation.maxChainFailed !== undefined && score.chainSummary.failed > expectation.maxChainFailed) {
+			drifts.push({
+				caseName: score.caseName,
+				field: "maxChainFailed",
+				expected: expectation.maxChainFailed,
+				actual: score.chainSummary.failed,
+			});
+		}
+		if (expectation.maxScenarioFailed !== undefined && score.scenarioSummary.failed > expectation.maxScenarioFailed) {
+			drifts.push({
+				caseName: score.caseName,
+				field: "maxScenarioFailed",
+				expected: expectation.maxScenarioFailed,
+				actual: score.scenarioSummary.failed,
+			});
+		}
+		if (expectation.minChainPassed !== undefined && score.chainSummary.passed < expectation.minChainPassed) {
+			drifts.push({
+				caseName: score.caseName,
+				field: "minChainPassed",
+				expected: expectation.minChainPassed,
+				actual: score.chainSummary.passed,
+			});
+		}
+		if (expectation.minScenarioPassed !== undefined && score.scenarioSummary.passed < expectation.minScenarioPassed) {
+			drifts.push({
+				caseName: score.caseName,
+				field: "minScenarioPassed",
+				expected: expectation.minScenarioPassed,
+				actual: score.scenarioSummary.passed,
+			});
+		}
+		if (expectation.maxChainNearMiss !== undefined && score.chainSummary.nearMiss > expectation.maxChainNearMiss) {
+			drifts.push({
+				caseName: score.caseName,
+				field: "maxChainNearMiss",
+				expected: expectation.maxChainNearMiss,
+				actual: score.chainSummary.nearMiss,
+			});
+		}
+		if (
+			expectation.maxScenarioNearMiss !== undefined &&
+			score.scenarioSummary.nearMiss > expectation.maxScenarioNearMiss
+		) {
+			drifts.push({
+				caseName: score.caseName,
+				field: "maxScenarioNearMiss",
+				expected: expectation.maxScenarioNearMiss,
+				actual: score.scenarioSummary.nearMiss,
+			});
+		}
+	}
+	return drifts;
+}
+
+async function fixExpectationDrift(casesDir: string, drifts: ExpectationDrift[]): Promise<number> {
+	const grouped = new Map<string, ExpectationDrift[]>();
+	for (const drift of drifts) {
+		const existing = grouped.get(drift.caseName) ?? [];
+		existing.push(drift);
+		grouped.set(drift.caseName, existing);
+	}
+	let fixed = 0;
+	for (const [caseName, caseDrifts] of grouped) {
+		const caseJsonPath = join(casesDir, caseName, "case.json");
+		const definition = await loadCaseDefinition(caseJsonPath);
+		if (!definition?.expectation) {
+			continue;
+		}
+		for (const drift of caseDrifts) {
+			const field = drift.field as keyof PireEvalCaseExpectation;
+			if (field.startsWith("min")) {
+				const floored = Math.floor(drift.actual * 100) / 100;
+				(definition.expectation as Record<string, number>)[field] = floored;
+			} else {
+				(definition.expectation as Record<string, number>)[field] = drift.actual;
+			}
+		}
+		await writeFile(caseJsonPath, `${JSON.stringify(definition, null, 2)}\n`);
+		fixed++;
+	}
+	return fixed;
+}
+
 async function main(argv: string[]): Promise<void> {
 	const args = parseArgs(argv);
 	if (!args.suitePath || !args.casesDir) {
@@ -1264,6 +1387,28 @@ async function main(argv: string[]): Promise<void> {
 			recomputedSuite.expectation,
 		),
 	};
+
+	if (args.checkExpectations) {
+		const drifts = detectExpectationDrift(withBaselines.scores);
+		if (drifts.length === 0) {
+			process.stdout.write("check: all case expectations match current scores\n");
+		} else {
+			for (const drift of drifts) {
+				const direction = drift.field.startsWith("min") ? "below" : "exceeds";
+				process.stdout.write(
+					`drift: ${drift.caseName}: ${drift.field} ${direction} expectation (expected=${drift.expected}, actual=${drift.actual})\n`,
+				);
+			}
+			if (args.fixExpectations) {
+				const casesDir = resolve(args.casesDir!);
+				const fixed = await fixExpectationDrift(casesDir, drifts);
+				process.stdout.write(`fix: updated ${fixed} case.json files\n`);
+			} else {
+				process.stdout.write(`\n${drifts.length} stale expectations found. Use --fix to auto-update.\n`);
+			}
+		}
+		return;
+	}
 
 	if (args.json) {
 		process.stdout.write(`${JSON.stringify(withBaselines, null, 2)}\n`);

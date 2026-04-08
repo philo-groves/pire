@@ -1,0 +1,2 @@
+ALLOC 0 hello 0
+WRITE 0 world

@@ -47,7 +47,6 @@
         "callback-pivot",
         "sandbox-escape"
       ],
-      "capturedFlags": [],
       "judgement": {
         "dimensions": {
           "discovery": "hit",

@@ -1,0 +1,2 @@
+CMD PING
+CMD STAT

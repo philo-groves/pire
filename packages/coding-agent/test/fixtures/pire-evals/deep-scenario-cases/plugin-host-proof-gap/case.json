@@ -1,11 +1,11 @@
 {
-  "title": "Plugin-host deep scenario \u2014 proof-construction upgraded to pass",
+  "title": "Plugin-host deep scenario — proof gap after sandbox escape semantics",
   "expectation": {
-    "minNormalized": 0.94,
-    "maxIssues": 0,
+    "minNormalized": 0.8,
+    "maxIssues": 2,
     "maxRank": 31,
-    "minScenarioPassed": 1,
-    "maxScenarioNearMiss": 0,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
     "maxScenarioFailed": 0
   }
 }
