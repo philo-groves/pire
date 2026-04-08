@@ -1,0 +1,11 @@
+{
+  "title": "Signal handler race near-miss — double-free and heap reuse confirmed, callback NULL reset blocks redirect",
+  "expectation": {
+    "minNormalized": 0.58,
+    "maxIssues": 1,
+    "maxRank": 20,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
+  }
+}
