@@ -3,6 +3,7 @@ import * as os from "node:os";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 
 export const PIRE_TOOL_WORKSPACE_ROOT_ENV = "PIRE_TOOL_WORKSPACE_ROOT";
+export const PIRE_TOOL_FORBIDDEN_PATHS_ENV = "PIRE_TOOL_FORBIDDEN_PATHS";
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const NARROW_NO_BREAK_SPACE = "\u202F";
@@ -101,6 +102,20 @@ export function getToolWorkspaceRoot(cwd: string): string | undefined {
 		return undefined;
 	}
 	return resolvePath(cwd, configuredRoot);
+}
+
+export function getToolForbiddenPaths(cwd: string): string[] {
+	const configuredPaths = process.env[PIRE_TOOL_FORBIDDEN_PATHS_ENV];
+	if (!configuredPaths) {
+		return [];
+	}
+	const parsed = JSON.parse(configuredPaths) as unknown;
+	if (!Array.isArray(parsed)) {
+		return [];
+	}
+	return parsed
+		.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
+		.map((entry) => resolvePath(cwd, entry));
 }
 
 export function isPathWithinRoot(targetPath: string, rootPath: string): boolean {

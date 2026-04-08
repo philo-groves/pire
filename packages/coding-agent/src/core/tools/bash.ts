@@ -12,7 +12,7 @@ import { theme } from "../../modes/interactive/theme/theme.js";
 import { waitForChildProcess } from "../../utils/child-process.js";
 import { getShellConfig, getShellEnv, killProcessTree } from "../../utils/shell.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
-import { getToolWorkspaceRoot, isPathWithinRoot } from "./path-utils.js";
+import { getToolForbiddenPaths, getToolWorkspaceRoot, isPathWithinRoot } from "./path-utils.js";
 import { getTextOutput, invalidArgText, str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateTail } from "./truncate.js";
@@ -147,24 +147,38 @@ function extractCommandPathCandidates(command: string): string[] {
 
 function assertCommandWithinWorkspace(command: string, cwd: string): void {
 	const workspaceRoot = getToolWorkspaceRoot(cwd);
+	const forbiddenPaths = getToolForbiddenPaths(cwd);
 	if (!workspaceRoot) {
-		return;
+		if (forbiddenPaths.length === 0) {
+			return;
+		}
 	}
-	for (const candidate of extractCommandPathCandidates(command)) {
-		try {
-			const resolved = candidate.startsWith("~/")
-				? join(process.env.HOME ?? "", candidate.slice(2))
-				: candidate.startsWith("/")
-					? candidate
-					: join(cwd, candidate);
-			if (!isPathWithinRoot(resolved, workspaceRoot)) {
+	if (workspaceRoot) {
+		for (const candidate of extractCommandPathCandidates(command)) {
+			try {
+				const resolved = candidate.startsWith("~/")
+					? join(process.env.HOME ?? "", candidate.slice(2))
+					: candidate.startsWith("/")
+						? candidate
+						: join(cwd, candidate);
+				if (!isPathWithinRoot(resolved, workspaceRoot)) {
+					throw new Error(`Command references path outside audited workspace root: ${candidate}`);
+				}
+			} catch (error) {
+				if (error instanceof Error) {
+					throw error;
+				}
 				throw new Error(`Command references path outside audited workspace root: ${candidate}`);
 			}
-		} catch (error) {
-			if (error instanceof Error) {
-				throw error;
-			}
-			throw new Error(`Command references path outside audited workspace root: ${candidate}`);
+		}
+	}
+	for (const forbiddenPath of forbiddenPaths) {
+		const relativeForbiddenPath = forbiddenPath.startsWith(cwd) ? forbiddenPath.slice(cwd.length + 1) : undefined;
+		if (
+			command.includes(forbiddenPath) ||
+			(relativeForbiddenPath !== undefined && command.includes(relativeForbiddenPath))
+		) {
+			throw new Error(`Command references forbidden audited path: ${relativeForbiddenPath ?? forbiddenPath}`);
 		}
 	}
 }

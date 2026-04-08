@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { type FileEntry, parseSessionEntries, type SessionMessageEntry } from "../session-manager.js";
-import { PIRE_TOOL_WORKSPACE_ROOT_ENV } from "../tools/path-utils.js";
+import { PIRE_TOOL_FORBIDDEN_PATHS_ENV, PIRE_TOOL_WORKSPACE_ROOT_ENV } from "../tools/path-utils.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -330,6 +330,10 @@ async function executePireLiveLabAgentRun(
 	workspaceRoot: string,
 	options: PireLiveLabAgentRunOptions,
 ): Promise<void> {
+	const forbiddenPaths = mergeForbiddenPaths(
+		await resolvePireLiveLabDefaultForbiddenPaths(workspaceRoot),
+		options.hiddenPaths,
+	);
 	await new Promise<void>((resolvePromise, reject) => {
 		const child = spawn(
 			"npx",
@@ -344,7 +348,11 @@ async function executePireLiveLabAgentRun(
 			],
 			{
 				cwd: workspaceRoot,
-				env: { ...process.env, [PIRE_TOOL_WORKSPACE_ROOT_ENV]: workspaceRoot },
+				env: {
+					...process.env,
+					[PIRE_TOOL_WORKSPACE_ROOT_ENV]: workspaceRoot,
+					[PIRE_TOOL_FORBIDDEN_PATHS_ENV]: JSON.stringify(forbiddenPaths),
+				},
 				stdio: ["ignore", "pipe", "pipe"],
 			},
 		);

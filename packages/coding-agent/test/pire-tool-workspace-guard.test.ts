@@ -4,17 +4,23 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { ExtensionContext } from "../src/core/extensions/types.js";
 import { createBashToolDefinition } from "../src/core/tools/bash.js";
-import { PIRE_TOOL_WORKSPACE_ROOT_ENV } from "../src/core/tools/path-utils.js";
+import { PIRE_TOOL_FORBIDDEN_PATHS_ENV, PIRE_TOOL_WORKSPACE_ROOT_ENV } from "../src/core/tools/path-utils.js";
 import { createReadToolDefinition } from "../src/core/tools/read.js";
 
 const previousWorkspaceRoot = process.env[PIRE_TOOL_WORKSPACE_ROOT_ENV];
+const previousForbiddenPaths = process.env[PIRE_TOOL_FORBIDDEN_PATHS_ENV];
 
 afterEach(() => {
 	if (previousWorkspaceRoot === undefined) {
 		delete process.env[PIRE_TOOL_WORKSPACE_ROOT_ENV];
-		return;
+	} else {
+		process.env[PIRE_TOOL_WORKSPACE_ROOT_ENV] = previousWorkspaceRoot;
 	}
-	process.env[PIRE_TOOL_WORKSPACE_ROOT_ENV] = previousWorkspaceRoot;
+	if (previousForbiddenPaths === undefined) {
+		delete process.env[PIRE_TOOL_FORBIDDEN_PATHS_ENV];
+	} else {
+		process.env[PIRE_TOOL_FORBIDDEN_PATHS_ENV] = previousForbiddenPaths;
+	}
 });
 
 function createToolContext(cwd: string): ExtensionContext {
@@ -74,5 +80,26 @@ describe("audited workspace guard", () => {
 				context,
 			),
 		).rejects.toThrow("Command references path outside audited workspace root");
+	});
+
+	test("blocks bash commands that reference forbidden audited paths inside the workspace root", async () => {
+		const tempRoot = await mkdtemp(join(tmpdir(), "pire-bash-forbidden-"));
+		const workspaceRoot = join(tempRoot, "workspace");
+		await mkdir(join(workspaceRoot, "src"), { recursive: true });
+
+		process.env[PIRE_TOOL_WORKSPACE_ROOT_ENV] = workspaceRoot;
+		process.env[PIRE_TOOL_FORBIDDEN_PATHS_ENV] = JSON.stringify(["src/answer_snapshot.c"]);
+		const bashTool = createBashToolDefinition(workspaceRoot);
+		const context = createToolContext(workspaceRoot);
+
+		await expect(
+			bashTool.execute(
+				"tool-3",
+				{ command: "find .. -path '*/src/answer_snapshot.c' -o -name answer_snapshot.c" },
+				undefined,
+				undefined,
+				context,
+			),
+		).rejects.toThrow("Command references forbidden audited path");
 	});
 });
