@@ -244,10 +244,10 @@ describe("pire eval cli", () => {
 			};
 		};
 
-		expect(parsed.suite.cases).toBe(11);
+		expect(parsed.suite.cases).toBe(12);
 		expect(parsed.suite.averageNormalized).toBeGreaterThan(0.7);
 		expect(parsed.suite.averageIssues).toBe(0);
-		expect(parsed.scores).toHaveLength(11);
+		expect(parsed.scores).toHaveLength(12);
 		expect(parsed.scores.every((score) => score.issues.length === 0)).toBe(true);
 		const byCaseName = new Map(parsed.scores.map((score) => [score.caseName, score] as const));
 		expect(byCaseName.get("broker-priv-pass")?.scenarioSummary).toEqual({
@@ -286,6 +286,12 @@ describe("pire eval cli", () => {
 			nearMiss: 1,
 			failed: 0,
 		});
+		expect(byCaseName.get("plugin-host-proof-gap")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 0,
+			nearMiss: 1,
+			failed: 0,
+		});
 		expect(byCaseName.get("updater-trust-near-miss")?.scenarioSummary).toEqual({
 			scored: 1,
 			passed: 0,
@@ -316,11 +322,11 @@ describe("pire eval cli", () => {
 			nearMiss: 0,
 			failed: 1,
 		});
-		expect(parsed.scores[7]?.normalized).toBeGreaterThan(parsed.scores[8]?.normalized ?? 0);
+		expect(parsed.scores[8]?.normalized).toBeGreaterThan(parsed.scores[9]?.normalized ?? 0);
 		expect(parsed.suite.scenarioSummary).toEqual({
-			scored: 11,
+			scored: 12,
 			passed: 3,
-			nearMiss: 5,
+			nearMiss: 6,
 			failed: 3,
 		});
 	});

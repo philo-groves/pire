@@ -1,0 +1,11 @@
+{
+  "title": "Plugin-host deep scenario proof-gap",
+  "expectation": {
+    "minNormalized": 0.78,
+    "maxIssues": 0,
+    "maxRank": 8,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T22:20:00.000Z",
+  "findings": [
+    {
+      "id": "find-plugin-proof-gap-001",
+      "title": "Plugin host chain reaches sandbox-escape semantics but omits final proof",
+      "status": "reported",
+      "severity": "high",
+      "statement": "A plugin archive parser flaw yields disclosure, allocator corruption, callback-table reuse, and sandbox-escape semantics, but the session never captures the host-owned proof artifact required to prove the boundary crossing.",
+      "basis": ["ev-plugin-proof-gap-001"],
+      "relatedEvidenceIds": ["ev-plugin-proof-gap-001"],
+      "relatedArtifactIds": ["artifact:/tmp/plugin-proof-gap.log", "artifact:/tmp/plugin-proof-gap.trace"],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T22:13:00.000Z",
+      "updatedAt": "2026-04-07T22:18:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-plugin-proof-gap-001",
+      "kind": "tool-result",
+      "summary": "gdb plus strace confirm disclosure, allocator pivot, callback reuse, and sandbox-escape semantics with no host-owned proof artifact",
+      "commandId": "tool:bash:plugin-proof-gap-01",
+      "artifactIds": ["artifact:/tmp/plugin-proof-gap.log", "artifact:/tmp/plugin-proof-gap.trace"],
+      "supports": ["find-plugin-proof-gap-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T22:15:00.000Z"
+    }
+  ]
+}
