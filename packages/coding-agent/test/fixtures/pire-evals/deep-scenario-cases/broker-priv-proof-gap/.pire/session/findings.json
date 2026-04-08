@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T22:05:00.000Z",
+  "findings": [
+    {
+      "id": "find-broker-proof-gap-001",
+      "title": "Broker chain reaches privileged-action semantics but omits final proof",
+      "status": "reported",
+      "severity": "high",
+      "statement": "Attacker-controlled renderer content reaches disclosure, write primitive, reuse pivot, broker escape, and privileged-action semantics, but the session never captures the broker-owned proof artifact required to prove the final action beyond userland compromise.",
+      "basis": ["ev-broker-proof-gap-001"],
+      "relatedEvidenceIds": ["ev-broker-proof-gap-001"],
+      "relatedArtifactIds": ["artifact:/tmp/broker-proof-gap.log", "artifact:/tmp/broker-proof-gap.trace"],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T21:58:00.000Z",
+      "updatedAt": "2026-04-07T22:03:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-broker-proof-gap-001",
+      "kind": "tool-result",
+      "summary": "gdb plus strace confirm renderer leak, write primitive, broker escape, and privileged-action semantics with no broker-owned proof artifact",
+      "commandId": "tool:bash:broker-proof-gap-01",
+      "artifactIds": ["artifact:/tmp/broker-proof-gap.log", "artifact:/tmp/broker-proof-gap.trace"],
+      "supports": ["find-broker-proof-gap-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T22:00:00.000Z"
+    }
+  ]
+}

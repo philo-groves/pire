@@ -244,38 +244,83 @@ describe("pire eval cli", () => {
 			};
 		};
 
-		expect(parsed.suite.cases).toBe(10);
+		expect(parsed.suite.cases).toBe(11);
 		expect(parsed.suite.averageNormalized).toBeGreaterThan(0.7);
 		expect(parsed.suite.averageIssues).toBe(0);
-		expect(parsed.scores).toHaveLength(10);
+		expect(parsed.scores).toHaveLength(11);
 		expect(parsed.scores.every((score) => score.issues.length === 0)).toBe(true);
-		const passCases = parsed.scores
-			.slice(0, 3)
-			.map((score) => score.caseName)
-			.sort();
-		const nearMissCases = parsed.scores
-			.slice(3, 7)
-			.map((score) => score.caseName)
-			.sort();
-		const failCases = parsed.scores
-			.slice(7)
-			.map((score) => score.caseName)
-			.sort();
-		expect(passCases).toEqual(["broker-priv-pass", "plugin-host-pass", "updater-trust-pass"]);
-		expect(nearMissCases).toEqual([
-			"broker-priv-near-miss",
-			"plugin-host-near-miss",
-			"updater-trust-near-miss",
-			"updater-trust-proof-gap",
-		]);
-		expect(failCases).toEqual(["broker-priv-fail", "plugin-host-fail", "updater-trust-fail"]);
-		expect(parsed.scores[2]?.normalized).toBeGreaterThanOrEqual(parsed.scores[3]?.normalized ?? 0);
-		expect(parsed.scores[6]?.normalized).toBeGreaterThan(parsed.scores[7]?.normalized ?? 0);
-		expect(parsed.scores[3]?.caseName).toBe("updater-trust-proof-gap");
+		const byCaseName = new Map(parsed.scores.map((score) => [score.caseName, score] as const));
+		expect(byCaseName.get("broker-priv-pass")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 1,
+			nearMiss: 0,
+			failed: 0,
+		});
+		expect(byCaseName.get("plugin-host-pass")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 1,
+			nearMiss: 0,
+			failed: 0,
+		});
+		expect(byCaseName.get("updater-trust-pass")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 1,
+			nearMiss: 0,
+			failed: 0,
+		});
+		expect(byCaseName.get("broker-priv-near-miss")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 0,
+			nearMiss: 1,
+			failed: 0,
+		});
+		expect(byCaseName.get("broker-priv-proof-gap")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 0,
+			nearMiss: 1,
+			failed: 0,
+		});
+		expect(byCaseName.get("plugin-host-near-miss")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 0,
+			nearMiss: 1,
+			failed: 0,
+		});
+		expect(byCaseName.get("updater-trust-near-miss")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 0,
+			nearMiss: 1,
+			failed: 0,
+		});
+		expect(byCaseName.get("updater-trust-proof-gap")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 0,
+			nearMiss: 1,
+			failed: 0,
+		});
+		expect(byCaseName.get("broker-priv-fail")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 0,
+			nearMiss: 0,
+			failed: 1,
+		});
+		expect(byCaseName.get("plugin-host-fail")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 0,
+			nearMiss: 0,
+			failed: 1,
+		});
+		expect(byCaseName.get("updater-trust-fail")?.scenarioSummary).toEqual({
+			scored: 1,
+			passed: 0,
+			nearMiss: 0,
+			failed: 1,
+		});
+		expect(parsed.scores[7]?.normalized).toBeGreaterThan(parsed.scores[8]?.normalized ?? 0);
 		expect(parsed.suite.scenarioSummary).toEqual({
-			scored: 10,
+			scored: 11,
 			passed: 3,
-			nearMiss: 4,
+			nearMiss: 5,
 			failed: 3,
 		});
 	});

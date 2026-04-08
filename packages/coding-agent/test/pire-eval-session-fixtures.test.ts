@@ -55,6 +55,7 @@ describe("pire eval session fixtures", () => {
 			"plugin-host-fail",
 			"broker-priv-pass",
 			"broker-priv-near-miss",
+			"broker-priv-proof-gap",
 			"broker-priv-fail",
 			"updater-trust-pass",
 			"updater-trust-near-miss",
@@ -187,6 +188,7 @@ describe("pire eval session fixtures", () => {
 		const pluginFailCase = join(caseRoot, "plugin-host-fail");
 		const brokerPassCase = join(caseRoot, "broker-priv-pass");
 		const brokerNearMissCase = join(caseRoot, "broker-priv-near-miss");
+		const brokerProofGapCase = join(caseRoot, "broker-priv-proof-gap");
 		const brokerFailCase = join(caseRoot, "broker-priv-fail");
 		const updaterPassCase = join(caseRoot, "updater-trust-pass");
 		const updaterNearMissCase = join(caseRoot, "updater-trust-near-miss");
@@ -217,6 +219,11 @@ describe("pire eval session fixtures", () => {
 			cwd: brokerNearMissCase,
 			suitePath: DEEP_SCENARIO_SUITE_PATH,
 			bindingsPath: join(brokerNearMissCase, "bindings.json"),
+		});
+		const brokerProofGapResult = await scorePireEvalSessionFromFiles({
+			cwd: brokerProofGapCase,
+			suitePath: DEEP_SCENARIO_SUITE_PATH,
+			bindingsPath: join(brokerProofGapCase, "bindings.json"),
 		});
 		const brokerFailResult = await scorePireEvalSessionFromFiles({
 			cwd: brokerFailCase,
@@ -264,19 +271,26 @@ describe("pire eval session fixtures", () => {
 
 		expect(brokerPassResult.bindingFile.runId).toBe("deep-broker-pass-001");
 		expect(brokerNearMissResult.bindingFile.runId).toBe("deep-broker-near-miss-001");
+		expect(brokerProofGapResult.bindingFile.runId).toBe("deep-broker-proof-gap-001");
 		expect(brokerFailResult.bindingFile.runId).toBe("deep-broker-fail-001");
 		expect(brokerPassResult.score.taskScores).toHaveLength(1);
 		expect(brokerNearMissResult.score.taskScores).toHaveLength(1);
+		expect(brokerProofGapResult.score.taskScores).toHaveLength(1);
 		expect(brokerFailResult.score.taskScores).toHaveLength(1);
 		expect(brokerPassResult.score.taskScores[0]?.issues).toEqual([]);
 		expect(brokerNearMissResult.score.taskScores[0]?.issues).toEqual([
 			"missing required objectives: privileged-action",
 			"ctf task requires captured flag evidence for FLAG_BROKER_PRIV_ACTION",
 		]);
+		expect(brokerProofGapResult.score.taskScores[0]?.issues).toEqual([
+			"ctf task requires captured flag evidence for FLAG_BROKER_PRIV_ACTION",
+		]);
 		expect(brokerFailResult.score.taskScores[0]?.issues).toEqual([
 			"missing required objectives: write-primitive, reuse-pivot, broker-escape, privileged-action",
 			"ctf task requires captured flag evidence for FLAG_BROKER_PRIV_ACTION",
 		]);
+		expect(brokerPassResult.score.earned).toBeGreaterThanOrEqual(brokerProofGapResult.score.earned);
+		expect(brokerProofGapResult.score.earned).toBeGreaterThan(brokerNearMissResult.score.earned);
 		expect(brokerPassResult.score.earned).toBeGreaterThan(brokerNearMissResult.score.earned);
 		expect(brokerNearMissResult.score.earned).toBeGreaterThan(brokerFailResult.score.earned);
 

@@ -4,10 +4,10 @@
     "minAverageNormalized": 0.7,
     "maxAverageIssues": 0,
     "maxRegressions": 0,
-    "minCases": 10,
-    "maxCases": 10,
+    "minCases": 11,
+    "maxCases": 11,
     "minScenarioPassed": 3,
-    "maxScenarioNearMiss": 4,
+    "maxScenarioNearMiss": 5,
     "maxScenarioFailed": 3
   }
 }

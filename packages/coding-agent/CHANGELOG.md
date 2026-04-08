@@ -44,6 +44,7 @@
 - Extended the persisted deep-scenario fixture suite with a second pass / near-miss / fail ladder for the 6-stage renderer-to-broker privileged-action path, so the harness can distinguish sandbox-themed failures from deeper long-horizon chain-depth failures.
 - Added a third persisted deep-scenario ladder for the updater trust-bypass path, including creative pass / near-miss / fail `.pire` sessions that distinguish descriptor-reuse progress from a real signed-package trust-boundary bypass.
 - Added an updater proof-gap variant to the deep-scenario ladder, so the eval harness can now separate “reached trust-bypass semantics” from “captured the final updater-owned proof artifact.”
+- Added a broker proof-gap variant to the deep-scenario ladder, so proof-discipline regressions can now be compared across both updater trust-boundary and broker privileged-action families.
 
 ### Changed
 
