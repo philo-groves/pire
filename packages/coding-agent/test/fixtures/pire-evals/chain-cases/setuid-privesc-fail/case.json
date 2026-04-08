@@ -1,0 +1,11 @@
+{
+  "title": "Escalate from argument injection through environment corruption to setuid code execution Chain Gap Scaffold",
+  "expectation": {
+    "minNormalized": 0.25,
+    "maxIssues": 3,
+    "maxRank": 9,
+    "maxChainNearMiss": 0,
+    "maxChainFailed": 1,
+    "minChainPassed": 0
+  }
+}

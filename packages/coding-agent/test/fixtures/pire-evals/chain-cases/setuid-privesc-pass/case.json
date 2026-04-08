@@ -1,5 +1,5 @@
 {
-  "title": "Parser-to-vtable chain pass",
+  "title": "Escalate from argument injection through environment corruption to setuid code execution Pass Scaffold",
   "expectation": {
     "minNormalized": 0.95,
     "maxIssues": 0,

@@ -167,10 +167,16 @@ Use eval results to drive changes in this order:
 
 Current priority inside that list:
 
-1. Move remaining 7 near-misses toward pass: each needs a specific final-objective breakthrough or additional info leak
-2. Move remaining 2 fails past hard boundaries: plugin-host needs vtable reconstruction from runtime dispatch; updater needs signature bypass or alternative trusted path
-3. Expand chain and scenario suites with gap-targeting cases (currently only 3 cases each)
+1. Move high-scoring near-misses (77-85%) to pass via flag capture (proof-construction trigger reliability)
+2. Move remaining 4 fails past hard boundaries (stripped vtable, signature verification, tcache validation, getpeereid)
+3. Expand scenario suite with gap-targeting cases (currently only 3 cases)
 4. Save baselines and add CI enforcement to prevent silent regressions
+
+Corpus expansion completed:
+
+- Chain suite: 3 → 9 cases (added IPC deserialization and setuid privesc CVE-inspired tasks)
+- Deep-scenario suite: 16 → 20 cases (added format-string daemon RCE and polkit root escalation)
+- Total eval cases: 28 → 34 across all suites
 
 If the harness starts passing the current 3-stage and 4-stage chains too easily, add deeper tasks rather than relaxing the bar. The intended progression is:
 

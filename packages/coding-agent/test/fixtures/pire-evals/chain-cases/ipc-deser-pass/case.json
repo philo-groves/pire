@@ -1,5 +1,5 @@
 {
-  "title": "Parser-to-vtable chain pass",
+  "title": "Chain a deserialization type confusion through IPC to a cross-process write primitive Pass Scaffold",
   "expectation": {
     "minNormalized": 0.95,
     "maxIssues": 0,

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T00:00:00.000Z",
+  "artifacts": [
+    {
+      "path": "/tmp/setuid-privesc-pass.log",
+      "type": "log"
+    },
+    {
+      "path": "/tmp/setuid-privesc-pass.trace",
+      "type": "trace"
+    }
+  ]
+}

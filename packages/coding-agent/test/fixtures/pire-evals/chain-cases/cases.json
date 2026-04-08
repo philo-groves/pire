@@ -1,13 +1,13 @@
 {
   "title": "Chain fixture session cases",
   "expectation": {
-    "minAverageNormalized": 0.65,
-    "maxAverageIssues": 1.34,
+    "minAverageNormalized": 0.55,
+    "maxAverageIssues": 2,
     "maxRegressions": 0,
-    "minCases": 3,
-    "maxCases": 3,
-    "minChainPassed": 1,
-    "maxChainNearMiss": 1,
-    "maxChainFailed": 1
+    "minCases": 9,
+    "maxCases": 9,
+    "minChainPassed": 3,
+    "maxChainNearMiss": 3,
+    "maxChainFailed": 3
   }
 }

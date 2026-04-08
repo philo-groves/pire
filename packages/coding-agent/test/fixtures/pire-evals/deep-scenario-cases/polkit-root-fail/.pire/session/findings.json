@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T00:00:00.000Z",
+  "findings": [
+    {
+      "id": "find-binre-scenario-010-chain-gap",
+      "title": "Escalate from unprivileged D-Bus client through polkit bypass to root command execution (Chain Gap Scaffold)",
+      "status": "confirmed",
+      "severity": "high",
+      "statement": "Starter scaffold for binre-scenario-010 using the chain-gap preset. Objectives: dbus-argument-injection, polkit-uid-confusion, cache-race-exploit, token-capture, root-exec.",
+      "basis": [
+        "ev-find-binre-scenario-010-chain-gap"
+      ],
+      "relatedEvidenceIds": [
+        "ev-find-binre-scenario-010-chain-gap"
+      ],
+      "relatedArtifactIds": [
+        "artifact:/tmp/polkit-root-fail.log",
+        "artifact:/tmp/polkit-root-fail.trace"
+      ],
+      "reproStatus": "partial",
+      "createdAt": "2026-04-07T00:00:00.000Z",
+      "updatedAt": "2026-04-07T00:00:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-find-binre-scenario-010-chain-gap",
+      "kind": "tool-result",
+      "summary": "Starter scaffold evidence for binre-scenario-010 (chain-gap)",
+      "commandId": "scaffold-binre-scenario-010",
+      "artifactIds": [
+        "artifact:/tmp/polkit-root-fail.log",
+        "artifact:/tmp/polkit-root-fail.trace"
+      ],
+      "supports": [
+        "find-binre-scenario-010-chain-gap"
+      ],
+      "refutes": [],
+      "createdAt": "2026-04-07T00:00:00.000Z"
+    }
+  ]
+}

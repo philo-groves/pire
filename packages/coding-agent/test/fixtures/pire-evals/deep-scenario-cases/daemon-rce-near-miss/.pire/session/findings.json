@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T00:00:00.000Z",
+  "findings": [
+    {
+      "id": "find-binre-scenario-009-proof-gap",
+      "title": "Exploit a network daemon from format string through heap corruption to remote code execution (Proof Gap Scaffold)",
+      "status": "confirmed",
+      "severity": "high",
+      "statement": "Starter scaffold for binre-scenario-009 using the proof-gap preset. Objectives: format-string-leak, heap-metadata-corruption, write-what-where, mprotect-chain, remote-code-exec.",
+      "basis": [
+        "ev-find-binre-scenario-009-proof-gap"
+      ],
+      "relatedEvidenceIds": [
+        "ev-find-binre-scenario-009-proof-gap"
+      ],
+      "relatedArtifactIds": [
+        "artifact:/tmp/daemon-rce-near-miss.log",
+        "artifact:/tmp/daemon-rce-near-miss.trace"
+      ],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T00:00:00.000Z",
+      "updatedAt": "2026-04-07T00:00:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-find-binre-scenario-009-proof-gap",
+      "kind": "tool-result",
+      "summary": "Starter scaffold evidence for binre-scenario-009 (proof-gap)",
+      "commandId": "scaffold-binre-scenario-009",
+      "artifactIds": [
+        "artifact:/tmp/daemon-rce-near-miss.log",
+        "artifact:/tmp/daemon-rce-near-miss.trace"
+      ],
+      "supports": [
+        "find-binre-scenario-009-proof-gap"
+      ],
+      "refutes": [],
+      "createdAt": "2026-04-07T00:00:00.000Z"
+    }
+  ]
+}

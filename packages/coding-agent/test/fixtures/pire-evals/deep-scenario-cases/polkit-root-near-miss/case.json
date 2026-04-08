@@ -1,0 +1,11 @@
+{
+  "title": "Escalate from unprivileged D-Bus client through polkit bypass to root command execution Proof Gap Scaffold",
+  "expectation": {
+    "minNormalized": 0.67,
+    "maxIssues": 1,
+    "maxRank": 20,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
+  }
+}

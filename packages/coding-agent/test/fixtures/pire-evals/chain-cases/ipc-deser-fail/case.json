@@ -1,0 +1,11 @@
+{
+  "title": "Chain a deserialization type confusion through IPC to a cross-process write primitive Chain Gap Scaffold",
+  "expectation": {
+    "minNormalized": 0.25,
+    "maxIssues": 3,
+    "maxRank": 9,
+    "minChainPassed": 0,
+    "maxChainNearMiss": 0,
+    "maxChainFailed": 1
+  }
+}

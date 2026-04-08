@@ -1,0 +1,11 @@
+{
+  "title": "Exploit a network daemon from format string through heap corruption to remote code execution Chain Gap Scaffold",
+  "expectation": {
+    "minNormalized": 0.25,
+    "maxIssues": 2,
+    "maxRank": 20,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 0,
+    "maxScenarioFailed": 1
+  }
+}

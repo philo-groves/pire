@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T00:00:00.000Z",
+  "findings": [
+    {
+      "id": "find-binre-chain-004-pass",
+      "title": "Chain a deserialization type confusion through IPC to a cross-process write primitive (Pass Scaffold)",
+      "status": "reported",
+      "severity": "critical",
+      "statement": "Starter scaffold for binre-chain-004 using the pass preset. Objectives: ipc-message-format, type-confusion-trigger, cross-process-write.",
+      "basis": [
+        "ev-find-binre-chain-004-pass"
+      ],
+      "relatedEvidenceIds": [
+        "ev-find-binre-chain-004-pass"
+      ],
+      "relatedArtifactIds": [
+        "artifact:/tmp/ipc-deser-pass.log",
+        "artifact:/tmp/ipc-deser-pass.trace"
+      ],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T00:00:00.000Z",
+      "updatedAt": "2026-04-07T00:00:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-find-binre-chain-004-pass",
+      "kind": "tool-result",
+      "summary": "Starter scaffold evidence for binre-chain-004 (pass)",
+      "commandId": "scaffold-binre-chain-004",
+      "artifactIds": [
+        "artifact:/tmp/ipc-deser-pass.log",
+        "artifact:/tmp/ipc-deser-pass.trace"
+      ],
+      "supports": [
+        "find-binre-chain-004-pass"
+      ],
+      "refutes": [],
+      "createdAt": "2026-04-07T00:00:00.000Z"
+    }
+  ]
+}

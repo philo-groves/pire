@@ -1,0 +1,11 @@
+{
+  "title": "Exploit a network daemon from format string through heap corruption to remote code execution Proof Gap Scaffold",
+  "expectation": {
+    "minNormalized": 0.72,
+    "maxIssues": 1,
+    "maxRank": 20,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
+  }
+}
