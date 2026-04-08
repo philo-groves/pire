@@ -176,8 +176,10 @@ export {
 	validateBinaryReEvalCorpus,
 } from "./core/pire/eval-corpus.js";
 export {
+	type CreateGeneratedScenarioPresetScaffoldOptions,
 	createGeneratedScenarioFixtureCase,
 	createGeneratedScenarioPresetCase,
+	createGeneratedScenarioPresetScaffold,
 	type PireGeneratedFixtureArtifact,
 	type PireGeneratedFixtureCaseExpectation,
 	type PireGeneratedFixtureCaseOptions,

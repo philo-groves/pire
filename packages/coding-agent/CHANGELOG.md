@@ -48,6 +48,7 @@
 - Added a plugin-host proof-gap variant to the deep-scenario ladder, completing the chain-gap / proof-gap / full-proof split across all deep scenario families.
 - Added a small deep-scenario fixture generator and regression coverage for generating proof-gap cases on disk, so new eval ladders can be minted from structured inputs instead of handwritten JSON.
 - Added preset-based deep-scenario fixture generation for `pass`, `proof-gap`, and `chain-gap`, reducing new fixture authoring to a small structured declaration instead of repeating objectives, flags, and default judgements.
+- Added a `pire-eval-scaffold` CLI that writes starter deep-scenario case directories from `--suite`, `--task-id`, `--preset`, and `--case-name`, turning preset-based eval expansion into a command instead of a code edit.
 
 ### Changed
 
