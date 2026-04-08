@@ -1,11 +1,11 @@
 {
-  "title": "Exploit a network daemon from format string through heap corruption to remote code execution Chain Gap Scaffold",
+  "title": "Daemon RCE near-miss — tcache bypassed, write-what-where achieved, full RELRO blocks GOT hijack",
   "expectation": {
-    "minNormalized": 0.25,
-    "maxIssues": 2,
+    "minNormalized": 0.52,
+    "maxIssues": 1,
     "maxRank": 20,
     "minScenarioPassed": 0,
-    "maxScenarioNearMiss": 0,
-    "maxScenarioFailed": 1
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
   }
 }

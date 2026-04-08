@@ -7,7 +7,7 @@
     "minCases": 20,
     "maxCases": 20,
     "minScenarioPassed": 7,
-    "maxScenarioNearMiss": 9,
-    "maxScenarioFailed": 4
+    "maxScenarioNearMiss": 12,
+    "maxScenarioFailed": 1
   }
 }

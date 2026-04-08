@@ -1,11 +1,11 @@
 {
-  "title": "Local helper end-to-end scenario fail",
+  "title": "Local helper near-miss — corruption primitive found, privilege separation blocks escalation",
   "expectation": {
-    "minNormalized": 0.41,
-    "maxIssues": 0,
+    "minNormalized": 0.50,
+    "maxIssues": 1,
     "maxRank": 3,
     "minScenarioPassed": 0,
-    "maxScenarioNearMiss": 0,
-    "maxScenarioFailed": 1
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
   }
 }

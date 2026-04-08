@@ -1,33 +1,38 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T00:00:00.000Z",
+  "updatedAt": "2026-04-07T00:30:00.000Z",
   "findings": [
     {
       "id": "find-binre-scenario-009-chain-gap",
-      "title": "Exploit a network daemon from format string through heap corruption to remote code execution (Chain Gap Scaffold)",
+      "title": "Daemon RCE near-miss: tcache key leaked via format string, write-what-where achieved, full RELRO blocks GOT hijack",
       "status": "confirmed",
       "severity": "high",
-      "statement": "Starter scaffold for binre-scenario-009 using the chain-gap preset. Objectives: format-string-leak, heap-metadata-corruption, write-what-where, mprotect-chain, remote-code-exec.",
+      "statement": "tcache key recovered via format string at %7$p offset. Double-free bypassed with replayed key. Heap metadata corruption achieves write-what-where primitive. mprotect chain blocked: the binary is compiled with full RELRO and no writable GOT entries — cannot redirect a function pointer via GOT overwrite. Need an alternative control hijack target.",
       "basis": [
-        "ev-find-binre-scenario-009-chain-gap"
+        "ev-find-binre-scenario-009-chain-gap",
+        "ev-daemon-rce-tcache-bypass",
+        "ev-daemon-rce-relro-block"
       ],
       "relatedEvidenceIds": [
-        "ev-find-binre-scenario-009-chain-gap"
+        "ev-find-binre-scenario-009-chain-gap",
+        "ev-daemon-rce-tcache-bypass",
+        "ev-daemon-rce-relro-block"
       ],
       "relatedArtifactIds": [
         "artifact:/tmp/daemon-rce-fail.log",
-        "artifact:/tmp/daemon-rce-fail.trace"
+        "artifact:/tmp/daemon-rce-fail.trace",
+        "artifact:/tmp/daemon-rce-tcache.log"
       ],
       "reproStatus": "partial",
       "createdAt": "2026-04-07T00:00:00.000Z",
-      "updatedAt": "2026-04-07T00:00:00.000Z"
+      "updatedAt": "2026-04-07T00:30:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-find-binre-scenario-009-chain-gap",
       "kind": "tool-result",
-      "summary": "Starter scaffold evidence for binre-scenario-009 (chain-gap)",
+      "summary": "Format string vulnerability found at %7$p offset, leaking tcache key from chunk+8",
       "commandId": "scaffold-binre-scenario-009",
       "artifactIds": [
         "artifact:/tmp/daemon-rce-fail.log",
@@ -38,6 +43,34 @@
       ],
       "refutes": [],
       "createdAt": "2026-04-07T00:00:00.000Z"
+    },
+    {
+      "id": "ev-daemon-rce-tcache-bypass",
+      "kind": "tool-result",
+      "summary": "heap-analysis Phase 6: tcache key replayed to bypass double-free detection, heap metadata corruption achieves write-what-where primitive",
+      "commandId": "tool:heap_analysis:tcache-bypass",
+      "artifactIds": [
+        "artifact:/tmp/daemon-rce-tcache.log"
+      ],
+      "supports": [
+        "find-binre-scenario-009-chain-gap"
+      ],
+      "refutes": [],
+      "createdAt": "2026-04-07T00:15:00.000Z"
+    },
+    {
+      "id": "ev-daemon-rce-relro-block",
+      "kind": "tool-result",
+      "summary": "Binary compiled with full RELRO — no writable GOT entries, GOT overwrite not viable for control hijack",
+      "commandId": "tool:decomp_ghidra_decompile:relro-check",
+      "artifactIds": [
+        "artifact:/tmp/daemon-rce-fail.log"
+      ],
+      "supports": [
+        "find-binre-scenario-009-chain-gap"
+      ],
+      "refutes": [],
+      "createdAt": "2026-04-07T00:25:00.000Z"
     }
   ]
 }

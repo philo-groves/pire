@@ -74,7 +74,42 @@ If the exploitation path requires placing a fake object:
 - Confirm the dispatch reads from the fake object's controlled field
 - Record the target address and whether it reaches the intended callback
 
-Stop and record a dead end if:
-- The allocator uses randomized slot ordering that defeats deterministic placement
-- Safe-linking or pointer authentication blocks fake pointer injection without a separate leak
+## Phase 6: Allocator hardening bypass
+
+Before declaring a hardening mechanism as a hard blocker, evaluate these bypass techniques:
+
+### tcache key validation (glibc 2.29+)
+The tcache stores a key in the second word of freed chunks to detect double-free. Bypass options:
+- **Leak the key**: the key is at chunk_addr+0x08 after free. If an OOB-read or UAF-read reaches this offset, the key can be recovered and replayed in a crafted free
+- **Corrupt the key**: if a write primitive reaches the key field before the double-free check, overwrite it with an arbitrary value to suppress detection
+- **Avoid tcache entirely**: allocate sizes that fall outside tcache range (> 0x410 on 64-bit glibc) to use unsorted/small/large bins instead, which have weaker validation
+- Use debug_gdb_commands to check: `p *(long*)(CHUNK_ADDR+8)` after free to read the current key
+
+### Safe-linking (glibc 2.32+)
+Free-list pointers are XOR'd with `(chunk_addr >> 12)`. Bypass options:
+- **Derive from position**: if you know the chunk address (from a heap base leak), the XOR mask is `chunk_addr >> 12` — no separate key leak needed
+- **Partial overwrite**: safe-linking protects the full pointer, but a 1-2 byte partial overwrite of the low bytes may redirect within the same page without triggering the check
+- **Leak via UAF-read**: if the freed chunk's user data is readable after free, the encoded pointer is visible. With the chunk address known, decode: `real_ptr = encoded_ptr ^ (chunk_addr >> 12)`
+- Use debug_gdb_commands: `p/x *(long*)CHUNK_ADDR ^ (CHUNK_ADDR >> 12)` to decode a safe-linked pointer
+
+### House techniques (when standard paths are blocked)
+- **House of Spirit**: forge a fake chunk in attacker-controlled memory (stack/global), free it, then re-allocate to get a chunk overlapping the target. Requires: controlled write to create the fake chunk header with valid size/flags
+- **House of Force**: corrupt the top chunk size to a very large value, then request an allocation that wraps the address space to land at the target. Requires: ability to corrupt top chunk metadata
+- **House of Einherjar**: corrupt the prev_size of a chunk adjacent to the target, trigger backward consolidation to merge with a fake chunk at the target address
+- **Tcache stashing unlink**: manipulate the tcache and smallbin simultaneously to get an arbitrary write during stashing
+
+### Descriptor/fd protection
+When file descriptors are protected by validation:
+- **TOCTOU on close-open sequence**: if the descriptor is closed and reopened, there's a window where the fd number can be reused. Use strace to measure the window
+- **dup2 race**: if the protection checks the fd but not when it was opened, race a dup2 to replace the fd between check and use
+- **procfs fd access**: `/proc/self/fd/N` may provide an alternative path to the underlying file object
+
+For each bypass attempted, use debug_gdb_commands to verify the hardening mechanism's actual behavior at runtime. Do not assume hardening from decompilation alone — "verify blockers with evidence."
+
+## Stop conditions
+
+Record a dead end only after evaluating the applicable bypass techniques above:
+- The allocator uses randomized slot ordering AND no leak surface reveals the ordering
+- Safe-linking AND the chunk address is not recoverable AND partial overwrite doesn't reach a useful target
+- All applicable house techniques require primitives that are not available from the current vulnerability
 - The tier topology is too deep to walk reliably (more than 3 tiers of indirection)

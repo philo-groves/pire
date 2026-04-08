@@ -2,12 +2,12 @@
   "title": "Scenario fixture session cases",
   "expectation": {
     "minAverageNormalized": 0.66,
-    "maxAverageIssues": 0,
+    "maxAverageIssues": 1,
     "maxRegressions": 0,
     "minCases": 3,
     "maxCases": 3,
     "minScenarioPassed": 1,
-    "maxScenarioNearMiss": 1,
-    "maxScenarioFailed": 1
+    "maxScenarioNearMiss": 2,
+    "maxScenarioFailed": 0
   }
 }

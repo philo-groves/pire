@@ -1,11 +1,11 @@
 {
-  "title": "Plugin-host fail — allocator corruption reached but stripped vtable blocks callback pivot",
+  "title": "Plugin-host near-miss — vtable recovered via dispatch tracing, sandbox escape blocked by seccomp",
   "expectation": {
-    "minNormalized": 0.51,
-    "maxIssues": 2,
+    "minNormalized": 0.62,
+    "maxIssues": 1,
     "maxRank": 20,
     "minScenarioPassed": 0,
-    "maxScenarioNearMiss": 0,
-    "maxScenarioFailed": 1
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
   }
 }

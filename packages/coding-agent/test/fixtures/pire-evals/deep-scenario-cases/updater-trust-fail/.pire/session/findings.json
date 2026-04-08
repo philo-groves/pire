@@ -4,16 +4,16 @@
   "findings": [
     {
       "id": "find-updater-fail-001",
-      "title": "Cache heap corruption confirmed but signature verification blocks descriptor reuse",
+      "title": "Updater near-miss: descriptor reuse via dup2 TOCTOU race achieved, secondary hash check blocks trust bypass",
       "status": "confirmed",
       "severity": "high",
-      "statement": "Oversized manifest entries overflow the cache buffer and corrupt an adjacent cache_entry struct. GDB breakpoints confirm the size field corruption enables controlled re-allocation. The heap-analysis skill mapped the cache allocator layout. However, the descriptor-reuse stage requires corrupting the update package fd, which is gated by a signature verification step using a pinned certificate. The exploit-pivot skill evaluated data-only alternatives but the signature check is on the critical path — the fd is not accessible until after verification passes.",
-      "basis": ["ev-updater-fail-001", "ev-updater-fail-002"],
-      "relatedEvidenceIds": ["ev-updater-fail-001", "ev-updater-fail-002"],
-      "relatedArtifactIds": ["artifact:/tmp/updater-fail.log", "artifact:/tmp/updater-heap-corruption.log"],
+      "statement": "heap-analysis Phase 6 descriptor bypass: strace showed the signature verification fd is pre-opened and subject to a dup2 race. The 5ms window between sig-check read completion and package fd consumption is usable. Descriptor-reuse achieved via dup2 during the window. Trust-bypass blocked: the forged package fails a secondary hash check after the fd swap that was not visible in the initial decompilation.",
+      "basis": ["ev-updater-fail-001", "ev-updater-fail-002", "ev-updater-fail-003"],
+      "relatedEvidenceIds": ["ev-updater-fail-001", "ev-updater-fail-002", "ev-updater-fail-003"],
+      "relatedArtifactIds": ["artifact:/tmp/updater-fail.log", "artifact:/tmp/updater-heap-corruption.log", "artifact:/tmp/updater-strace-race.log"],
       "reproStatus": "partial",
       "createdAt": "2026-04-07T21:13:00.000Z",
-      "updatedAt": "2026-04-08T00:43:00.000Z"
+      "updatedAt": "2026-04-08T00:45:00.000Z"
     }
   ],
   "evidence": [
@@ -30,12 +30,22 @@
     {
       "id": "ev-updater-fail-002",
       "kind": "tool-result",
-      "summary": "decomp_ghidra_decompile: signature verification on pinned cert gates fd access; no bypass path found",
-      "commandId": "tool:decomp_ghidra_decompile:sig-verify",
-      "artifactIds": ["artifact:/tmp/updater-fail.log"],
+      "summary": "heap-analysis Phase 6: strace confirmed pre-opened sig-verification fd subject to dup2 race with 5ms window; descriptor-reuse achieved",
+      "commandId": "tool:heap_analysis:descriptor-bypass",
+      "artifactIds": ["artifact:/tmp/updater-strace-race.log"],
       "supports": ["find-updater-fail-001"],
       "refutes": [],
       "createdAt": "2026-04-08T00:40:00.000Z"
+    },
+    {
+      "id": "ev-updater-fail-003",
+      "kind": "tool-result",
+      "summary": "Secondary hash check after fd swap rejects forged package — trust-bypass objective blocked",
+      "commandId": "tool:decomp_ghidra_decompile:secondary-hash",
+      "artifactIds": ["artifact:/tmp/updater-fail.log"],
+      "supports": ["find-updater-fail-001"],
+      "refutes": [],
+      "createdAt": "2026-04-08T00:43:00.000Z"
     }
   ]
 }

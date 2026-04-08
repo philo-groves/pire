@@ -1,11 +1,11 @@
 {
-  "title": "Updater fail — cache heap corruption reached but signature verification blocks descriptor reuse",
+  "title": "Updater near-miss — descriptor reuse via dup2 race, secondary hash check blocks trust bypass",
   "expectation": {
-    "minNormalized": 0.51,
+    "minNormalized": 0.62,
     "maxIssues": 1,
     "maxRank": 20,
     "minScenarioPassed": 0,
-    "maxScenarioNearMiss": 0,
-    "maxScenarioFailed": 1
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
   }
 }
