@@ -316,6 +316,24 @@ npx tsx ./src/pire-live-lab-cli.ts \
   --prompt "Reverse the threaded rendezvous gate and recover the proof artifact."
 ```
 
+Example audited RE-tier sweep:
+
+```bash
+npx tsx ./src/pire-live-lab-cli.ts \
+  --sweep re-tier \
+  --session-dir /tmp/pire-live-re-tier \
+  --json
+```
+
+Example challenge-tier sweep:
+
+```bash
+npx tsx ./src/pire-live-lab-cli.ts \
+  --sweep challenge-tier \
+  --session-dir /tmp/pire-live-challenge-tier \
+  --json
+```
+
 Example deep-case scaffold:
 
 ```bash
