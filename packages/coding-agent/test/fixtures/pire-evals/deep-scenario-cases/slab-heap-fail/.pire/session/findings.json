@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T23:10:00.000Z",
+  "findings": [
+    {
+      "id": "find-slab-fail-001",
+      "title": "Custom slab allocator identified but metadata layout unrecoverable",
+      "status": "candidate",
+      "severity": "medium",
+      "statement": "Network message handler routes through a custom slab allocator. Static analysis via objdump and readelf confirms non-standard allocation paths, but the allocator metadata layout, free-list structure, and slab sizing cannot be recovered without heap dump inspection or dynamic memory analysis.",
+      "basis": ["ev-slab-fail-001"],
+      "relatedEvidenceIds": ["ev-slab-fail-001"],
+      "relatedArtifactIds": ["artifact:/tmp/slab-heap-fail.log"],
+      "reproStatus": "not-reproduced",
+      "createdAt": "2026-04-07T23:02:00.000Z",
+      "updatedAt": "2026-04-07T23:08:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-slab-fail-001",
+      "kind": "tool-result",
+      "summary": "objdump and readelf identify custom allocator entry points but cannot resolve metadata layout",
+      "commandId": "tool:bash:slab-fail-01",
+      "artifactIds": ["artifact:/tmp/slab-heap-fail.log"],
+      "supports": ["find-slab-fail-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T23:04:00.000Z"
+    }
+  ]
+}

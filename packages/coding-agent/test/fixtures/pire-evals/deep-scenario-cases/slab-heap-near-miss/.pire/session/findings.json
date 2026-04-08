@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T23:25:00.000Z",
+  "findings": [
+    {
+      "id": "find-slab-near-miss-001",
+      "title": "Slab allocator UAF path identified but fake object placement unvalidated",
+      "status": "confirmed",
+      "severity": "high",
+      "statement": "Decompilation reveals the slab allocator metadata layout and a UAF in the message handler free path. The free-list corruption allows controlled re-allocation, but validating fake object placement and vtable hijack requires dynamic heap state inspection that the current tooling cannot provide.",
+      "basis": ["ev-slab-near-miss-001"],
+      "relatedEvidenceIds": ["ev-slab-near-miss-001"],
+      "relatedArtifactIds": ["artifact:/tmp/slab-heap-near-miss.log", "artifact:/tmp/slab-heap-near-miss.ghidra"],
+      "reproStatus": "partial",
+      "createdAt": "2026-04-07T23:15:00.000Z",
+      "updatedAt": "2026-04-07T23:23:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-slab-near-miss-001",
+      "kind": "tool-result",
+      "summary": "Ghidra decompilation confirms slab metadata layout and UAF path; gdb batch confirms free-list corruption reachable but cannot inspect runtime heap state",
+      "commandId": "tool:bash:slab-near-miss-01",
+      "artifactIds": ["artifact:/tmp/slab-heap-near-miss.log", "artifact:/tmp/slab-heap-near-miss.ghidra"],
+      "supports": ["find-slab-near-miss-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T23:17:00.000Z"
+    }
+  ]
+}

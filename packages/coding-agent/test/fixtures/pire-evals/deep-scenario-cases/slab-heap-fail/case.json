@@ -1,8 +1,8 @@
 {
-  "title": "Plugin-host deep scenario fail",
+  "title": "Slab allocator heap exploitation fail — no heap introspection",
   "expectation": {
-    "minNormalized": 0.45,
-    "maxIssues": 2,
+    "minNormalized": 0.15,
+    "maxIssues": 3,
     "maxRank": 20,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 0,

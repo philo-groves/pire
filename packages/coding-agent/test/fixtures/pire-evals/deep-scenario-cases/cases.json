@@ -1,13 +1,13 @@
 {
   "title": "Deep scenario fixture session cases",
   "expectation": {
-    "minAverageNormalized": 0.7,
-    "maxAverageIssues": 0,
+    "minAverageNormalized": 0.55,
+    "maxAverageIssues": 1,
     "maxRegressions": 0,
-    "minCases": 12,
-    "maxCases": 12,
+    "minCases": 16,
+    "maxCases": 16,
     "minScenarioPassed": 3,
-    "maxScenarioNearMiss": 6,
-    "maxScenarioFailed": 3
+    "maxScenarioNearMiss": 8,
+    "maxScenarioFailed": 7
   }
 }

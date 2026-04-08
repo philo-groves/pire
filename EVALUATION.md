@@ -102,17 +102,24 @@ Current direct eval runs show:
 - `chain-suite.json`: passes
 - `deep-scenario-suite.json`: passes
 
-All four suites pass expectation enforcement with zero regressions. The deep suite produces the correct outcome shape:
+All four suites pass expectation enforcement with zero regressions. The deep suite produces 16 cases:
 
 - `pass=3`
 - `near-miss=6`
-- `fail=3`
+- `fail=7`
 
-Key scorer improvements that enabled this:
+Key scorer improvements:
 
 - CTF proof enforcement: the proof dimension is capped at "partial" when a CTF task has no captured flag evidence, preventing overclaiming
 - CTF chaining enforcement: the chaining dimension is capped by objective completion ratio, so incomplete chains cannot score as high as complete ones
-- Tier-based rank expectations: maxRank is set per outcome tier (pass=3, proof-gap=6, near-miss=9, fail=12) instead of per-case absolute ranks, eliminating brittle regressions from alphabetical tie-breaking within tied scores
+- Tier-based rank expectations: maxRank is set per outcome tier instead of per-case absolute ranks, eliminating brittle regressions from alphabetical tie-breaking within tied scores
+
+Gap-targeting tasks added to the deep suite expose specific harness weaknesses:
+
+- `binre-scenario-007` (slab allocator heap exploitation): requires heap dump analysis, custom allocator metadata reversal, and fake object placement — the harness lacks heap introspection and interactive debugging, so it stalls at the allocator-reversal stage
+- `binre-scenario-008` (ROP-gated CFI bypass): requires programmatic gadget search, CFI-aware chain assembly, and JIT page pivot — the harness has no ROP tooling, so it can only manually identify a few gadgets via objdump but cannot assemble or validate a chain
+
+Both gap tasks currently produce only fail outcomes. Moving either to near-miss requires new harness capabilities (interactive debugging, heap dump parsing, gadget search, or chain assembly tooling).
 
 ## What To Improve
 
@@ -126,9 +133,10 @@ Use eval results to drive changes in this order:
 
 Current priority inside that list:
 
-1. Deep scenario completion across 5-stage and 6-stage chains
-2. Adding harder corpus now that the current suite passes cleanly
-3. Reduction of overclaiming and false positives in near-miss cases
+1. Heap introspection: interactive GDB breakpoints on allocator internals, heap dump parsing, fake object validation — would unblock binre-scenario-007 from fail to near-miss
+2. ROP/gadget tooling: programmatic gadget search with CFI-aware filtering, chain assembly, stack pivot validation — would unblock binre-scenario-008 from fail to near-miss
+3. Batch decompilation: Ghidra cross-function data-flow analysis for multi-component chains
+4. Reduction of overclaiming and false positives in near-miss cases
 
 If the harness starts passing the current 3-stage and 4-stage chains too easily, add deeper tasks rather than relaxing the bar. The intended progression is:
 

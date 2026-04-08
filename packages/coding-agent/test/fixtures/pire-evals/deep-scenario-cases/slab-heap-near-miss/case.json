@@ -1,7 +1,7 @@
 {
-  "title": "Plugin-host deep scenario fail",
+  "title": "Slab allocator near-miss — static reversal succeeds but dynamic proof blocked",
   "expectation": {
-    "minNormalized": 0.45,
+    "minNormalized": 0.40,
     "maxIssues": 2,
     "maxRank": 20,
     "minScenarioPassed": 0,

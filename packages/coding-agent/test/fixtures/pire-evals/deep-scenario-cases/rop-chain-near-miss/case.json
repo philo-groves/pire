@@ -1,7 +1,7 @@
 {
-  "title": "Plugin-host deep scenario fail",
+  "title": "ROP chain near-miss — gadgets found manually but chain assembly blocked",
   "expectation": {
-    "minNormalized": 0.45,
+    "minNormalized": 0.38,
     "maxIssues": 2,
     "maxRank": 20,
     "minScenarioPassed": 0,

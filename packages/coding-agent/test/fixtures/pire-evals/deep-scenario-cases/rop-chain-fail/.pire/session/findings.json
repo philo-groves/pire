@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T23:35:00.000Z",
+  "findings": [
+    {
+      "id": "find-rop-fail-001",
+      "title": "Parser OOB write primitive found but ROP chain construction infeasible",
+      "status": "confirmed",
+      "severity": "high",
+      "statement": "The document parser contains a controlled OOB write from a malformed length field. The write reaches a vtable pointer, but exploiting it requires a ROP chain under CFI constraints. No gadget search capability exists in the current tooling, and manual objdump inspection of a large stripped binary is insufficient to find CFI-compatible gadgets.",
+      "basis": ["ev-rop-fail-001"],
+      "relatedEvidenceIds": ["ev-rop-fail-001"],
+      "relatedArtifactIds": ["artifact:/tmp/rop-chain-fail.log"],
+      "reproStatus": "partial",
+      "createdAt": "2026-04-07T23:28:00.000Z",
+      "updatedAt": "2026-04-07T23:33:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-rop-fail-001",
+      "kind": "tool-result",
+      "summary": "Ghidra decompilation confirms OOB write primitive in parser; objdump shows CFI enforcement on indirect calls; no automated gadget search available",
+      "commandId": "tool:bash:rop-fail-01",
+      "artifactIds": ["artifact:/tmp/rop-chain-fail.log"],
+      "supports": ["find-rop-fail-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T23:30:00.000Z"
+    }
+  ]
+}
