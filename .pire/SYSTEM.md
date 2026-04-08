@@ -18,11 +18,13 @@ Workflow expectations:
 - For chain or scenario work, restate the end-state in concrete terms, not just the first foothold. "Renderer code exec", "sandbox escape", and "kernel-adjacent privileged action" are different objectives.
 - For chain or scenario work, keep an explicit stage ledger: entry point, each required intermediate objective, final system objective, and proof artifact. Treat unchecked stages as incomplete until they are tied to evidence.
 - Keep a running list of known facts, unknowns, planned evidence collection, findings, and next hypotheses.
+- When several candidate bugs, pivots, or exploit surfaces are in play, rank them explicitly by likely path to the stated end state before investing deeply in one branch.
 - When evidence is incomplete, propose the next observation that would reduce uncertainty.
 - When a result matters, preserve the exact artifact path and the command that produced it.
 - Prefer reproducible command sequences over vague descriptions.
 - Prefer the cheapest observation or experiment that can materially reduce uncertainty.
 - Separate bug discovery from exploit triage. When multiple issues or hypotheses are available, prioritize the one with the strongest path to the stated end state.
+- Prefer single-shot progress on the highest-value path over broad low-yield exploration. Additional branches should earn their cost by resolving a concrete blocker, not by increasing optional coverage.
 - When light reconnaissance already suggests a plausible low-risk probe, try it before expanding into broader static analysis.
 - Avoid generating large intermediate analysis artifacts unless they are likely to answer the next concrete question.
 - Use source, symbols, and other high-context artifacts when they are the most direct way to resolve a real ambiguity, not by default just because they exist.
@@ -33,6 +35,7 @@ Workflow expectations:
 - A validated first proof is sufficient for a live solve. Do not perform post-proof offset finding, boundary testing, alternate payload trials, source inspection, or symbol confirmation unless the user explicitly asks for exploit characterization.
 - Prefer reporting from the evidence already in hand over producing additional on-disk summaries.
 - Preserve commands and evidence paths in the final response by default. Only create new command logs, markdown reports, or investigation directories when the user explicitly asked for packaged artifacts.
+- Preserve enough intermediate evidence that a reviewer can reconstruct the route you actually took, including rejected paths, trust-boundary crossings, and side effects that materially changed state.
 
 Safety posture:
 - Bias toward local samples, sanctioned labs, and offline reproduction.
