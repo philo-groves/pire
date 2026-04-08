@@ -1,6 +1,6 @@
 ---
 name: proof-construction
-description: Use when the exploit chain is complete through all intermediate stages and the only remaining step is constructing an end-to-end proof of concept that captures the flag artifact. This is the last-mile skill — it turns a confirmed chain into a demonstrated one.
+description: Use when the exploit chain is complete through all intermediate stages and the only remaining step is constructing an end-to-end proof of concept that captures the required proof artifact. This is the last-mile skill — it turns a confirmed chain into a demonstrated one.
 ---
 # Proof Construction
 
@@ -22,7 +22,7 @@ Prefer the experiment that directly unlocks observability or a required secret o
 Before starting proof construction, verify:
 - Every intermediate objective is completed and has supporting evidence
 - The chain logic is documented: what input triggers each stage, what state each stage produces, what the next stage consumes
-- The target flag/proof artifact is defined (from the CTF spec)
+- The target proof artifact is defined from the task brief, environment, or user goal
 
 If any intermediate stage is unvalidated, go back and validate it first. Proof construction on an incomplete chain produces overclaiming.
 
@@ -41,7 +41,7 @@ If the final step is only one or two low-risk input mutations away, execute it d
 
 Run the assembled trigger sequence against the target:
 - Capture all output, exit codes, and side effects
-- If the chain produces a flag artifact (file, output string, network response), capture it immediately
+- If the chain produces a proof artifact (file, output string, network response, privileged side effect), capture it immediately
 - If the chain produces a state change (privilege escalation, sandbox escape, file creation in a privileged directory), verify the change with an independent check
 - Use debug_gdb_commands or strace to capture the exact moment of the final action
 
@@ -49,18 +49,15 @@ Run the assembled trigger sequence against the target:
 
 Confirm the proof is genuine, not an artifact of the testing setup:
 - Re-run the proof from a clean state when the environment supports it cheaply, or otherwise perform one independent validation that the action was target-created
-- Verify the flag/artifact matches the expected format from the CTF spec
+- Verify the artifact matches the expected task-defined format or semantics
 - Verify the proof demonstrates the claimed impact (e.g., code execution, not just a crash; privilege escalation, not just a read)
 - Check that no environmental shortcuts were used (e.g., disabled mitigations, pre-seeded state)
 
 ## Phase 4: Package the evidence
 
-Record the proof in the findings tracker:
-- Update the finding status to "reported"
-- Set reproStatus to "reproduced"
-- Add the captured flag to the submission's capturedFlags
-- Set the proof dimension to "hit" in the judgement
-- Preserve the minimum durable evidence set only: exact trigger command, captured proof artifact path, and one validation artifact proving the action was target-created
+Record the proof in the active task system:
+- If the environment provides a findings tracker, fixture harness, or eval metadata store, update only the fields that are required to reflect the observed proof
+- Otherwise preserve the minimum durable evidence set only: exact trigger command, captured proof artifact path, and one validation artifact proving the action was target-created
 - Unless the user asked for filesystem deliverables, do not create extra markdown reports or recopied summaries after the proof is already preserved
 - Unless the user asked for packaged deliverables, do not create new `evidence/`, `analysis/`, or report directories during proof packaging
 - Do not add follow-on experiments once the proof is already sufficient. Boundary probes, offset refinements, and extra characterization belong only to unresolved exploit questions, not to proof packaging
@@ -81,7 +78,7 @@ If the first exit condition is met, stop tool use and report immediately.
 Do not:
 - Claim proof=hit based on theoretical reachability — the chain must actually execute end-to-end
 - Skip all validation — a one-time success without any confirming check may be a flaky race
-- Capture a flag from a modified target (disabled ASLR, removed canaries, weakened sandbox)
+- Capture a proof artifact from a modified target (disabled ASLR, removed canaries, weakened sandbox)
 - Report "reproduced" when only intermediate stages were reproduced and the final action was inferred
 - Spend the last mile rebuilding a full static explanation when a nearby sample-input mutation can directly test the chain
 - Insert additional static reversing between a successful secret-disclosure step and the final proof run unless the disclosure output leaves a concrete ambiguity
