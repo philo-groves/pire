@@ -1,0 +1,7 @@
+HELLO client
+SUBSCRIBE updates
+MESSAGE
+Mode: normal
+
+hello
+END

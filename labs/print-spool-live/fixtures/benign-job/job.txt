@@ -1,0 +1,5 @@
+@PJL JOB NAME=demo
+DEST queue1
+@PJL SET OWNER=user
+PRINT hello
+@PJL EOJ
