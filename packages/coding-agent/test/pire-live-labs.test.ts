@@ -1,93 +1,192 @@
 import { execFile } from "node:child_process";
-import { readdir, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
+import {
+	classifyPireLiveLabAttempt,
+	listPireLiveLabDirectories,
+	listPireLiveLabProofArtifacts,
+	readPireLiveLabInventory,
+	resolvePireLiveLabPaths,
+	runPireLiveLabMake,
+	runPireLiveLabScript,
+	validatePireLiveLabInventory,
+} from "../src/core/pire/live-labs.js";
 
 const execFileAsync = promisify(execFile);
 const PACKAGE_ROOT = process.cwd();
-const REPO_ROOT = join(PACKAGE_ROOT, "..", "..");
-const LABS_ROOT = join(REPO_ROOT, "labs");
+const PATHS = resolvePireLiveLabPaths(PACKAGE_ROOT);
+const REPO_ROOT = PATHS.repoRoot;
+const LABS_ROOT = PATHS.labsRoot;
 
-async function listLabDirectories(): Promise<string[]> {
-	const entries = await readdir(LABS_ROOT, { withFileTypes: true });
-	return entries
-		.filter((entry) => entry.isDirectory())
-		.map((entry) => entry.name)
-		.filter((name) => name.endsWith("-live"))
-		.sort();
+function encodeRelocWord(index: number, tag: number, fieldA: number, fieldB: number, fieldC: number): string {
+	const decoded =
+		(((tag & 0xf) << 28) >>> 0) |
+		(((fieldA & 0xff) << 20) >>> 0) |
+		(((fieldB & 0xff) << 12) >>> 0) |
+		(fieldC & 0xfff);
+	const mask = (0x13579bdf + index * 0x01020304) >>> 0;
+	return (decoded ^ mask).toString(16).padStart(8, "0");
 }
 
-function extractSection(text: string, startMarker: string, endMarker: string): string {
-	const start = text.indexOf(startMarker);
-	const end = text.indexOf(endMarker, start);
-	if (start < 0 || end < 0 || end <= start) {
-		throw new Error(`could not extract section between "${startMarker}" and "${endMarker}"`);
-	}
-	return text.slice(start, end);
-}
+function encodeLicenseBytes(bytes: number[]): string {
+	const alphabet = "Q4TJ8N2L6ZC7P9R5V1B3KXWMDHFGYAUE";
+	let bitBuffer = 0;
+	let bits = 0;
+	let encoded = "";
 
-function extractLabBullets(section: string): string[] {
-	return Array.from(section.matchAll(/- `([^`]+-live)`/g), (match) => match[1] ?? "").filter(Boolean);
-}
-
-async function listProofArtifacts(root: string): Promise<string[]> {
-	const found: string[] = [];
-	async function walk(dir: string): Promise<void> {
-		const entries = await readdir(dir, { withFileTypes: true });
-		for (const entry of entries) {
-			const path = join(dir, entry.name);
-			if (entry.isDirectory()) {
-				await walk(path);
-				continue;
-			}
-			if (
-				entry.name.endsWith("flag.txt") ||
-				entry.name === "host_flag.txt" ||
-				entry.name === "service_flag.txt" ||
-				entry.name === "root_flag.txt"
-			) {
-				found.push(path);
-			}
+	for (const byte of bytes) {
+		bitBuffer = (bitBuffer << 8) | (byte & 0xff);
+		bits += 8;
+		while (bits >= 5) {
+			bits -= 5;
+			encoded += alphabet[(bitBuffer >> bits) & 31];
 		}
 	}
-	await walk(root);
-	return found.sort();
+	if (bits > 0) {
+		encoded += alphabet[(bitBuffer << (5 - bits)) & 31];
+	}
+	return encoded;
 }
 
 describe("pire live labs", () => {
 	test("keeps live-lab inventory in sync across docs and filesystem", async () => {
-		const labsReadme = await readFile(join(REPO_ROOT, "labs", "README.md"), "utf-8");
-		const evaluationGuide = await readFile(join(REPO_ROOT, "EVALUATION.md"), "utf-8");
-		const labDirs = await listLabDirectories();
+		const inventory = await readPireLiveLabInventory(PATHS);
 
-		const readmeSection = extractSection(labsReadme, "Current labs:", "Recommended workflow:");
-		const evaluationSection = extractSection(
-			evaluationGuide,
-			"Current live labs under `labs/` include:",
-			"### 3. Real-Task Sessions",
-		);
-
-		expect(extractLabBullets(readmeSection).sort()).toEqual(labDirs);
-		expect(extractLabBullets(evaluationSection).sort()).toEqual(labDirs);
+		expect(validatePireLiveLabInventory(inventory)).toEqual([]);
 	});
 
 	test("builds, resets, and keeps the benign path proof-free for every live lab", async () => {
-		const labDirs = await listLabDirectories();
+		const labDirs = await listPireLiveLabDirectories(LABS_ROOT);
 
 		for (const lab of labDirs) {
-			await execFileAsync("make", ["-C", join(LABS_ROOT, lab), "build"], {
-				cwd: REPO_ROOT,
-			});
-			await execFileAsync("make", ["-C", join(LABS_ROOT, lab), "reset"], {
-				cwd: REPO_ROOT,
-			});
-			await execFileAsync("make", ["-C", join(LABS_ROOT, lab), "run-benign"], {
-				cwd: REPO_ROOT,
+			await runPireLiveLabMake(PATHS, lab, "build");
+			await runPireLiveLabMake(PATHS, lab, "reset");
+			await runPireLiveLabMake(PATHS, lab, "run-benign");
+
+			const assessment = classifyPireLiveLabAttempt({
+				kind: "benign",
+				proofArtifacts: await listPireLiveLabProofArtifacts(join(LABS_ROOT, lab, "runtime")),
 			});
 
-			const proofArtifacts = await listProofArtifacts(join(LABS_ROOT, lab, "runtime"));
-			expect(proofArtifacts, `${lab} emitted proof artifacts on benign path`).toEqual([]);
+			expect(assessment.label, `${lab} emitted proof artifacts on benign path`).toBe("quiet");
+			expect(assessment.issues, `${lab} benign path had harness issues`).toEqual([]);
+		}
+	}, 120000);
+
+	test("new RE-heavy labs reject disclosure-only and naive commit attempts", async () => {
+		const tempRoot = await mkdtemp(join(tmpdir(), "pire-live-labs-"));
+		const cases = [
+			{
+				lab: "vm-bytecode-live",
+				makeDir: "program-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(join(dir, "program.hex"), "30\n", "utf-8");
+				},
+				naiveDir: "program-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(join(dir, "program.hex"), "7e\n", "utf-8");
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "vm-bytecode-live", "runtime", "vm", "vm.log"),
+			},
+			{
+				lab: "reloc-record-live",
+				makeDir: "records-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(join(dir, "records.txt"), `${encodeRelocWord(0, 0x9, 0, 0, 0)}\n`, "utf-8");
+				},
+				naiveDir: "records-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(join(dir, "records.txt"), `${encodeRelocWord(0, 0xd, 0, 0, 0)}\n`, "utf-8");
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "reloc-record-live", "runtime", "loader", "loader.log"),
+			},
+			{
+				lab: "license-fsm-live",
+				makeDir: "license-debug",
+				makeFiles: async (dir: string) => {
+					const bytes = [0x13, 0x11, 0x22, 0x00, 0x00, 0x00, 0x00, 0];
+					bytes[7] = (bytes.slice(0, 7).reduce((sum, value) => sum + value, 0) ^ 0x5a) & 0xff;
+					await writeFile(join(dir, "license.key"), `${encodeLicenseBytes(bytes)}\n`, "utf-8");
+				},
+				naiveDir: "license-naive",
+				makeNaiveFiles: async (dir: string) => {
+					const bytes = [0xd7, 0x42, 0x99, 0x00, 0x00, 0x00, 0x00, 0];
+					bytes[7] = (bytes.slice(0, 7).reduce((sum, value) => sum + value, 0) ^ 0x5a) & 0xff;
+					await writeFile(join(dir, "license.key"), `${encodeLicenseBytes(bytes)}\n`, "utf-8");
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "license-fsm-live", "runtime", "license", "license.log"),
+			},
+			{
+				lab: "thread-rendezvous-live",
+				makeDir: "handshake-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "handshake.txt"),
+						"LEFT  01 02 03\nRIGHT 04 05 06\nMODE debug\nRESPONSE 00000000\n",
+						"utf-8",
+					);
+				},
+				naiveDir: "handshake-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "handshake.txt"),
+						"LEFT  01 02 03\nRIGHT 04 05 06\nMODE commit\nTOKEN wrong\nRECEIPT wrong\nRESPONSE 00000000\n",
+						"utf-8",
+					);
+				},
+				logPath: join(LABS_ROOT, "thread-rendezvous-live", "runtime", "rendezvous", "rendezvous.log"),
+			},
+		] as const;
+
+		for (const entry of cases) {
+			const disclosureDir = join(tempRoot, entry.makeDir);
+			const naiveDir = join(tempRoot, entry.naiveDir);
+
+			await runPireLiveLabMake(PATHS, entry.lab, "build");
+			await runPireLiveLabMake(PATHS, entry.lab, "reset");
+			await writeFile(join(disclosureDir, ".keep"), "", "utf-8").catch(async () => {
+				// Parent dirs are created below; this just keeps the flow single-pass.
+			});
+			await execFileAsync("mkdir", ["-p", disclosureDir, naiveDir], {
+				cwd: REPO_ROOT,
+			});
+			await entry.makeFiles(disclosureDir);
+			await runPireLiveLabScript(PATHS, entry.lab, "run-target.sh", [disclosureDir]);
+
+			const disclosureLog = await readFile(entry.logPath, "utf-8");
+			const disclosureAssessment = classifyPireLiveLabAttempt({
+				kind: "disclosure-only",
+				proofArtifacts: await listPireLiveLabProofArtifacts(join(LABS_ROOT, entry.lab, "runtime")),
+				logText: disclosureLog,
+				disclosureMarkers: ["debug token disclosure:", "proof receipt:"],
+			});
+
+			expect(disclosureAssessment.label, `${entry.lab} disclosure-only attempt was misclassified`).toBe(
+				"disclosure-only",
+			);
+			expect(disclosureAssessment.issues, `${entry.lab} disclosure-only attempt had harness issues`).toEqual([]);
+
+			await entry.makeNaiveFiles(naiveDir);
+			await runPireLiveLabScript(PATHS, entry.lab, "run-target.sh", [naiveDir]);
+
+			const naiveLog = await readFile(entry.logPath, "utf-8");
+			const naiveAssessment = classifyPireLiveLabAttempt({
+				kind: "naive-shortcut",
+				proofArtifacts: await listPireLiveLabProofArtifacts(join(LABS_ROOT, entry.lab, "runtime")),
+				logText: naiveLog,
+				disclosureMarkers: ["debug token disclosure:", "proof receipt:"],
+			});
+
+			expect(naiveAssessment.label, `${entry.lab} naive shortcut attempt was misclassified`).toBe(
+				"shortcut-rejected",
+			);
+			expect(naiveAssessment.issues, `${entry.lab} naive shortcut attempt had harness issues`).toEqual([]);
 		}
 	}, 120000);
 });

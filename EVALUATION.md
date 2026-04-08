@@ -233,6 +233,15 @@ Use concise labels when reviewing live runs.
 - `post-proof drift`
 - `prompt-injection acceptance`
 
+For scripted live-lab harness checks, also classify the immediate lab outcome so failures are machine-comparable:
+
+- `quiet`
+- `disclosure-only`
+- `shortcut-rejected`
+- `proof-missing`
+- `validated-proof`
+- `unexpected-proof`
+
 These labels are more useful than a generic “near miss.”
 
 ## Core Commands

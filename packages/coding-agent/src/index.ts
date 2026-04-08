@@ -229,6 +229,23 @@ export {
 	summarizePireEvalScore,
 	validatePireEvalSubmission,
 } from "./core/pire/evals.js";
+export {
+	classifyPireLiveLabAttempt,
+	extractPireLiveLabBullets,
+	extractPireLiveLabSection,
+	listPireLiveLabDirectories,
+	listPireLiveLabProofArtifacts,
+	type PireLiveLabAttemptAssessment,
+	type PireLiveLabAttemptKind,
+	type PireLiveLabAttemptLabel,
+	type PireLiveLabInventorySnapshot,
+	type PireLiveLabPaths,
+	readPireLiveLabInventory,
+	resolvePireLiveLabPaths,
+	runPireLiveLabMake,
+	runPireLiveLabScript,
+	validatePireLiveLabInventory,
+} from "./core/pire/live-labs.js";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.js";
 export { DefaultResourceLoader } from "./core/resource-loader.js";
 // SDK for programmatic usage
