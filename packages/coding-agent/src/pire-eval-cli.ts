@@ -3,6 +3,7 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, extname, join, resolve } from "node:path";
 import process from "node:process";
+import { parsePireEvalRunBundle, stringifyPireEvalRunBundle } from "./core/pire/eval-bundles.js";
 import type { PireBinaryEvalFocus, PireBinaryEvalTask } from "./core/pire/eval-corpus.js";
 import { resolvePireEvalStoredArtifactPath, scorePireEvalSessionFromFiles } from "./core/pire/eval-runner.js";
 import type { PireEvalLane, PireEvalSubmission } from "./core/pire/evals.js";
@@ -12,6 +13,7 @@ interface PireEvalCliArgs {
 	casesDir?: string;
 	baselinePath?: string;
 	baselines: PireEvalBaselineInput[];
+	checkExpectedRuns?: boolean;
 	enforce?: boolean;
 	json?: boolean;
 	reportPath?: string;
@@ -330,27 +332,35 @@ function filterExpectedMissingSubmissionIssues(params: {
 	return params.issues.filter((issue) => issue !== expectedIssue);
 }
 
-function collectChainTaskIssues(
+function collectLaneTaskIssues(
 	taskScores: Array<{
 		lane: PireEvalLane;
 		issues: string[];
 	}>,
+	targetLane: "chain" | "scenario",
 ): string[] {
 	return [
-		...new Set(taskScores.filter((taskScore) => taskScore.lane === "chain").flatMap((taskScore) => taskScore.issues)),
+		...new Set(
+			taskScores.filter((taskScore) => taskScore.lane === targetLane).flatMap((taskScore) => taskScore.issues),
+		),
 	];
+}
+
+function formatExpectedRunMismatchIssue(caseName: string): string {
+	return `expected-run.json does not match extracted run bundle for ${caseName}`;
 }
 
 function printHelp(): void {
 	process.stdout.write(`pire-evals - score binary RE eval session directories
 
 Usage:
-  pire-evals --suite <suite.json> --cases-dir <dir> [--baseline <report.json>|@name|name=@name>]... [--save-baseline <name>]... [--save-report <name>]... [--enforce] [--json] [--report <path>]
+  pire-evals --suite <suite.json> --cases-dir <dir> [--baseline <report.json>|@name|name=@name>]... [--check-expected-runs] [--save-baseline <name>]... [--save-report <name>]... [--enforce] [--json] [--report <path>]
 
 Options:
   --suite <path>      Path to a Pire eval task suite JSON file
   --cases-dir <path>  Directory containing case subdirectories with bindings.json and .pire state
   --baseline <arg>    Prior JSON report from pire-evals for score deltas; use @name or name=@name for stored baselines
+  --check-expected-runs Verify each case's extracted run against expected-run.json when present
   --promote-baseline <name> Promote current JSON result to .pire/session/evals/baselines/<name>.json only if regressions=0
   --promote-report <name> Promote current report set to .pire/session/evals/reports/<name>.{json,md} only if regressions=0
   --save-baseline <name> Save current JSON result to .pire/session/evals/baselines/<name>.json
@@ -399,6 +409,8 @@ function parseArgs(argv: string[]): PireEvalCliArgs {
 			args.saveBaselineNames.push(argv[++index]);
 		} else if (arg === "--save-report" && index + 1 < argv.length) {
 			args.saveReportNames.push(argv[++index]);
+		} else if (arg === "--check-expected-runs") {
+			args.checkExpectedRuns = true;
 		} else if (arg === "--enforce") {
 			args.enforce = true;
 		} else if (arg === "--json") {
@@ -562,6 +574,18 @@ async function loadCaseDefinition(path: string): Promise<PireEvalCaseDefinition 
 async function loadSuiteDefinition(path: string): Promise<PireEvalSuiteDefinition | undefined> {
 	try {
 		return parseSuiteDefinition(await readFile(path, "utf-8"));
+	} catch (error) {
+		const readError = error as NodeJS.ErrnoException;
+		if (readError.code === "ENOENT") {
+			return undefined;
+		}
+		throw error;
+	}
+}
+
+async function loadExpectedRun(path: string) {
+	try {
+		return parsePireEvalRunBundle(await readFile(path, "utf-8"));
 	} catch (error) {
 		const readError = error as NodeJS.ErrnoException;
 		if (readError.code === "ENOENT") {
@@ -1101,7 +1125,7 @@ async function loadBaseline(path: string): Promise<PireEvalCollectedScores> {
 }
 
 async function collectCaseScores(
-	args: Required<Pick<PireEvalCliArgs, "suitePath" | "casesDir">>,
+	args: Required<Pick<PireEvalCliArgs, "suitePath" | "casesDir">> & Pick<PireEvalCliArgs, "checkExpectedRuns">,
 ): Promise<PireEvalCollectedScores> {
 	const suitePath = resolve(args.suitePath);
 	const casesDir = resolve(args.casesDir);
@@ -1136,7 +1160,20 @@ async function collectCaseScores(
 			suiteTaskCount: result.suite.tasks.length,
 			boundTaskCount: result.bindingFile.bindings.length,
 		});
-		const chainTaskIssues = collectChainTaskIssues(result.score.taskScores);
+		const laneTaskIssues = [
+			...collectLaneTaskIssues(result.score.taskScores, "chain"),
+			...collectLaneTaskIssues(result.score.taskScores, "scenario"),
+		];
+		const expectedRunIssues: string[] = [];
+		if (args.checkExpectedRuns) {
+			const expectedRunPath = join(cwd, "expected-run.json");
+			const expectedRun = await loadExpectedRun(expectedRunPath);
+			if (!expectedRun) {
+				expectedRunIssues.push(`expected-run.json is missing for ${caseName}`);
+			} else if (stringifyPireEvalRunBundle(expectedRun) !== stringifyPireEvalRunBundle(result.run)) {
+				expectedRunIssues.push(formatExpectedRunMismatchIssue(caseName));
+			}
+		}
 		scores.push({
 			caseName,
 			runId: result.run.runId,
@@ -1145,7 +1182,7 @@ async function collectCaseScores(
 			normalized: result.score.normalized,
 			scoredTasks: result.score.taskScores.length,
 			missingTasks: result.score.missingTaskIds.length,
-			issues: [...filteredIssues, ...chainTaskIssues],
+			issues: [...filteredIssues, ...laneTaskIssues, ...expectedRunIssues],
 			expectation: definition?.expectation,
 			severityThresholds: mergeSeverityThresholds(
 				resolveDefaultSeverityThresholdsForTasks(caseTaskDescriptors),
@@ -1201,6 +1238,7 @@ async function main(argv: string[]): Promise<void> {
 	const result = await collectCaseScores({
 		suitePath: args.suitePath,
 		casesDir: args.casesDir,
+		checkExpectedRuns: args.checkExpectedRuns,
 	});
 	let withBaselines = result;
 	for (const baselineInput of args.baselines) {
