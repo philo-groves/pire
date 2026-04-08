@@ -1,28 +1,28 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T23:55:00.000Z",
+  "updatedAt": "2026-04-08T02:20:00.000Z",
   "findings": [
     {
       "id": "find-slab-near-miss-001",
-      "title": "Slab allocator UAF exploitable through vtable hijack but privileged callback unreachable",
+      "title": "Slab allocator chain complete through vtable hijack with ASLR base recovered from residual vtable pointer",
       "status": "confirmed",
       "severity": "high",
-      "statement": "The custom slab allocator metadata layout was reversed via Ghidra decompilation and confirmed with a GDB Python free-list walker. Breakpoints on the allocator fast-path show that after a controlled free sequence, a fake object can be placed at a predictable slab offset. GDB single-stepping confirms the vtable dispatch redirects to the attacker-controlled pointer. However, reaching the privileged callback requires a second info leak (ASLR base of the callback table) that static analysis and the current heap state do not provide.",
-      "basis": ["ev-slab-near-miss-001", "ev-slab-near-miss-002"],
-      "relatedEvidenceIds": ["ev-slab-near-miss-001", "ev-slab-near-miss-002"],
-      "relatedArtifactIds": ["artifact:/tmp/slab-heap-near-miss.log", "artifact:/tmp/slab-free-list-walk.log", "artifact:/tmp/slab-heap-breakpoint.log"],
-      "reproStatus": "partial",
+      "statement": "The 'name what you don't know' prompt identified the ASLR base of libprivileged.so as the explicit unknown blocking the privileged callback. Systematic check of the OOB-read surface found a residual vtable pointer in a freed object 32 bytes past the read base. The pointer is at a known offset (vtable+0x28) into libprivileged.so, so subtracting the offset recovers the library base. With the base, the privileged callback address is computed and the vtable hijack redirects dispatch to it. The callback fires and executes the privileged capability check, but the check returns a boolean value — it does not produce a file-system artifact or output that would serve as a captured flag.",
+      "basis": ["ev-slab-near-miss-001", "ev-slab-near-miss-002", "ev-slab-near-miss-003"],
+      "relatedEvidenceIds": ["ev-slab-near-miss-001", "ev-slab-near-miss-002", "ev-slab-near-miss-003"],
+      "relatedArtifactIds": ["artifact:/tmp/slab-heap-near-miss.log", "artifact:/tmp/slab-heap-near-miss.ghidra", "artifact:/tmp/slab-aslr-leak.log"],
+      "reproStatus": "reproduced",
       "createdAt": "2026-04-07T23:15:00.000Z",
-      "updatedAt": "2026-04-07T23:53:00.000Z"
+      "updatedAt": "2026-04-08T02:18:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-slab-near-miss-001",
       "kind": "tool-result",
-      "summary": "debug_gdb_script: Python free-list walker confirms slab metadata layout and controlled re-allocation after UAF",
+      "summary": "debug_gdb_script: tier-specific walker confirms heap state and fake object placement",
       "commandId": "tool:debug_gdb_script:slab-walker",
-      "artifactIds": ["artifact:/tmp/slab-free-list-walk.log"],
+      "artifactIds": ["artifact:/tmp/slab-heap-near-miss.log", "artifact:/tmp/slab-heap-near-miss.ghidra"],
       "supports": ["find-slab-near-miss-001"],
       "refutes": [],
       "createdAt": "2026-04-07T23:20:00.000Z"
@@ -30,12 +30,22 @@
     {
       "id": "ev-slab-near-miss-002",
       "kind": "tool-result",
-      "summary": "debug_gdb_commands: breakpoints on allocator fast-path confirm fake object at target slab offset; single-step shows vtable redirect",
-      "commandId": "tool:debug_gdb_commands:heap-break",
-      "artifactIds": ["artifact:/tmp/slab-heap-breakpoint.log"],
+      "summary": "debug_gdb_commands: OOB-read at +32 from base reaches freed object with residual vtable pointer into libprivileged.so at vtable+0x28",
+      "commandId": "tool:debug_gdb_commands:aslr-leak",
+      "artifactIds": ["artifact:/tmp/slab-aslr-leak.log"],
       "supports": ["find-slab-near-miss-001"],
       "refutes": [],
-      "createdAt": "2026-04-07T23:35:00.000Z"
+      "createdAt": "2026-04-08T02:10:00.000Z"
+    },
+    {
+      "id": "ev-slab-near-miss-003",
+      "kind": "tool-result",
+      "summary": "debug_gdb_commands: vtable hijack targets privileged callback; callback fires but returns boolean, no capturable artifact",
+      "commandId": "tool:debug_gdb_commands:callback-verify",
+      "artifactIds": ["artifact:/tmp/slab-heap-near-miss.log"],
+      "supports": ["find-slab-near-miss-001"],
+      "refutes": [],
+      "createdAt": "2026-04-08T02:15:00.000Z"
     }
   ]
 }

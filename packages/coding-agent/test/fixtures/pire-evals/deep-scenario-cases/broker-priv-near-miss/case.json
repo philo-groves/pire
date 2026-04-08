@@ -1,8 +1,8 @@
 {
   "title": "Broker deep scenario near miss",
   "expectation": {
-    "minNormalized": 0.62,
-    "maxIssues": 2,
+    "minNormalized": 0.79,
+    "maxIssues": 0,
     "maxRank": 14,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,

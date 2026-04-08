@@ -1,8 +1,8 @@
 {
   "title": "Slab allocator near-miss — static reversal succeeds but dynamic proof blocked",
   "expectation": {
-    "minNormalized": 0.61,
-    "maxIssues": 2,
+    "minNormalized": 0.76,
+    "maxIssues": 0,
     "maxRank": 20,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,
