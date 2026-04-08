@@ -1,31 +1,41 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T23:50:00.000Z",
+  "updatedAt": "2026-04-07T23:58:00.000Z",
   "findings": [
     {
       "id": "find-rop-near-miss-001",
-      "title": "ROP gadgets identified under CFI but chain assembly and JIT pivot unproven",
+      "title": "ROP chain assembled through stack pivot but JIT page and privileged execution unproven",
       "status": "confirmed",
       "severity": "high",
-      "statement": "The parser write primitive is confirmed. Manual objdump analysis identified several CFI-compatible gadgets (pop/ret sequences surviving the landing-pad checks). The CFI policy was documented. However, assembling a complete chain requires automated constraint solving: the stack pivot must land in a gadget that survives CFI, the JIT page address must be discoverable at runtime, and the final payload must avoid W^X. None of these steps can be completed with batch-mode tooling.",
-      "basis": ["ev-rop-near-miss-001"],
-      "relatedEvidenceIds": ["ev-rop-near-miss-001"],
-      "relatedArtifactIds": ["artifact:/tmp/rop-chain-near-miss.log", "artifact:/tmp/rop-chain-near-miss.gadgets"],
+      "statement": "The parser OOB write reaches a vtable pointer. ROPgadget found 47 gadgets surviving the CFI landing-pad policy after filtering indirect branches. A stack-pivot gadget (xchg rax, rsp; ret) chains into a mprotect(addr, 0x1000, PROT_READ|PROT_WRITE|PROT_EXEC) sequence using pop rdi; pop rsi; pop rdx gadgets. The chain is complete through the stack pivot, but the JIT page address is randomized at runtime and no info leak was found to resolve it. Without the JIT target, the mprotect call cannot be aimed and privileged execution cannot be demonstrated.",
+      "basis": ["ev-rop-near-miss-001", "ev-rop-near-miss-002"],
+      "relatedEvidenceIds": ["ev-rop-near-miss-001", "ev-rop-near-miss-002"],
+      "relatedArtifactIds": ["artifact:/tmp/rop-chain-near-miss.log", "artifact:/tmp/rop-chain-near-miss.gadgets", "artifact:/tmp/rop-chain-assembly.log"],
       "reproStatus": "partial",
       "createdAt": "2026-04-07T23:40:00.000Z",
-      "updatedAt": "2026-04-07T23:48:00.000Z"
+      "updatedAt": "2026-04-07T23:56:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-rop-near-miss-001",
       "kind": "tool-result",
-      "summary": "objdump gadget search found 12 CFI-surviving sequences; Ghidra confirms JIT page allocator exists but address not recoverable without runtime inspection",
-      "commandId": "tool:bash:rop-near-miss-01",
-      "artifactIds": ["artifact:/tmp/rop-chain-near-miss.log", "artifact:/tmp/rop-chain-near-miss.gadgets"],
+      "summary": "exploit_ropgadget --filter 'jmp|call': 47 CFI-surviving gadgets including register-control and stack-pivot sequences",
+      "commandId": "tool:exploit_ropgadget:cfi-filtered",
+      "artifactIds": ["artifact:/tmp/rop-chain-near-miss.gadgets"],
       "supports": ["find-rop-near-miss-001"],
       "refutes": [],
       "createdAt": "2026-04-07T23:42:00.000Z"
+    },
+    {
+      "id": "ev-rop-near-miss-002",
+      "kind": "tool-result",
+      "summary": "disasm_radare2_gadgets confirmed xchg rax, rsp; ret pivot; chain assembled through mprotect setup",
+      "commandId": "tool:disasm_radare2_gadgets:pivot-search",
+      "artifactIds": ["artifact:/tmp/rop-chain-assembly.log"],
+      "supports": ["find-rop-near-miss-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T23:48:00.000Z"
     }
   ]
 }

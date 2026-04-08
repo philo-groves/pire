@@ -1,27 +1,27 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T23:10:00.000Z",
+  "updatedAt": "2026-04-07T23:12:00.000Z",
   "findings": [
     {
       "id": "find-slab-fail-001",
-      "title": "Custom slab allocator identified but metadata layout unrecoverable",
+      "title": "Slab allocator metadata layout reversed but heap state inference blocked",
       "status": "candidate",
       "severity": "medium",
-      "statement": "Network message handler routes through a custom slab allocator. Static analysis via objdump and readelf confirms non-standard allocation paths, but the allocator metadata layout, free-list structure, and slab sizing cannot be recovered without heap dump inspection or dynamic memory analysis.",
+      "statement": "GDB breakpoints on the allocator init path confirmed slab header field offsets (size, free-count, next-free pointer). However, the allocator uses a multi-tier topology with thread-local caches and a central arena, making heap state inference after a controlled free sequence infeasible without a custom GDB Python walker script targeting this specific variant.",
       "basis": ["ev-slab-fail-001"],
       "relatedEvidenceIds": ["ev-slab-fail-001"],
       "relatedArtifactIds": ["artifact:/tmp/slab-heap-fail.log"],
       "reproStatus": "not-reproduced",
       "createdAt": "2026-04-07T23:02:00.000Z",
-      "updatedAt": "2026-04-07T23:08:00.000Z"
+      "updatedAt": "2026-04-07T23:10:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-slab-fail-001",
       "kind": "tool-result",
-      "summary": "objdump and readelf identify custom allocator entry points but cannot resolve metadata layout",
-      "commandId": "tool:bash:slab-fail-01",
+      "summary": "debug_gdb_commands: breakpoints on allocator init confirm slab header offsets; multi-tier topology blocks further progress",
+      "commandId": "tool:debug_gdb_commands:slab-init",
       "artifactIds": ["artifact:/tmp/slab-heap-fail.log"],
       "supports": ["find-slab-fail-001"],
       "refutes": [],

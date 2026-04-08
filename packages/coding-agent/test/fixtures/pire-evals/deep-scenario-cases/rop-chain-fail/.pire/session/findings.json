@@ -1,28 +1,28 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T23:35:00.000Z",
+  "updatedAt": "2026-04-07T23:38:00.000Z",
   "findings": [
     {
       "id": "find-rop-fail-001",
-      "title": "Parser OOB write primitive found but ROP chain construction infeasible",
+      "title": "Gadgets discovered but CFI policy eliminates all viable pivot sequences",
       "status": "confirmed",
       "severity": "high",
-      "statement": "The document parser contains a controlled OOB write from a malformed length field. The write reaches a vtable pointer, but exploiting it requires a ROP chain under CFI constraints. No gadget search capability exists in the current tooling, and manual objdump inspection of a large stripped binary is insufficient to find CFI-compatible gadgets.",
+      "statement": "The parser OOB write primitive is confirmed with 4-byte reach past the vtable pointer. ROPgadget found 200+ raw gadgets, but after filtering indirect branches for CFI compliance only 8 gadgets survive. None provide a stack pivot (xchg/mov rsp sequences all land on non-CFI-valid addresses). Without a pivot, the 4-byte write cannot be chained into register control. The exploit path is blocked by the combination of narrow write reach and aggressive CFI enforcement.",
       "basis": ["ev-rop-fail-001"],
       "relatedEvidenceIds": ["ev-rop-fail-001"],
-      "relatedArtifactIds": ["artifact:/tmp/rop-chain-fail.log"],
-      "reproStatus": "partial",
+      "relatedArtifactIds": ["artifact:/tmp/rop-chain-fail.log", "artifact:/tmp/rop-chain-fail.gadgets"],
+      "supports": [],
       "createdAt": "2026-04-07T23:28:00.000Z",
-      "updatedAt": "2026-04-07T23:33:00.000Z"
+      "updatedAt": "2026-04-07T23:36:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-rop-fail-001",
       "kind": "tool-result",
-      "summary": "Ghidra decompilation confirms OOB write primitive in parser; objdump shows CFI enforcement on indirect calls; no automated gadget search available",
-      "commandId": "tool:bash:rop-fail-01",
-      "artifactIds": ["artifact:/tmp/rop-chain-fail.log"],
+      "summary": "exploit_ropgadget: 200+ raw gadgets, 8 CFI-surviving, no usable pivot; disasm_radare2_gadgets confirms no xchg/mov rsp in valid landing pads",
+      "commandId": "tool:exploit_ropgadget:full-scan",
+      "artifactIds": ["artifact:/tmp/rop-chain-fail.log", "artifact:/tmp/rop-chain-fail.gadgets"],
       "supports": ["find-rop-fail-001"],
       "refutes": [],
       "createdAt": "2026-04-07T23:30:00.000Z"

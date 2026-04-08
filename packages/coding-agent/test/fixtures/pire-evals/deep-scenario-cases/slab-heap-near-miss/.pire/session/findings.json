@@ -1,31 +1,41 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T23:25:00.000Z",
+  "updatedAt": "2026-04-07T23:55:00.000Z",
   "findings": [
     {
       "id": "find-slab-near-miss-001",
-      "title": "Slab allocator UAF path identified but fake object placement unvalidated",
+      "title": "Slab allocator UAF exploitable through vtable hijack but privileged callback unreachable",
       "status": "confirmed",
       "severity": "high",
-      "statement": "Decompilation reveals the slab allocator metadata layout and a UAF in the message handler free path. The free-list corruption allows controlled re-allocation, but validating fake object placement and vtable hijack requires dynamic heap state inspection that the current tooling cannot provide.",
-      "basis": ["ev-slab-near-miss-001"],
-      "relatedEvidenceIds": ["ev-slab-near-miss-001"],
-      "relatedArtifactIds": ["artifact:/tmp/slab-heap-near-miss.log", "artifact:/tmp/slab-heap-near-miss.ghidra"],
+      "statement": "The custom slab allocator metadata layout was reversed via Ghidra decompilation and confirmed with a GDB Python free-list walker. Breakpoints on the allocator fast-path show that after a controlled free sequence, a fake object can be placed at a predictable slab offset. GDB single-stepping confirms the vtable dispatch redirects to the attacker-controlled pointer. However, reaching the privileged callback requires a second info leak (ASLR base of the callback table) that static analysis and the current heap state do not provide.",
+      "basis": ["ev-slab-near-miss-001", "ev-slab-near-miss-002"],
+      "relatedEvidenceIds": ["ev-slab-near-miss-001", "ev-slab-near-miss-002"],
+      "relatedArtifactIds": ["artifact:/tmp/slab-heap-near-miss.log", "artifact:/tmp/slab-free-list-walk.log", "artifact:/tmp/slab-heap-breakpoint.log"],
       "reproStatus": "partial",
       "createdAt": "2026-04-07T23:15:00.000Z",
-      "updatedAt": "2026-04-07T23:23:00.000Z"
+      "updatedAt": "2026-04-07T23:53:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-slab-near-miss-001",
       "kind": "tool-result",
-      "summary": "Ghidra decompilation confirms slab metadata layout and UAF path; gdb batch confirms free-list corruption reachable but cannot inspect runtime heap state",
-      "commandId": "tool:bash:slab-near-miss-01",
-      "artifactIds": ["artifact:/tmp/slab-heap-near-miss.log", "artifact:/tmp/slab-heap-near-miss.ghidra"],
+      "summary": "debug_gdb_script: Python free-list walker confirms slab metadata layout and controlled re-allocation after UAF",
+      "commandId": "tool:debug_gdb_script:slab-walker",
+      "artifactIds": ["artifact:/tmp/slab-free-list-walk.log"],
       "supports": ["find-slab-near-miss-001"],
       "refutes": [],
-      "createdAt": "2026-04-07T23:17:00.000Z"
+      "createdAt": "2026-04-07T23:20:00.000Z"
+    },
+    {
+      "id": "ev-slab-near-miss-002",
+      "kind": "tool-result",
+      "summary": "debug_gdb_commands: breakpoints on allocator fast-path confirm fake object at target slab offset; single-step shows vtable redirect",
+      "commandId": "tool:debug_gdb_commands:heap-break",
+      "artifactIds": ["artifact:/tmp/slab-heap-breakpoint.log"],
+      "supports": ["find-slab-near-miss-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T23:35:00.000Z"
     }
   ]
 }

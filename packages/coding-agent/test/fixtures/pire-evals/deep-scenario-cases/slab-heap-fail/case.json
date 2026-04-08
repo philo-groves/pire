@@ -1,7 +1,7 @@
 {
-  "title": "Slab allocator heap exploitation fail — no heap introspection",
+  "title": "Slab allocator fail — allocator reversed but multi-tier topology blocks heap inference",
   "expectation": {
-    "minNormalized": 0.15,
+    "minNormalized": 0.14,
     "maxIssues": 3,
     "maxRank": 20,
     "minScenarioPassed": 0,

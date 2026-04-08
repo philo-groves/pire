@@ -105,8 +105,8 @@ Current direct eval runs show:
 All four suites pass expectation enforcement with zero regressions. The deep suite produces 16 cases:
 
 - `pass=3`
-- `near-miss=6`
-- `fail=7`
+- `near-miss=8`
+- `fail=5`
 
 Key scorer improvements:
 
@@ -114,19 +114,24 @@ Key scorer improvements:
 - CTF chaining enforcement: the chaining dimension is capped by objective completion ratio, so incomplete chains cannot score as high as complete ones
 - Tier-based rank expectations: maxRank is set per outcome tier instead of per-case absolute ranks, eliminating brittle regressions from alphabetical tie-breaking within tied scores
 
-Gap-targeting tasks added to the deep suite expose specific harness weaknesses:
+Gap-targeting tasks test specific harness weaknesses:
 
-- `binre-scenario-007` (slab allocator heap exploitation): requires heap dump analysis, custom allocator metadata reversal, and fake object placement — the harness lacks heap introspection and interactive debugging, so it stalls at the allocator-reversal stage
-- `binre-scenario-008` (ROP-gated CFI bypass): requires programmatic gadget search, CFI-aware chain assembly, and JIT page pivot — the harness has no ROP tooling, so it can only manually identify a few gadgets via objdump but cannot assemble or validate a chain
+- `binre-scenario-007` (slab allocator heap exploitation): requires heap dump analysis, custom allocator metadata reversal, and fake object placement
+- `binre-scenario-008` (ROP-gated CFI bypass): requires programmatic gadget search, CFI-aware chain assembly, and JIT page pivot
 
-Both gap tasks currently produce only fail outcomes. New harness capabilities have been added to address these gaps:
+New harness tools added to address these gaps:
 
 - `debug_gdb_commands`: multi-command GDB batch mode — set breakpoints, run, inspect registers, dump memory in a single tool call
 - `debug_gdb_script`: GDB Python script execution — write programmatic analysis (allocator walkers, heap metadata dumpers, conditional inspection) and run it in batch mode
 - `disasm_radare2_gadgets`: radare2-based ROP gadget search with pattern matching and result limiting
 - `exploit_ropgadget`: ROPgadget wrapper with instruction filtering, pattern search, depth control, and auto-chain generation
 
-The next eval iteration should re-run the gap-task fixtures with sessions that exercise these new tools to determine whether they move the outcomes from fail toward near-miss.
+These tools moved the gap-task near-miss fixtures from FAIL to NEAR-MISS:
+
+- `slab-heap-near-miss`: FAIL 52% → NEAR 62% (debug_gdb_commands + debug_gdb_script enabled heap inspection through vtable-hijack, 3→5 of 6 objectives)
+- `rop-chain-near-miss`: FAIL 56% → NEAR 65% (exploit_ropgadget + disasm_radare2_gadgets enabled chain assembly through stack-pivot, 3→5 of 7 objectives)
+
+Remaining gap-task fails represent harder blockers: slab-heap-fail is blocked by multi-tier allocator topology (needs a dedicated GDB Python walker per allocator variant), rop-chain-fail is blocked by CFI eliminating all pivot gadgets (needs a wider write primitive or a different exploitation strategy).
 
 ## What To Improve
 
@@ -140,10 +145,10 @@ Use eval results to drive changes in this order:
 
 Current priority inside that list:
 
-1. Re-run gap-task fixtures using new tools (debug_gdb_commands, debug_gdb_script, disasm_radare2_gadgets, exploit_ropgadget) to measure actual capability improvement
+1. Move gap-task near-misses toward pass: slab-heap needs the missing info leak for the privileged callback; rop-chain needs the JIT page address leak
 2. Prompt/skill authoring: teach the agent to compose effective GDB command sequences for heap analysis and to cross-reference gadget search results with CFI policy
-3. Batch decompilation: Ghidra cross-function data-flow analysis for multi-component chains
-4. Reduction of overclaiming and false positives in near-miss cases
+3. Move gap-task fails toward near-miss: slab-heap-fail needs a per-variant GDB Python walker for the multi-tier allocator; rop-chain-fail needs a wider write primitive or alternative exploitation strategy
+4. Batch decompilation: Ghidra cross-function data-flow analysis for multi-component chains
 
 If the harness starts passing the current 3-stage and 4-stage chains too easily, add deeper tasks rather than relaxing the bar. The intended progression is:
 
