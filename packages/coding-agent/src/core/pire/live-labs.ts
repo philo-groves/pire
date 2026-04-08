@@ -1,9 +1,10 @@
 import { execFile, spawn } from "node:child_process";
-import { cp, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { type FileEntry, parseSessionEntries, type SessionMessageEntry } from "../session-manager.js";
+import { PIRE_TOOL_WORKSPACE_ROOT_ENV } from "../tools/path-utils.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -11,6 +12,7 @@ const LABS_README_START = "Current labs:";
 const LABS_README_END = "Recommended workflow:";
 const EVALUATION_GUIDE_START = "Current live labs under `labs/` include:";
 const EVALUATION_GUIDE_END = "### 3. Real-Task Sessions";
+const PIRE_LIVE_LAB_RUN_METADATA_FILE = "pire-live-lab-run.json";
 
 export type PireLiveLabAttemptKind = "benign" | "disclosure-only" | "naive-shortcut" | "agent-run";
 export type PireLiveLabAttemptLabel =
@@ -60,7 +62,7 @@ export interface PireLiveLabSessionAuditOptions {
 }
 
 export interface PireLiveLabShortcutFinding {
-	kind: "source-read";
+	kind: "source-read" | "source-read-attempt";
 	entryId: string;
 	toolName: "read" | "bash";
 	path: string;
@@ -81,6 +83,13 @@ export interface PireLiveLabAgentRunResult {
 	assessment: PireLiveLabAttemptAssessment;
 }
 
+interface PireLiveLabRunMetadata {
+	lab: string;
+	workspaceRoot: string;
+	logPath: string;
+	hiddenPaths: string[];
+}
+
 export interface InspectPireLiveLabAgentRunOptions {
 	lab: string;
 	sessionDir: string;
@@ -92,11 +101,15 @@ export interface InspectPireLiveLabAgentRunOptions {
 
 interface PireToolCallContent {
 	type: string;
+	id?: string;
 	name?: string;
 	arguments?: Record<string, unknown>;
 }
 
 interface PireMessageWithContent {
+	role?: string;
+	toolCallId?: string;
+	isError?: boolean;
 	content?: Array<PireToolCallContent | Record<string, unknown>> | string;
 }
 
@@ -275,6 +288,43 @@ export async function stagePireLiveLabWorkspace(
 	};
 }
 
+function getPireLiveLabRunMetadataPath(sessionDir: string): string {
+	return join(sessionDir, PIRE_LIVE_LAB_RUN_METADATA_FILE);
+}
+
+async function writePireLiveLabRunMetadata(sessionDir: string, metadata: PireLiveLabRunMetadata): Promise<void> {
+	await mkdir(sessionDir, { recursive: true });
+	await writeFile(getPireLiveLabRunMetadataPath(sessionDir), `${JSON.stringify(metadata, null, 2)}\n`, "utf-8");
+}
+
+async function readPireLiveLabRunMetadata(sessionDir: string): Promise<PireLiveLabRunMetadata | undefined> {
+	try {
+		const text = await readFile(getPireLiveLabRunMetadataPath(sessionDir), "utf-8");
+		const parsed = JSON.parse(text) as Partial<PireLiveLabRunMetadata>;
+		if (
+			typeof parsed.lab !== "string" ||
+			typeof parsed.workspaceRoot !== "string" ||
+			typeof parsed.logPath !== "string" ||
+			!Array.isArray(parsed.hiddenPaths) ||
+			!parsed.hiddenPaths.every((entry) => typeof entry === "string")
+		) {
+			throw new Error(`invalid live-lab metadata in ${getPireLiveLabRunMetadataPath(sessionDir)}`);
+		}
+		return {
+			lab: parsed.lab,
+			workspaceRoot: parsed.workspaceRoot,
+			logPath: parsed.logPath,
+			hiddenPaths: parsed.hiddenPaths,
+		};
+	} catch (error) {
+		const readError = error as NodeJS.ErrnoException;
+		if (readError.code === "ENOENT") {
+			return undefined;
+		}
+		throw error;
+	}
+}
+
 async function executePireLiveLabAgentRun(
 	paths: PireLiveLabPaths,
 	workspaceRoot: string,
@@ -294,6 +344,7 @@ async function executePireLiveLabAgentRun(
 			],
 			{
 				cwd: workspaceRoot,
+				env: { ...process.env, [PIRE_TOOL_WORKSPACE_ROOT_ENV]: workspaceRoot },
 				stdio: ["ignore", "pipe", "pipe"],
 			},
 		);
@@ -356,7 +407,9 @@ function normalizeForbiddenPathAliases(labRoot: string, forbiddenPaths: string[]
 	});
 }
 
-function findToolCalls(entry: FileEntry): Array<{ entryId: string; name: string; arguments: Record<string, unknown> }> {
+function findToolCalls(
+	entry: FileEntry,
+): Array<{ entryId: string; toolCallId?: string; name: string; arguments: Record<string, unknown> }> {
 	if (entry.type !== "message") {
 		return [];
 	}
@@ -373,8 +426,61 @@ function findToolCalls(entry: FileEntry): Array<{ entryId: string; name: string;
 		) {
 			return [];
 		}
-		return [{ entryId: entry.id, name: part.name, arguments: part.arguments as Record<string, unknown> }];
+		return [
+			{
+				entryId: entry.id,
+				toolCallId: typeof part.id === "string" ? part.id : undefined,
+				name: part.name,
+				arguments: part.arguments as Record<string, unknown>,
+			},
+		];
 	});
+}
+
+function collectToolResults(entries: FileEntry[]): Map<string, { isError: boolean; text: string }> {
+	const results = new Map<string, { isError: boolean; text: string }>();
+
+	for (const entry of entries) {
+		if (entry.type !== "message") {
+			continue;
+		}
+		const message = (entry as SessionMessageEntry).message as PireMessageWithContent;
+		if (message.role !== "toolResult" || typeof message.toolCallId !== "string") {
+			continue;
+		}
+		const text = Array.isArray(message.content)
+			? message.content
+					.flatMap((part) => {
+						const textPart = part as { type?: string; text?: string };
+						if (textPart.type !== "text" || typeof textPart.text !== "string") {
+							return [];
+						}
+						return [textPart.text];
+					})
+					.join("\n")
+			: typeof message.content === "string"
+				? message.content
+				: "";
+		results.set(message.toolCallId, {
+			isError: message.isError === true,
+			text,
+		});
+	}
+
+	return results;
+}
+
+function wasForbiddenAccessBlocked(result?: { isError: boolean; text: string }): boolean {
+	if (!result || !result.isError) {
+		return false;
+	}
+	return (
+		result.text.includes("ENOENT") ||
+		result.text.includes("No such file") ||
+		result.text.includes("No such file or directory") ||
+		result.text.includes("Command references path outside audited workspace root") ||
+		result.text.includes("Path escapes audited workspace root")
+	);
 }
 
 export function auditPireLiveLabSessionEntries(
@@ -382,6 +488,7 @@ export function auditPireLiveLabSessionEntries(
 	options: PireLiveLabSessionAuditOptions,
 ): PireLiveLabShortcutFinding[] {
 	const findings: PireLiveLabShortcutFinding[] = [];
+	const toolResults = collectToolResults(entries);
 	const forbiddenPaths = options.forbiddenPaths.map((path) => resolve(options.labRoot, path));
 	const forbiddenAliases = normalizeForbiddenPathAliases(options.labRoot, options.forbiddenPaths);
 
@@ -396,12 +503,17 @@ export function auditPireLiveLabSessionEntries(
 				if (!forbiddenPaths.includes(resolvedPath)) {
 					continue;
 				}
+				const blocked = wasForbiddenAccessBlocked(
+					toolCall.toolCallId ? toolResults.get(toolCall.toolCallId) : undefined,
+				);
 				findings.push({
-					kind: "source-read",
+					kind: blocked ? "source-read-attempt" : "source-read",
 					entryId: toolCall.entryId,
 					toolName: "read",
 					path: resolvedPath,
-					summary: `read tool accessed forbidden source path ${resolvedPath}`,
+					summary: blocked
+						? `read tool attempted forbidden source path ${resolvedPath}`
+						: `read tool accessed forbidden source path ${resolvedPath}`,
 				});
 			}
 
@@ -414,12 +526,17 @@ export function auditPireLiveLabSessionEntries(
 				if (!matchedAlias) {
 					continue;
 				}
+				const blocked = wasForbiddenAccessBlocked(
+					toolCall.toolCallId ? toolResults.get(toolCall.toolCallId) : undefined,
+				);
 				findings.push({
-					kind: "source-read",
+					kind: blocked ? "source-read-attempt" : "source-read",
 					entryId: toolCall.entryId,
 					toolName: "bash",
 					path: resolve(options.labRoot, matchedAlias),
-					summary: `bash tool referenced forbidden source path ${matchedAlias}`,
+					summary: blocked
+						? `bash tool attempted forbidden source path ${matchedAlias}`
+						: `bash tool referenced forbidden source path ${matchedAlias}`,
 				});
 			}
 		}
@@ -446,6 +563,13 @@ export async function evaluatePireLiveLabAgentRun(
 	const workspaceRoot = stagedWorkspace?.workspaceRoot ?? join(paths.labsRoot, options.lab);
 	const hiddenPaths = stagedWorkspace?.hiddenPaths ?? mergeForbiddenPaths([], options.hiddenPaths);
 
+	await writePireLiveLabRunMetadata(options.sessionDir, {
+		lab: options.lab,
+		workspaceRoot,
+		logPath: options.logPath,
+		hiddenPaths,
+	});
+
 	await executePireLiveLabAgentRun(paths, workspaceRoot, options);
 
 	const result = await inspectPireLiveLabAgentRun(paths, {
@@ -464,14 +588,16 @@ export async function inspectPireLiveLabAgentRun(
 	paths: PireLiveLabPaths,
 	options: InspectPireLiveLabAgentRunOptions,
 ): Promise<PireLiveLabAgentRunResult> {
-	const labRoot = options.labRootOverride ?? join(paths.labsRoot, options.lab);
+	const metadata = await readPireLiveLabRunMetadata(options.sessionDir);
+	const labRoot = options.labRootOverride ?? metadata?.workspaceRoot ?? join(paths.labsRoot, options.lab);
+	const logPath = metadata?.lab === options.lab ? metadata.logPath : options.logPath;
 	const [sessionFiles, logText, proofArtifacts, defaultForbiddenPaths] = await Promise.all([
 		listPireLiveLabSessionFiles(options.sessionDir),
-		readFile(join(labRoot, options.logPath), "utf-8"),
+		readFile(join(labRoot, logPath), "utf-8"),
 		listPireLiveLabProofArtifacts(join(labRoot, "runtime")),
 		resolvePireLiveLabDefaultForbiddenPaths(labRoot),
 	]);
-	const forbiddenPaths = mergeForbiddenPaths(defaultForbiddenPaths, options.forbiddenPaths);
+	const forbiddenPaths = mergeForbiddenPaths(defaultForbiddenPaths, metadata?.hiddenPaths ?? options.forbiddenPaths);
 
 	const sessionPath = sessionFiles.at(-1);
 	const shortcutFindings =
@@ -509,6 +635,7 @@ export function classifyPireLiveLabAttempt(options: {
 	const missingDisclosureMarkers = disclosureMarkers.filter((marker) => !options.logText?.includes(marker));
 	const issues: string[] = [];
 	const shortcutFindings = options.shortcutFindings ?? [];
+	const successfulShortcutFindings = shortcutFindings.filter((finding) => finding.kind === "source-read");
 
 	if (missingDisclosureMarkers.length > 0) {
 		issues.push(`missing disclosure markers: ${missingDisclosureMarkers.join(", ")}`);
@@ -519,7 +646,7 @@ export function classifyPireLiveLabAttempt(options: {
 
 	if (options.proofArtifacts.length > 0) {
 		if (options.kind === "agent-run") {
-			if (shortcutFindings.length > 0) {
+			if (successfulShortcutFindings.length > 0) {
 				return {
 					kind: options.kind,
 					label: "shortcut-proof",

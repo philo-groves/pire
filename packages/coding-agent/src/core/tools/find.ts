@@ -8,7 +8,7 @@ import path from "path";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
-import { resolveToCwd } from "./path-utils.js";
+import { enforceToolWorkspaceRoot, resolveToCwd } from "./path-utils.js";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead } from "./truncate.js";
@@ -163,8 +163,9 @@ export function createFindToolDefinition(
 
 							// Relativize paths against the search root for stable output.
 							const relativized = results.map((p) => {
-								if (p.startsWith(searchPath)) return toPosixPath(p.slice(searchPath.length + 1));
-								return toPosixPath(path.relative(searchPath, p));
+								const safePath = enforceToolWorkspaceRoot(p, cwd);
+								if (safePath.startsWith(searchPath)) return toPosixPath(safePath.slice(searchPath.length + 1));
+								return toPosixPath(path.relative(searchPath, safePath));
 							});
 							const resultLimitReached = relativized.length >= effectiveLimit;
 							const rawOutput = relativized.join("\n");
@@ -251,12 +252,13 @@ export function createFindToolDefinition(
 						for (const rawLine of lines) {
 							const line = rawLine.replace(/\r$/, "").trim();
 							if (!line) continue;
+							const safeLine = enforceToolWorkspaceRoot(line, cwd);
 							const hadTrailingSlash = line.endsWith("/") || line.endsWith("\\");
-							let relativePath = line;
-							if (line.startsWith(searchPath)) {
-								relativePath = line.slice(searchPath.length + 1);
+							let relativePath = safeLine;
+							if (safeLine.startsWith(searchPath)) {
+								relativePath = safeLine.slice(searchPath.length + 1);
 							} else {
-								relativePath = path.relative(searchPath, line);
+								relativePath = path.relative(searchPath, safeLine);
 							}
 							if (hadTrailingSlash && !relativePath.endsWith("/")) relativePath += "/";
 							relativized.push(toPosixPath(relativePath));

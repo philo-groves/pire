@@ -2,6 +2,8 @@ import { accessSync, constants } from "node:fs";
 import * as os from "node:os";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 
+export const PIRE_TOOL_WORKSPACE_ROOT_ENV = "PIRE_TOOL_WORKSPACE_ROOT";
+
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const NARROW_NO_BREAK_SPACE = "\u202F";
 function normalizeUnicodeSpaces(str: string): string {
@@ -54,9 +56,9 @@ export function expandPath(filePath: string): string {
 export function resolveToCwd(filePath: string, cwd: string): string {
 	const expanded = expandPath(filePath);
 	if (isAbsolute(expanded)) {
-		return expanded;
+		return enforceToolWorkspaceRoot(expanded, cwd);
 	}
-	return resolvePath(cwd, expanded);
+	return enforceToolWorkspaceRoot(resolvePath(cwd, expanded), cwd);
 }
 
 export function resolveReadPath(filePath: string, cwd: string): string {
@@ -91,4 +93,30 @@ export function resolveReadPath(filePath: string, cwd: string): string {
 	}
 
 	return resolved;
+}
+
+export function getToolWorkspaceRoot(cwd: string): string | undefined {
+	const configuredRoot = process.env[PIRE_TOOL_WORKSPACE_ROOT_ENV];
+	if (!configuredRoot) {
+		return undefined;
+	}
+	return resolvePath(cwd, configuredRoot);
+}
+
+export function isPathWithinRoot(targetPath: string, rootPath: string): boolean {
+	const normalizedRoot = resolvePath(rootPath);
+	const normalizedTarget = resolvePath(targetPath);
+	return normalizedTarget === normalizedRoot || normalizedTarget.startsWith(`${normalizedRoot}/`);
+}
+
+export function enforceToolWorkspaceRoot(targetPath: string, cwd: string): string {
+	const workspaceRoot = getToolWorkspaceRoot(cwd);
+	if (!workspaceRoot) {
+		return targetPath;
+	}
+	const resolvedTarget = resolvePath(targetPath);
+	if (!isPathWithinRoot(resolvedTarget, workspaceRoot)) {
+		throw new Error(`Path escapes audited workspace root: ${resolvedTarget}`);
+	}
+	return resolvedTarget;
 }

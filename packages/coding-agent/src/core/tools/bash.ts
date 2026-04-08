@@ -12,6 +12,7 @@ import { theme } from "../../modes/interactive/theme/theme.js";
 import { waitForChildProcess } from "../../utils/child-process.js";
 import { getShellConfig, getShellEnv, killProcessTree } from "../../utils/shell.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
+import { getToolWorkspaceRoot, isPathWithinRoot } from "./path-utils.js";
 import { getTextOutput, invalidArgText, str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateTail } from "./truncate.js";
@@ -138,6 +139,34 @@ export type BashSpawnHook = (context: BashSpawnContext) => BashSpawnContext;
 function resolveSpawnContext(command: string, cwd: string, spawnHook?: BashSpawnHook): BashSpawnContext {
 	const baseContext: BashSpawnContext = { command, cwd, env: { ...getShellEnv() } };
 	return spawnHook ? spawnHook(baseContext) : baseContext;
+}
+
+function extractCommandPathCandidates(command: string): string[] {
+	return Array.from(command.matchAll(/(^|[\s"'=])((?:\/|\.{1,2}\/|~\/)[^\s"'`;|&<>]+)/g), (match) => match[2] ?? "");
+}
+
+function assertCommandWithinWorkspace(command: string, cwd: string): void {
+	const workspaceRoot = getToolWorkspaceRoot(cwd);
+	if (!workspaceRoot) {
+		return;
+	}
+	for (const candidate of extractCommandPathCandidates(command)) {
+		try {
+			const resolved = candidate.startsWith("~/")
+				? join(process.env.HOME ?? "", candidate.slice(2))
+				: candidate.startsWith("/")
+					? candidate
+					: join(cwd, candidate);
+			if (!isPathWithinRoot(resolved, workspaceRoot)) {
+				throw new Error(`Command references path outside audited workspace root: ${candidate}`);
+			}
+		} catch (error) {
+			if (error instanceof Error) {
+				throw error;
+			}
+			throw new Error(`Command references path outside audited workspace root: ${candidate}`);
+		}
+	}
 }
 
 export interface BashToolOptions {
@@ -280,6 +309,7 @@ export function createBashToolDefinition(
 			_ctx?,
 		) {
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
+			assertCommandWithinWorkspace(resolvedCommand, cwd);
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
 			if (onUpdate) {
 				onUpdate({ content: [], details: undefined });

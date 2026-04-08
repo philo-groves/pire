@@ -8,7 +8,7 @@ import path from "path";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
-import { resolveToCwd } from "./path-utils.js";
+import { enforceToolWorkspaceRoot, resolveToCwd } from "./path-utils.js";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import {
@@ -187,26 +187,28 @@ export function createGrepToolDefinition(
 						const contextValue = context && context > 0 ? context : 0;
 						const effectiveLimit = Math.max(1, limit ?? DEFAULT_LIMIT);
 						const formatPath = (filePath: string): string => {
+							const safePath = enforceToolWorkspaceRoot(filePath, cwd);
 							if (isDirectory) {
-								const relative = path.relative(searchPath, filePath);
+								const relative = path.relative(searchPath, safePath);
 								if (relative && !relative.startsWith("..")) {
 									return relative.replace(/\\/g, "/");
 								}
 							}
-							return path.basename(filePath);
+							return path.basename(safePath);
 						};
 
 						const fileCache = new Map<string, string[]>();
 						const getFileLines = async (filePath: string): Promise<string[]> => {
-							let lines = fileCache.get(filePath);
+							const safePath = enforceToolWorkspaceRoot(filePath, cwd);
+							let lines = fileCache.get(safePath);
 							if (!lines) {
 								try {
-									const content = await ops.readFile(filePath);
+									const content = await ops.readFile(safePath);
 									lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 								} catch {
 									lines = [];
 								}
-								fileCache.set(filePath, lines);
+								fileCache.set(safePath, lines);
 							}
 							return lines;
 						};
