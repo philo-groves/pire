@@ -105,6 +105,10 @@ Current live labs under `labs/` include:
 - `multi-stage-live`
 - `encoded-config-live`
 - `dispatch-table-live`
+- `vm-bytecode-live`
+- `reloc-record-live`
+- `license-fsm-live`
+- `thread-rendezvous-live`
 
 ### 3. Real-Task Sessions
 
