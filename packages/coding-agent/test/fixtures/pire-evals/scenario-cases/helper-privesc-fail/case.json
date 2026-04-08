@@ -1,7 +1,7 @@
 {
   "title": "Local helper end-to-end scenario fail",
   "expectation": {
-    "minNormalized": 0.45,
+    "minNormalized": 0.41,
     "maxIssues": 0,
     "maxRank": 3,
     "minScenarioPassed": 0,

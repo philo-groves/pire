@@ -249,7 +249,26 @@ export function scorePireEvalSubmission(task: PireEvalTask, submission: PireEval
 		if (max <= 0) {
 			continue;
 		}
-		const grade = submission.judgement.dimensions[dimension] ?? "miss";
+		let grade = submission.judgement.dimensions[dimension] ?? "miss";
+
+		// CTF proof enforcement: proof cannot be "hit" without captured flag evidence
+		if (dimension === "proof" && task.ctf && (submission.capturedFlags?.length ?? 0) === 0) {
+			if (grade === "hit") {
+				grade = "partial";
+			}
+		}
+
+		// CTF chaining enforcement: cap chaining grade by objective completion ratio
+		if (dimension === "chaining" && task.ctf && task.ctf.requiredObjectives.length > 0) {
+			const completed = new Set(submission.completedObjectives ?? []);
+			const completionRatio =
+				task.ctf.requiredObjectives.filter((o) => completed.has(o)).length / task.ctf.requiredObjectives.length;
+			const cappedFraction = Math.min(gradeToFraction(grade), completionRatio);
+			const earned = max * cappedFraction;
+			breakdown.push({ dimension, grade, earned, max });
+			continue;
+		}
+
 		const earned = max * gradeToFraction(grade);
 		breakdown.push({ dimension, grade, earned, max });
 	}

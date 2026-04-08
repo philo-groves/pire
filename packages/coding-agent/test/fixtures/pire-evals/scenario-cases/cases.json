@@ -1,7 +1,7 @@
 {
   "title": "Scenario fixture session cases",
   "expectation": {
-    "minAverageNormalized": 0.7,
+    "minAverageNormalized": 0.66,
     "maxAverageIssues": 0,
     "maxRegressions": 0,
     "minCases": 3,

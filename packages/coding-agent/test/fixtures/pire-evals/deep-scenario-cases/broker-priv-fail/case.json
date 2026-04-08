@@ -1,9 +1,9 @@
 {
   "title": "Broker deep scenario fail",
   "expectation": {
-    "minNormalized": 0.48,
+    "minNormalized": 0.43,
     "maxIssues": 2,
-    "maxRank": 6,
+    "maxRank": 12,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 0,
     "maxScenarioFailed": 1

@@ -25,6 +25,7 @@
           "mitigations": "partial",
           "primitives": "hit",
           "chaining": "hit",
+          "proof": "miss",
           "reporting": "hit"
         }
       },

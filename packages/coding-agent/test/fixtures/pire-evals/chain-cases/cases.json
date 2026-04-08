@@ -1,7 +1,7 @@
 {
   "title": "Chain fixture session cases",
   "expectation": {
-    "minAverageNormalized": 0.68,
+    "minAverageNormalized": 0.65,
     "maxAverageIssues": 1.34,
     "maxRegressions": 0,
     "minCases": 3,

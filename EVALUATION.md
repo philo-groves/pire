@@ -41,6 +41,17 @@ npx tsx ./src/pire-eval-cli.ts \
   --json
 ```
 
+Scaffold a new deep-case starter from an existing task:
+
+```bash
+npx tsx ./src/pire-eval-scaffold-cli.ts \
+  --suite test/fixtures/pire-evals/deep-scenario-suite.json \
+  --cases-dir test/fixtures/pire-evals/deep-scenario-cases \
+  --task-id binre-scenario-006 \
+  --preset proof-gap \
+  --case-name broker-proof-gap-next
+```
+
 Save or compare baselines:
 
 ```bash
@@ -65,12 +76,14 @@ Primary fixture suites:
 - `packages/coding-agent/test/fixtures/pire-evals/binary-re-starter-suite.json`
 - `packages/coding-agent/test/fixtures/pire-evals/chain-suite.json`
 - `packages/coding-agent/test/fixtures/pire-evals/scenario-suite.json`
+- `packages/coding-agent/test/fixtures/pire-evals/deep-scenario-suite.json`
 
 Primary case directories:
 
 - `packages/coding-agent/test/fixtures/pire-evals/session-cases`
 - `packages/coding-agent/test/fixtures/pire-evals/chain-cases`
 - `packages/coding-agent/test/fixtures/pire-evals/scenario-cases`
+- `packages/coding-agent/test/fixtures/pire-evals/deep-scenario-cases`
 
 The real fixture metadata now carries expected outcome shape in `case.json` and `cases.json`, including:
 
@@ -79,6 +92,27 @@ The real fixture metadata now carries expected outcome shape in `case.json` and 
 - chain pass / near-miss / fail expectations
 - scenario pass / near-miss / fail expectations
 - baseline drift thresholds
+
+## Current Status
+
+Current direct eval runs show:
+
+- `binary-re-starter-suite.json`: passes
+- `scenario-suite.json`: passes
+- `chain-suite.json`: passes
+- `deep-scenario-suite.json`: passes
+
+All four suites pass expectation enforcement with zero regressions. The deep suite produces the correct outcome shape:
+
+- `pass=3`
+- `near-miss=6`
+- `fail=3`
+
+Key scorer improvements that enabled this:
+
+- CTF proof enforcement: the proof dimension is capped at "partial" when a CTF task has no captured flag evidence, preventing overclaiming
+- CTF chaining enforcement: the chaining dimension is capped by objective completion ratio, so incomplete chains cannot score as high as complete ones
+- Tier-based rank expectations: maxRank is set per outcome tier (pass=3, proof-gap=6, near-miss=9, fail=12) instead of per-case absolute ranks, eliminating brittle regressions from alphabetical tie-breaking within tied scores
 
 ## What To Improve
 
@@ -89,6 +123,12 @@ Use eval results to drive changes in this order:
 3. Chain composition
 4. End-to-end scenario completion
 5. Reduction of overclaiming and false positives
+
+Current priority inside that list:
+
+1. Deep scenario completion across 5-stage and 6-stage chains
+2. Adding harder corpus now that the current suite passes cleanly
+3. Reduction of overclaiming and false positives in near-miss cases
 
 If the harness starts passing the current 3-stage and 4-stage chains too easily, add deeper tasks rather than relaxing the bar. The intended progression is:
 

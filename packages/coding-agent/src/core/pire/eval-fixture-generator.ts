@@ -198,13 +198,25 @@ function getPresetJudgementDimensions(
 	if (options.judgementDimensions) {
 		return options.judgementDimensions;
 	}
-	if (options.preset === "pass" || options.preset === "proof-gap") {
+	if (options.preset === "pass") {
 		return {
 			rootCause: "hit",
 			exploitability: "hit",
 			mitigations: "partial",
 			primitives: "hit",
 			chaining: "hit",
+			proof: "hit",
+			reporting: "hit",
+		};
+	}
+	if (options.preset === "proof-gap") {
+		return {
+			rootCause: "hit",
+			exploitability: "hit",
+			mitigations: "partial",
+			primitives: "hit",
+			chaining: "hit",
+			proof: "miss",
 			reporting: "hit",
 		};
 	}

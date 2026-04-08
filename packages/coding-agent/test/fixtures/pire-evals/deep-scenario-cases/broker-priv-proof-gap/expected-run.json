@@ -44,7 +44,7 @@
           "discovery": "hit",
           "classification": "hit",
           "rootCause": "hit",
-          "proof": "hit",
+          "proof": "miss",
           "reporting": "hit",
           "exploitability": "hit",
           "mitigations": "partial",

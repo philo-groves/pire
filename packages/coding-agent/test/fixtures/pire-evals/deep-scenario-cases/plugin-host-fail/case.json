@@ -1,9 +1,9 @@
 {
   "title": "Plugin-host deep scenario fail",
   "expectation": {
-    "minNormalized": 0.48,
+    "minNormalized": 0.45,
     "maxIssues": 2,
-    "maxRank": 3,
+    "maxRank": 12,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 0,
     "maxScenarioFailed": 1

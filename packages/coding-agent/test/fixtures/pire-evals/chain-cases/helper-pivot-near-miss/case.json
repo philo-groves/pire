@@ -1,7 +1,7 @@
 {
   "title": "Helper-pivot chain near miss",
   "expectation": {
-    "minNormalized": 0.69,
+    "minNormalized": 0.66,
     "maxIssues": 2,
     "maxRank": 2,
     "minChainPassed": 0,

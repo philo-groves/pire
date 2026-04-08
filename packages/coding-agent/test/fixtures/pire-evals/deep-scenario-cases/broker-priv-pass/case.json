@@ -3,7 +3,7 @@
   "expectation": {
     "minNormalized": 0.94,
     "maxIssues": 0,
-    "maxRank": 2,
+    "maxRank": 3,
     "minScenarioPassed": 1,
     "maxScenarioNearMiss": 0,
     "maxScenarioFailed": 0
