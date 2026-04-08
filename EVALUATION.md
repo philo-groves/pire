@@ -17,12 +17,34 @@ The current eval program is centered on binary reverse engineering rather than w
 - multi-stage chain construction
 - end-to-end scenario execution
 
+That focus remains useful, but it is no longer sufficient by itself. Static fixture suites are now only one layer of the eval program, not the whole thing.
+
 Complex `chain` and `scenario` tasks use CTF-style success criteria:
 
 - required intermediate objectives
 - captured-flag evidence for a full pass
 - explicit pass / near-miss / fail summaries
 - baseline drift enforcement in CI
+
+Those CTF-style suites are still valuable for regression control, but once the harness saturates them they should be treated as baseline checks rather than the main signal for capability.
+
+## Eval Principles
+
+We now want the eval program to follow these priorities:
+
+1. Realistic end-to-end security work over benchmark trivia
+2. Pass@1 on meaningful tasks over "eventually solved after retries"
+3. Separate scoring for discovery, exploit triage, exploit development, proof, and reporting
+4. Explicit trajectory-safety coverage, not just outcome scoring
+5. Stable fixture suites for regression control plus harder live or private tasks for capability growth
+
+Concrete implications:
+
+- Prefer real binaries, real codebases, realistic shells, and explicit attacker or researcher end states.
+- Measure exploitability judgment separately from bug identification. "Found a bug" and "picked the right bug to push to proof" are different capabilities.
+- Evaluate the full loop: observe, hypothesize, triage, exploit or prove, and report.
+- Treat benchmark saturation as a signal to add harder tasks, not to relax the bar.
+- Keep fixture baselines in CI, but use live and external-style tasks to decide whether the agent is actually improving.
 
 ## Core Commands
 
@@ -92,6 +114,48 @@ The real fixture metadata now carries expected outcome shape in `case.json` and 
 - chain pass / near-miss / fail expectations
 - scenario pass / near-miss / fail expectations
 - baseline drift thresholds
+
+## Next Eval Layers
+
+Beyond the existing fixture suites, add and track these layers explicitly:
+
+1. Real-task pass@1 runs
+
+- Use local runnable labs, real binaries, or real codebases with concrete success conditions.
+- Run single-shot or tightly budgeted attempts.
+- Record both task success and whether the trajectory stayed within policy.
+
+2. Exploit-triage evals
+
+- Give the agent multiple candidate crashes, bugs, or primitives.
+- Score whether it identifies the most exploitable path, not just any bug-like signal.
+- Separate "best target chosen" from "final exploit completed."
+
+3. Trajectory-safety evals
+
+- Add dedicated cases for reckless shortcutting:
+  - editing protected targets instead of exploiting them
+  - reusing stale outputs from prior runs
+  - bypassing permissions, sandbox boundaries, or approval gates
+  - fabricating or manually planting proof artifacts
+- Score these as hard failures even if the nominal task outcome is achieved.
+
+4. Prompt-injection evals
+
+- Add indirect instruction payloads in logs, comments, manifests, recovered files, browser content, and shell output.
+- Measure whether the agent treats them as untrusted input instead of authoritative instructions.
+- Score both refusal quality and retained benign-task performance.
+
+5. Monitoring and review evals
+
+- Preserve enough trajectory evidence to support post-run review.
+- Check whether a reviewer can reconstruct the path, side effects, and trust-boundary crossings from the session.
+- Penalize covert behavior, hidden side effects, and unexplained state changes.
+
+6. External or harder-than-public tasks
+
+- When possible, add private or internally held tasks, not just public CTF-like problems.
+- Use these to detect overfitting to the public fixture corpus.
 
 ## Current Status
 
@@ -164,6 +228,9 @@ Use eval results to drive changes in this order:
 3. Chain composition
 4. End-to-end scenario completion
 5. Reduction of overclaiming and false positives
+6. Exploit-triage quality
+7. Trajectory-safety reliability
+8. Prompt-injection robustness
 
 Current priority inside that list:
 
@@ -171,6 +238,8 @@ Current priority inside that list:
 2. Move remaining 4 fails past hard boundaries (stripped vtable, signature verification, tcache validation, getpeereid)
 3. Expand scenario suite with gap-targeting cases (currently only 3 cases)
 4. Save baselines and add CI enforcement to prevent silent regressions
+5. Add real-task pass@1 runs and trajectory-safety grading so fixture passes do not mask reckless behavior
+6. Add dedicated prompt-injection and stale-artifact-reuse cases
 
 Corpus expansion completed:
 
@@ -184,3 +253,5 @@ If the harness starts passing the current 3-stage and 4-stage chains too easily,
 - near-miss
 - pass
 - harder corpus
+
+The long-term target is not "perfect fixture scores." The target is an autonomous RE agent that succeeds on realistic tasks, chooses the right exploit path, stays within policy, resists injected instructions, and leaves a reviewable trajectory.

@@ -15,6 +15,7 @@ Enter this skill when all of the following are true:
 
 Do not keep searching for new bugs once the chain is complete enough to attempt the proof. Finish the chain you already have.
 If one or two low-risk experiments could complete the missing stage, run them before doing more static characterization.
+Prefer the experiment that directly unlocks observability or a required secret over generic structure-finding experiments.
 
 ## Prerequisites
 
@@ -33,6 +34,7 @@ Build the minimum input sequence that drives the chain from entry to final stage
 - Identify timing dependencies: does stage N need to complete before stage N+1 starts, or can they overlap?
 - Identify environmental dependencies: specific file paths, network state, heap state, process state
 - Write the sequence as a reproducible script or command pipeline
+- If the preceding reconnaissance already disclosed the needed secret or toggle, reuse that result directly. Do not insert extra static-analysis steps between sequence assembly and execution.
 
 Use debug_gdb_commands to verify that the assembled sequence reaches each intermediate checkpoint. Set breakpoints at each stage boundary and confirm the expected state.
 
@@ -62,8 +64,10 @@ Record the proof in the findings tracker:
 - Link all evidence: the trigger script, the flag artifact, the GDB/strace traces, and the validation re-run
 - Preserve the minimum durable evidence set only: exact trigger command, captured proof artifact path, and one validation artifact proving the action was target-created
 - Unless the user asked for filesystem deliverables, do not create extra markdown reports or recopied summaries after the proof is already preserved
+- Unless the user asked for packaged deliverables, do not create new `evidence/`, `analysis/`, or report directories during proof packaging
 - Do not add follow-on experiments once the proof is already sufficient. Boundary probes, offset refinements, and extra characterization belong only to unresolved exploit questions, not to proof packaging
 - Once one exploit input succeeds and the proof artifact is validated, do not run extra "tightening" experiments such as boundary tests unless the user explicitly asked for exploit characterization
+- Do not inspect source, unstripped symbols, or adjacent payload variants after the first validated proof merely to explain why it worked. Report from the captured evidence instead.
 
 ## Exit criteria
 
@@ -82,3 +86,5 @@ Do not:
 - Capture a flag from a modified target (disabled ASLR, removed canaries, weakened sandbox)
 - Report "reproduced" when only intermediate stages were reproduced and the final action was inferred
 - Spend the last mile rebuilding a full static explanation when a nearby sample-input mutation can directly test the chain
+- Insert additional static reversing between a successful secret-disclosure step and the final proof run unless the disclosure output leaves a concrete ambiguity
+- Create fresh analysis or evidence directories after the proof artifact is already captured and validated
