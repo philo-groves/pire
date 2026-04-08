@@ -334,6 +334,15 @@ npx tsx ./src/pire-live-lab-cli.ts \
   --json
 ```
 
+Example failure-tier sweep:
+
+```bash
+npx tsx ./src/pire-live-lab-cli.ts \
+  --sweep failure-tier \
+  --session-dir /tmp/pire-live-failure-tier \
+  --json
+```
+
 Example deep-case scaffold:
 
 ```bash
