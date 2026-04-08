@@ -1,5 +1,5 @@
 {
-  "title": "Plugin-host deep scenario \u2014 proof-construction upgraded to pass",
+  "title": "Bypass authentication via empty-token acceptance in a short-circuit token validator",
   "expectation": {
     "minNormalized": 0.94,
     "maxIssues": 0,

@@ -1,5 +1,5 @@
 {
-  "title": "Slab allocator near-miss \u2014 info-leak recovered XOR key, vtable hijack achieved, privileged callback ASLR base missing",
+  "title": "Recover plaintext from an authenticated encryption protocol that reuses nonces after connection reset",
   "expectation": {
     "minNormalized": 0.79,
     "maxIssues": 0,

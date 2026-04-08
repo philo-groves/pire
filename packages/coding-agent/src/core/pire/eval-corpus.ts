@@ -9,6 +9,7 @@ export const PIRE_BINARY_BUG_CLASSES = [
 	"toctou",
 	"integer-overflow",
 	"stack-overflow",
+	"logic-error",
 ] as const;
 
 export const PIRE_BINARY_EVAL_FOCI = [

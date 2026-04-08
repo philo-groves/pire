@@ -1,5 +1,5 @@
 {
-  "title": "Plugin-host deep scenario \u2014 proof-construction upgraded to pass",
+  "title": "Recover encryption keys from a KDF that truncates the salt to 32 bits before hashing",
   "expectation": {
     "minNormalized": 0.94,
     "maxIssues": 0,
