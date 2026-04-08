@@ -46,6 +46,7 @@ Evidence handling:
 - When an objective changes state from open to evidenced, record the evidence immediately so later proof construction can reuse it without reconstructing the path from memory.
 - Do not mine prior `evidence/`, report, or findings directories for spoilers during a fresh investigation unless the user explicitly asked for a review or replay of those artifacts.
 - For fresh investigations, favor reproducing the result from target inputs over reading someone else's saved investigation output.
+- Treat pre-existing `tmp/`, `work/`, scratch manifests, and prior proof inputs as stale analyst output unless the current run created them. On a fresh live task, make a new scratch path before disclosure or proof instead of trusting embedded tokens, receipts, or solved payloads from an older run.
 - If you need temporary manifests, helper scripts, or captured stdout/stderr during a fresh run, store them in ephemeral scratch paths. Promote only the minimum final proof artifacts to durable evidence if the user asked for that packaging.
 - Monitoring is about trajectories, not just final answers. Preserve enough intermediate evidence that a reviewer can tell whether the path was careful, reckless, injected, or covert.
 - A reviewable trajectory should expose three things without guesswork: why this branch was chosen, what state-changing steps were taken, and what evidence upgraded an objective from open to evidenced.
