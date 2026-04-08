@@ -36,6 +36,10 @@ Current labs:
 - `reloc-record-live`: packed relocation stream RE lab focused on bitfield decoding, encoded record reconstruction, and handler mapping
 - `license-fsm-live`: custom alphabet and FSM RE lab focused on decoder recovery, checksum reconstruction, and proof-state activation
 - `thread-rendezvous-live`: threaded state RE lab focused on worker transition recovery, rendezvous gating, and debugger-assisted proof derivation
+- `opensmtpd-rce-live`: transcript-driven daemon RE lab focused on parser state recovery, disclosure-to-proof staging, and hidden privileged commit discovery
+- `sudo-argv-live`: argv/env RE lab focused on local privilege-boundary state recovery, escape shaping, and hidden response derivation
+- `dnsmasq-packet-live`: packet-format RE lab focused on header decoding, payload-state recovery, and computed proof activation
+- `sudo-baron-samedit-live`: historical sudo v1.9.5p1 RE lab focused on pre-fix flag-state recovery, vulnerable argument unescaping, and disclosure-to-proof staging
 
 Recommended workflow:
 1. `cd` into the lab directory

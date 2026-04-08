@@ -1,0 +1,8 @@
+HELO benign.local
+MAILFROM benign@example.test
+RCPTTO user@example.test
+XROUTE 11
+XMODE normal
+XSTAGE 01
+XFOLD 02
+XMAC 00000000

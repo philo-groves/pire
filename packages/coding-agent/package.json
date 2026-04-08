@@ -10,7 +10,8 @@
 	"bin": {
 		"pi": "dist/cli.js",
 		"pire-evals": "dist/pire-eval-cli.js",
-		"pire-eval-scaffold": "dist/pire-eval-scaffold-cli.js"
+		"pire-eval-scaffold": "dist/pire-eval-scaffold-cli.js",
+		"pire-live-labs": "dist/pire-live-lab-cli.js"
 	},
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",

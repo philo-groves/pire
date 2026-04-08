@@ -1,0 +1,3 @@
+sudo
+-l
+/usr/bin/id

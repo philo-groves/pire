@@ -52,6 +52,10 @@ function encodeLicenseBytes(bytes: number[]): string {
 	return encoded;
 }
 
+function encodeDnsmasqPacket(bytes: number[]): string {
+	return bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 describe("pire live labs", () => {
 	test("keeps live-lab inventory in sync across docs and filesystem", async () => {
 		const inventory = await readPireLiveLabInventory(PATHS);
@@ -207,6 +211,95 @@ describe("pire live labs", () => {
 					);
 				},
 				logPath: join(LABS_ROOT, "thread-rendezvous-live", "runtime", "rendezvous", "rendezvous.log"),
+			},
+			{
+				lab: "opensmtpd-rce-live",
+				makeDir: "smtp-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "transcript.txt"),
+						[
+							"HELO debug.local",
+							"MAILFROM debug@example.test",
+							"RCPTTO root@example.test",
+							"XROUTE 5c",
+							"XMODE debug",
+							"XSTAGE 13",
+							"XFOLD 00",
+							"XMAC 00000000",
+						].join("\n"),
+						"utf-8",
+					);
+				},
+				naiveDir: "smtp-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "transcript.txt"),
+						[
+							"HELO proof.local",
+							"MAILFROM proof@example.test",
+							"RCPTTO root@example.test",
+							"XROUTE a7",
+							"XMODE commit",
+							"XSTAGE 42",
+							"XFOLD 9d",
+							"XMAC 11111111",
+						].join("\n"),
+						"utf-8",
+					);
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "opensmtpd-rce-live", "runtime", "smtpd", "smtpd.log"),
+			},
+			{
+				lab: "sudo-argv-live",
+				makeDir: "sudo-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(join(dir, "args.txt"), "sudoedit\n--probe\nAAA\\\n", "utf-8");
+					await writeFile(join(dir, "env.txt"), "MODE=debug\nLC_SEGMENT=21\n", "utf-8");
+				},
+				naiveDir: "sudo-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(join(dir, "args.txt"), "sudoedit\n-s\n--escalate\nA\\\\\n", "utf-8");
+					await writeFile(join(dir, "env.txt"), "MODE=commit\nLC_SEGMENT=33\nLC_RESPONSE=11111111\n", "utf-8");
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "sudo-argv-live", "runtime", "sudo", "sudo.log"),
+			},
+			{
+				lab: "dnsmasq-packet-live",
+				makeDir: "dns-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "packet.hex"),
+						`${encodeDnsmasqPacket([0x29, 0x10, 0x41, 0x03, 0x00, 0, 0, 0, 0])}\n`,
+						"utf-8",
+					);
+				},
+				naiveDir: "dns-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "packet.hex"),
+						`${encodeDnsmasqPacket([0x7e, 0x42, 0x91, 0x0d, 0x02, 0xaa, 0x55, 0x11, 0x11, 0x11, 0x11])}\n`,
+						"utf-8",
+					);
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "dnsmasq-packet-live", "runtime", "dnsmasq", "dnsmasq.log"),
+			},
+			{
+				lab: "sudo-baron-samedit-live",
+				makeDir: "samedit-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(join(dir, "args.txt"), "sudoedit\n-s\n\\\n", "utf-8");
+				},
+				naiveDir: "samedit-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(join(dir, "args.txt"), "sudoedit\n-s\n\\\nAA\n", "utf-8");
+					await writeFile(join(dir, "response.txt"), "11111111\n", "utf-8");
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "sudo-baron-samedit-live", "runtime", "samedit", "samedit.log"),
 			},
 		] as const;
 
