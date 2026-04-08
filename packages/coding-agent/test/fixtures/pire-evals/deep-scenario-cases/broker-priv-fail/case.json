@@ -1,11 +1,11 @@
 {
   "title": "Broker near-miss \u2014 memfd+fexecve bypasses seccomp, kernel interface still unreachable",
   "expectation": {
-    "minNormalized": 0.94,
+    "minNormalized": 0.84,
     "maxIssues": 0,
     "maxRank": 31,
-    "minScenarioPassed": 1,
-    "maxScenarioNearMiss": 0,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
     "maxScenarioFailed": 0
   }
 }

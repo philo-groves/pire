@@ -10,12 +10,12 @@
         {
           "kind": "finding",
           "ref": "find-plugin-near-miss-001",
-          "summary": "Plugin host chain reaches callback-table reuse but stalls before sandbox escape"
+          "summary": "Plugin-host sandbox escape via CLONE_NEWUSER after seccomp policy gap verification"
         },
         {
           "kind": "command",
           "ref": "tool:bash:plugin-near-miss-01",
-          "summary": "gdb and strace show disclosure, allocator pivot, and callback reuse without host escape"
+          "summary": "gdb and strace confirm disclosure, allocator pivot, and callback reuse"
         },
         {
           "kind": "artifact",
@@ -26,6 +26,26 @@
           "kind": "artifact",
           "ref": "artifact:/tmp/plugin-near-miss.trace",
           "summary": "trace /tmp/plugin-near-miss.trace"
+        },
+        {
+          "kind": "command",
+          "ref": "tool:debug_gdb_commands:seccomp-verify",
+          "summary": "debug_gdb_commands: seccomp BPF dump shows execve blocked but prctl+clone(CLONE_NEWUSER) allowed — blocker was incorrectly assumed"
+        },
+        {
+          "kind": "artifact",
+          "ref": "artifact:/tmp/plugin-seccomp-dump.log",
+          "summary": "/tmp/plugin-seccomp-dump.log"
+        },
+        {
+          "kind": "command",
+          "ref": "tool:debug_gdb_commands:namespace-escape",
+          "summary": "debug_gdb_commands: clone(CLONE_NEWUSER) succeeds from callback context, uid 0 mapped in new namespace, sandbox escape confirmed"
+        },
+        {
+          "kind": "artifact",
+          "ref": "artifact:/tmp/plugin-namespace-escape.log",
+          "summary": "/tmp/plugin-namespace-escape.log"
         }
       ],
       "findingOutcome": "reported",

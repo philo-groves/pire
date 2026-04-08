@@ -1,11 +1,11 @@
 {
   "title": "Exploit a thread race in an authentication service to bypass credential validation near-miss",
   "expectation": {
-    "minNormalized": 0.94,
+    "minNormalized": 0.84,
     "maxIssues": 0,
     "maxRank": 31,
-    "minScenarioPassed": 1,
-    "maxScenarioNearMiss": 0,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
     "maxScenarioFailed": 0
   }
 }

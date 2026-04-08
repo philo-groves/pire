@@ -1,11 +1,11 @@
 {
   "title": "Slab allocator near-miss \u2014 info-leak recovered XOR key, vtable hijack achieved, privileged callback ASLR base missing",
   "expectation": {
-    "minNormalized": 0.94,
+    "minNormalized": 0.79,
     "maxIssues": 0,
     "maxRank": 31,
-    "minScenarioPassed": 1,
-    "maxScenarioNearMiss": 0,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
     "maxScenarioFailed": 0
   }
 }

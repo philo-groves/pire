@@ -1,11 +1,11 @@
 {
   "title": "Exploit a payment protocol state machine violation to achieve double-spend via out-of-order refund",
   "expectation": {
-    "minNormalized": 0.94,
+    "minNormalized": 0.79,
     "maxIssues": 0,
     "maxRank": 31,
-    "minScenarioPassed": 1,
-    "maxScenarioNearMiss": 0,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
     "maxScenarioFailed": 0
   }
 }

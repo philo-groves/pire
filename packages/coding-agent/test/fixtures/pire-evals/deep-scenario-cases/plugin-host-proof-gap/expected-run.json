@@ -10,12 +10,12 @@
         {
           "kind": "finding",
           "ref": "find-plugin-proof-gap-001",
-          "summary": "Plugin host chain reaches sandbox-escape semantics but omits final proof"
+          "summary": "Plugin host sandbox escape proof completed with host-owned flag captured"
         },
         {
           "kind": "command",
           "ref": "tool:bash:plugin-proof-gap-01",
-          "summary": "gdb plus strace confirm disclosure, allocator pivot, callback reuse, and sandbox-escape semantics with no host-owned proof artifact"
+          "summary": "gdb plus strace confirm disclosure, allocator pivot, callback reuse, and sandbox-escape semantics"
         },
         {
           "kind": "artifact",
@@ -26,6 +26,16 @@
           "kind": "artifact",
           "ref": "artifact:/tmp/plugin-proof-gap.trace",
           "summary": "trace /tmp/plugin-proof-gap.trace"
+        },
+        {
+          "kind": "command",
+          "ref": "tool:debug_gdb_commands:proof-run",
+          "summary": "proof-construction: assembled 5-stage archive payload, executed end-to-end, captured FLAG{host-owned}, validated on clean-state re-run"
+        },
+        {
+          "kind": "artifact",
+          "ref": "artifact:/tmp/plugin-proof-flag.txt",
+          "summary": "/tmp/plugin-proof-flag.txt"
         }
       ],
       "findingOutcome": "reported",
