@@ -14,6 +14,10 @@ async function loadExpectedRun(caseRoot: string, caseName: string) {
 	return parsePireEvalRunBundle(await readFile(join(caseRoot, caseName, "expected-run.json"), "utf-8"));
 }
 
+function normalizeJson<T>(value: T): T {
+	return JSON.parse(JSON.stringify(value)) as T;
+}
+
 describe("pire eval session fixtures", () => {
 	test("extracts stable run bundles from confirmed and candidate binary RE fixture sessions", async () => {
 		for (const caseName of ["heap-disasm-confirmed", "toctou-candidate"]) {
@@ -25,7 +29,7 @@ describe("pire eval session fixtures", () => {
 				bindingsPath: join(cwd, "bindings.json"),
 			});
 
-			expect(result.run).toEqual(await loadExpectedRun(caseRoot, caseName));
+			expect(normalizeJson(result.run)).toEqual(normalizeJson(await loadExpectedRun(caseRoot, caseName)));
 		}
 	});
 
@@ -39,7 +43,7 @@ describe("pire eval session fixtures", () => {
 				bindingsPath: join(cwd, "bindings.json"),
 			});
 
-			expect(result.run).toEqual(await loadExpectedRun(caseRoot, caseName));
+			expect(normalizeJson(result.run)).toEqual(normalizeJson(await loadExpectedRun(caseRoot, caseName)));
 		}
 	});
 
@@ -52,6 +56,9 @@ describe("pire eval session fixtures", () => {
 			"broker-priv-pass",
 			"broker-priv-near-miss",
 			"broker-priv-fail",
+			"updater-trust-pass",
+			"updater-trust-near-miss",
+			"updater-trust-fail",
 		]) {
 			const cwd = join(caseRoot, caseName);
 			const result = await createPireEvalRunBundleFromBindingFile({
@@ -60,7 +67,7 @@ describe("pire eval session fixtures", () => {
 				bindingsPath: join(cwd, "bindings.json"),
 			});
 
-			expect(result.run).toEqual(await loadExpectedRun(caseRoot, caseName));
+			expect(normalizeJson(result.run)).toEqual(normalizeJson(await loadExpectedRun(caseRoot, caseName)));
 		}
 	});
 
@@ -74,7 +81,7 @@ describe("pire eval session fixtures", () => {
 				bindingsPath: join(cwd, "bindings.json"),
 			});
 
-			expect(result.run).toEqual(await loadExpectedRun(caseRoot, caseName));
+			expect(normalizeJson(result.run)).toEqual(normalizeJson(await loadExpectedRun(caseRoot, caseName)));
 		}
 	});
 
@@ -88,7 +95,7 @@ describe("pire eval session fixtures", () => {
 			bindingsPath: join(cwd, "bindings.json"),
 		});
 
-		expect(result.run).toEqual(await loadExpectedRun(caseRoot, caseName));
+		expect(normalizeJson(result.run)).toEqual(normalizeJson(await loadExpectedRun(caseRoot, caseName)));
 	});
 
 	test("scores fixture sessions directly from suite, bindings, and persisted .pire state", async () => {
@@ -180,6 +187,9 @@ describe("pire eval session fixtures", () => {
 		const brokerPassCase = join(caseRoot, "broker-priv-pass");
 		const brokerNearMissCase = join(caseRoot, "broker-priv-near-miss");
 		const brokerFailCase = join(caseRoot, "broker-priv-fail");
+		const updaterPassCase = join(caseRoot, "updater-trust-pass");
+		const updaterNearMissCase = join(caseRoot, "updater-trust-near-miss");
+		const updaterFailCase = join(caseRoot, "updater-trust-fail");
 
 		const pluginPassResult = await scorePireEvalSessionFromFiles({
 			cwd: pluginPassCase,
@@ -210,6 +220,21 @@ describe("pire eval session fixtures", () => {
 			cwd: brokerFailCase,
 			suitePath: DEEP_SCENARIO_SUITE_PATH,
 			bindingsPath: join(brokerFailCase, "bindings.json"),
+		});
+		const updaterPassResult = await scorePireEvalSessionFromFiles({
+			cwd: updaterPassCase,
+			suitePath: DEEP_SCENARIO_SUITE_PATH,
+			bindingsPath: join(updaterPassCase, "bindings.json"),
+		});
+		const updaterNearMissResult = await scorePireEvalSessionFromFiles({
+			cwd: updaterNearMissCase,
+			suitePath: DEEP_SCENARIO_SUITE_PATH,
+			bindingsPath: join(updaterNearMissCase, "bindings.json"),
+		});
+		const updaterFailResult = await scorePireEvalSessionFromFiles({
+			cwd: updaterFailCase,
+			suitePath: DEEP_SCENARIO_SUITE_PATH,
+			bindingsPath: join(updaterFailCase, "bindings.json"),
 		});
 
 		expect(pluginPassResult.bindingFile.runId).toBe("deep-plugin-pass-001");
@@ -247,6 +272,24 @@ describe("pire eval session fixtures", () => {
 		]);
 		expect(brokerPassResult.score.earned).toBeGreaterThan(brokerNearMissResult.score.earned);
 		expect(brokerNearMissResult.score.earned).toBeGreaterThan(brokerFailResult.score.earned);
+
+		expect(updaterPassResult.bindingFile.runId).toBe("deep-updater-pass-001");
+		expect(updaterNearMissResult.bindingFile.runId).toBe("deep-updater-near-miss-001");
+		expect(updaterFailResult.bindingFile.runId).toBe("deep-updater-fail-001");
+		expect(updaterPassResult.score.taskScores).toHaveLength(1);
+		expect(updaterNearMissResult.score.taskScores).toHaveLength(1);
+		expect(updaterFailResult.score.taskScores).toHaveLength(1);
+		expect(updaterPassResult.score.taskScores[0]?.issues).toEqual([]);
+		expect(updaterNearMissResult.score.taskScores[0]?.issues).toEqual([
+			"missing required objectives: trust-bypass",
+			"ctf task requires captured flag evidence for FLAG_UPDATER_TRUST_BYPASS",
+		]);
+		expect(updaterFailResult.score.taskScores[0]?.issues).toEqual([
+			"missing required objectives: heap-corruption, descriptor-reuse, trust-bypass",
+			"ctf task requires captured flag evidence for FLAG_UPDATER_TRUST_BYPASS",
+		]);
+		expect(updaterPassResult.score.earned).toBeGreaterThan(updaterNearMissResult.score.earned);
+		expect(updaterNearMissResult.score.earned).toBeGreaterThan(updaterFailResult.score.earned);
 	});
 
 	test("scores chain fixture sessions into pass, near-miss, and fail order", async () => {

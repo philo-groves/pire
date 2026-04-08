@@ -244,16 +244,19 @@ describe("pire eval cli", () => {
 			};
 		};
 
-		expect(parsed.suite.cases).toBe(6);
+		expect(parsed.suite.cases).toBe(9);
 		expect(parsed.suite.averageNormalized).toBeGreaterThan(0.7);
 		expect(parsed.suite.averageIssues).toBe(0);
 		expect(parsed.scores.map((score) => score.caseName)).toEqual([
 			"broker-priv-pass",
 			"plugin-host-pass",
+			"updater-trust-pass",
+			"updater-trust-near-miss",
 			"broker-priv-near-miss",
 			"plugin-host-near-miss",
 			"broker-priv-fail",
 			"plugin-host-fail",
+			"updater-trust-fail",
 		]);
 		expect(parsed.scores[0]?.issues).toEqual([]);
 		expect(parsed.scores[1]?.issues).toEqual([]);
@@ -261,16 +264,22 @@ describe("pire eval cli", () => {
 		expect(parsed.scores[3]?.issues).toEqual([]);
 		expect(parsed.scores[4]?.issues).toEqual([]);
 		expect(parsed.scores[5]?.issues).toEqual([]);
+		expect(parsed.scores[6]?.issues).toEqual([]);
+		expect(parsed.scores[7]?.issues).toEqual([]);
+		expect(parsed.scores[8]?.issues).toEqual([]);
 		expect(parsed.scores[0]?.normalized).toBeGreaterThanOrEqual(parsed.scores[1]?.normalized ?? 0);
-		expect(parsed.scores[1]?.normalized).toBeGreaterThan(parsed.scores[2]?.normalized ?? 0);
-		expect(parsed.scores[2]?.normalized).toBeGreaterThanOrEqual(parsed.scores[3]?.normalized ?? 0);
-		expect(parsed.scores[3]?.normalized).toBeGreaterThan(parsed.scores[4]?.normalized ?? 0);
+		expect(parsed.scores[1]?.normalized).toBeGreaterThanOrEqual(parsed.scores[2]?.normalized ?? 0);
+		expect(parsed.scores[2]?.normalized).toBeGreaterThan(parsed.scores[3]?.normalized ?? 0);
+		expect(parsed.scores[3]?.normalized).toBeGreaterThanOrEqual(parsed.scores[4]?.normalized ?? 0);
 		expect(parsed.scores[4]?.normalized).toBeGreaterThanOrEqual(parsed.scores[5]?.normalized ?? 0);
+		expect(parsed.scores[5]?.normalized).toBeGreaterThan(parsed.scores[6]?.normalized ?? 0);
+		expect(parsed.scores[6]?.normalized).toBeGreaterThanOrEqual(parsed.scores[7]?.normalized ?? 0);
+		expect(parsed.scores[7]?.normalized).toBeGreaterThanOrEqual(parsed.scores[8]?.normalized ?? 0);
 		expect(parsed.suite.scenarioSummary).toEqual({
-			scored: 6,
-			passed: 2,
-			nearMiss: 2,
-			failed: 2,
+			scored: 9,
+			passed: 3,
+			nearMiss: 3,
+			failed: 3,
 		});
 	});
 

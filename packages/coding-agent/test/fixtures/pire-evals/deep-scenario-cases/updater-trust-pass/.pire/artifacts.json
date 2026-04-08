@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T21:20:00.000Z",
+  "artifacts": [
+    {
+      "path": "/tmp/updater-pass.log",
+      "type": "log"
+    },
+    {
+      "path": "/tmp/updater-pass-proof.txt",
+      "type": "text"
+    }
+  ]
+}

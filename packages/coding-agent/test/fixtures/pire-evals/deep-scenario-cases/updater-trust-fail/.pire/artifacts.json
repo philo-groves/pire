@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T21:20:00.000Z",
+  "artifacts": [
+    {
+      "path": "/tmp/updater-fail.log",
+      "type": "log"
+    }
+  ]
+}

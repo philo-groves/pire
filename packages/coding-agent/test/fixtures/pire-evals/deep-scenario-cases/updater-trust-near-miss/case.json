@@ -1,0 +1,11 @@
+{
+  "title": "Updater trust-bypass deep scenario near-miss",
+  "expectation": {
+    "minNormalized": 0.7,
+    "maxIssues": 0,
+    "maxRank": 6,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
+  }
+}

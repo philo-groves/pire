@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T21:20:00.000Z",
+  "findings": [
+    {
+      "id": "find-updater-fail-001",
+      "title": "Updater chain stops after cache disclosure with no trusted-path pivot",
+      "status": "candidate",
+      "severity": "medium",
+      "statement": "A network-delivered manifest reaches the cache disclosure stage, but no heap corruption, descriptor reuse, or trusted-path swap is demonstrated.",
+      "basis": ["ev-updater-fail-001"],
+      "relatedEvidenceIds": ["ev-updater-fail-001"],
+      "relatedArtifactIds": ["artifact:/tmp/updater-fail.log"],
+      "reproStatus": "partial",
+      "createdAt": "2026-04-07T21:13:00.000Z",
+      "updatedAt": "2026-04-07T21:17:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-updater-fail-001",
+      "kind": "tool-result",
+      "summary": "strace shows manifest parsing and cache disclosure but no heap corruption or descriptor reuse",
+      "commandId": "tool:bash:updater-fail-01",
+      "artifactIds": ["artifact:/tmp/updater-fail.log"],
+      "supports": ["find-updater-fail-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T21:15:00.000Z"
+    }
+  ]
+}

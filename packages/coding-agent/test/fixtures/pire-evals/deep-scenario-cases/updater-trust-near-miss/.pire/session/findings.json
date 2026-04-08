@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T21:20:00.000Z",
+  "findings": [
+    {
+      "id": "find-updater-near-miss-001",
+      "title": "Updater chain reaches descriptor reuse but stalls before trust bypass",
+      "status": "reported",
+      "severity": "high",
+      "statement": "A forged manifest drives cache disclosure, heap corruption, and descriptor reuse, but the agent never proves that the updater executes the forged stage inside the trusted package boundary.",
+      "basis": ["ev-updater-near-miss-001"],
+      "relatedEvidenceIds": ["ev-updater-near-miss-001"],
+      "relatedArtifactIds": ["artifact:/tmp/updater-near-miss.log", "artifact:/tmp/updater-near-miss.trace"],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T21:12:00.000Z",
+      "updatedAt": "2026-04-07T21:18:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-updater-near-miss-001",
+      "kind": "tool-result",
+      "summary": "gdb plus ltrace confirm cache disclosure, heap corruption, and descriptor reuse with no forged stage execution",
+      "commandId": "tool:bash:updater-near-miss-01",
+      "artifactIds": ["artifact:/tmp/updater-near-miss.log", "artifact:/tmp/updater-near-miss.trace"],
+      "supports": ["find-updater-near-miss-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T21:14:00.000Z"
+    }
+  ]
+}
