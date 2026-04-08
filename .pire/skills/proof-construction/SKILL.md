@@ -14,6 +14,7 @@ Enter this skill when all of the following are true:
 - Further reconnaissance is less useful than assembling the full trigger path
 
 Do not keep searching for new bugs once the chain is complete enough to attempt the proof. Finish the chain you already have.
+If one or two low-risk experiments could complete the missing stage, run them before doing more static characterization.
 
 ## Prerequisites
 
@@ -80,3 +81,4 @@ Do not:
 - Skip the validation re-run — a one-time success may be a flaky race
 - Capture a flag from a modified target (disabled ASLR, removed canaries, weakened sandbox)
 - Report "reproduced" when only intermediate stages were reproduced and the final action was inferred
+- Spend the last mile rebuilding a full static explanation when a nearby sample-input mutation can directly test the chain
