@@ -177,12 +177,15 @@ export {
 } from "./core/pire/eval-corpus.js";
 export {
 	createGeneratedScenarioFixtureCase,
+	createGeneratedScenarioPresetCase,
 	type PireGeneratedFixtureArtifact,
 	type PireGeneratedFixtureCaseExpectation,
 	type PireGeneratedFixtureCaseOptions,
 	type PireGeneratedFixtureFindingOptions,
 	type PireGeneratedScenarioFixtureCase,
 	type PireGeneratedScenarioFixtureCaseOptions,
+	type PireGeneratedScenarioPreset,
+	type PireGeneratedScenarioPresetCaseOptions,
 	writeGeneratedScenarioFixtureCase,
 } from "./core/pire/eval-fixture-generator.js";
 export {
