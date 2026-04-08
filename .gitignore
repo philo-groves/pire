@@ -9,6 +9,9 @@ packages/*/dist-chrome/
 packages/*/dist-firefox/
 *.cpuprofile
 
+# Temp Files
+**/tmp/
+
 # Environment
 .env
 
