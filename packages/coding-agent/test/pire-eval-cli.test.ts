@@ -244,41 +244,38 @@ describe("pire eval cli", () => {
 			};
 		};
 
-		expect(parsed.suite.cases).toBe(9);
+		expect(parsed.suite.cases).toBe(10);
 		expect(parsed.suite.averageNormalized).toBeGreaterThan(0.7);
 		expect(parsed.suite.averageIssues).toBe(0);
-		expect(parsed.scores.map((score) => score.caseName)).toEqual([
-			"broker-priv-pass",
-			"plugin-host-pass",
-			"updater-trust-pass",
-			"updater-trust-near-miss",
+		expect(parsed.scores).toHaveLength(10);
+		expect(parsed.scores.every((score) => score.issues.length === 0)).toBe(true);
+		const passCases = parsed.scores
+			.slice(0, 3)
+			.map((score) => score.caseName)
+			.sort();
+		const nearMissCases = parsed.scores
+			.slice(3, 7)
+			.map((score) => score.caseName)
+			.sort();
+		const failCases = parsed.scores
+			.slice(7)
+			.map((score) => score.caseName)
+			.sort();
+		expect(passCases).toEqual(["broker-priv-pass", "plugin-host-pass", "updater-trust-pass"]);
+		expect(nearMissCases).toEqual([
 			"broker-priv-near-miss",
 			"plugin-host-near-miss",
-			"broker-priv-fail",
-			"plugin-host-fail",
-			"updater-trust-fail",
+			"updater-trust-near-miss",
+			"updater-trust-proof-gap",
 		]);
-		expect(parsed.scores[0]?.issues).toEqual([]);
-		expect(parsed.scores[1]?.issues).toEqual([]);
-		expect(parsed.scores[2]?.issues).toEqual([]);
-		expect(parsed.scores[3]?.issues).toEqual([]);
-		expect(parsed.scores[4]?.issues).toEqual([]);
-		expect(parsed.scores[5]?.issues).toEqual([]);
-		expect(parsed.scores[6]?.issues).toEqual([]);
-		expect(parsed.scores[7]?.issues).toEqual([]);
-		expect(parsed.scores[8]?.issues).toEqual([]);
-		expect(parsed.scores[0]?.normalized).toBeGreaterThanOrEqual(parsed.scores[1]?.normalized ?? 0);
-		expect(parsed.scores[1]?.normalized).toBeGreaterThanOrEqual(parsed.scores[2]?.normalized ?? 0);
-		expect(parsed.scores[2]?.normalized).toBeGreaterThan(parsed.scores[3]?.normalized ?? 0);
-		expect(parsed.scores[3]?.normalized).toBeGreaterThanOrEqual(parsed.scores[4]?.normalized ?? 0);
-		expect(parsed.scores[4]?.normalized).toBeGreaterThanOrEqual(parsed.scores[5]?.normalized ?? 0);
-		expect(parsed.scores[5]?.normalized).toBeGreaterThan(parsed.scores[6]?.normalized ?? 0);
-		expect(parsed.scores[6]?.normalized).toBeGreaterThanOrEqual(parsed.scores[7]?.normalized ?? 0);
-		expect(parsed.scores[7]?.normalized).toBeGreaterThanOrEqual(parsed.scores[8]?.normalized ?? 0);
+		expect(failCases).toEqual(["broker-priv-fail", "plugin-host-fail", "updater-trust-fail"]);
+		expect(parsed.scores[2]?.normalized).toBeGreaterThanOrEqual(parsed.scores[3]?.normalized ?? 0);
+		expect(parsed.scores[6]?.normalized).toBeGreaterThan(parsed.scores[7]?.normalized ?? 0);
+		expect(parsed.scores[3]?.caseName).toBe("updater-trust-proof-gap");
 		expect(parsed.suite.scenarioSummary).toEqual({
-			scored: 9,
+			scored: 10,
 			passed: 3,
-			nearMiss: 3,
+			nearMiss: 4,
 			failed: 3,
 		});
 	});

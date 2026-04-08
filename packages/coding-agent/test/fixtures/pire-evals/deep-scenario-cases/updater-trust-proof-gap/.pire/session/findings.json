@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T21:45:00.000Z",
+  "findings": [
+    {
+      "id": "find-updater-proof-gap-001",
+      "title": "Updater chain reaches trust-bypass semantics but omits forged-stage proof",
+      "status": "reported",
+      "severity": "high",
+      "statement": "A forged manifest reaches cache disclosure, heap corruption, descriptor reuse, and the trusted-path swap, but the session never captures the updater-owned proof artifact that would prove the forged stage executed inside the trust boundary.",
+      "basis": ["ev-updater-proof-gap-001"],
+      "relatedEvidenceIds": ["ev-updater-proof-gap-001"],
+      "relatedArtifactIds": ["artifact:/tmp/updater-proof-gap.log", "artifact:/tmp/updater-proof-gap.trace"],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T21:38:00.000Z",
+      "updatedAt": "2026-04-07T21:43:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-updater-proof-gap-001",
+      "kind": "tool-result",
+      "summary": "gdb plus ltrace confirm manifest control, heap corruption, descriptor reuse, and trusted-path swap with no updater-owned proof artifact",
+      "commandId": "tool:bash:updater-proof-gap-01",
+      "artifactIds": ["artifact:/tmp/updater-proof-gap.log", "artifact:/tmp/updater-proof-gap.trace"],
+      "supports": ["find-updater-proof-gap-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T21:40:00.000Z"
+    }
+  ]
+}

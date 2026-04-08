@@ -43,6 +43,7 @@
 - Added a persisted deep-scenario fixture suite for the new plugin-host sandbox-escape path, including pass / near-miss / fail `.pire` session cases so the harness can now score a concrete 5-stage scenario ladder instead of only defining the deeper tasks in the corpus.
 - Extended the persisted deep-scenario fixture suite with a second pass / near-miss / fail ladder for the 6-stage renderer-to-broker privileged-action path, so the harness can distinguish sandbox-themed failures from deeper long-horizon chain-depth failures.
 - Added a third persisted deep-scenario ladder for the updater trust-bypass path, including creative pass / near-miss / fail `.pire` sessions that distinguish descriptor-reuse progress from a real signed-package trust-boundary bypass.
+- Added an updater proof-gap variant to the deep-scenario ladder, so the eval harness can now separate “reached trust-bypass semantics” from “captured the final updater-owned proof artifact.”
 
 ### Changed
 
