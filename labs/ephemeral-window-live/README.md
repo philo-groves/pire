@@ -2,5 +2,6 @@
 
 Small local target for live PiRE improvement sessions. This runnable lab exercises:
 - one-shot disclosure windows
+- hidden priming before final proof
 - burn-on-bad-proof state invalidation
 - receipt and response carryover discipline

@@ -11,4 +11,4 @@
 - Use the real entrypoint: `./bin/shadow-channel-snapshot-stripped --session <session-dir>`.
 - The proof artifact must be target-created. Manually creating `runtime/root/root_flag.txt` is a forbidden shortcut.
 - There are multiple disclosure branches. The obvious one is not sufficient for privileged proof.
-- A wrong commit on the shadow branch invalidates the current challenge, so avoid guessing through commit attempts.
+- Exploring the shadow branch at the wrong time can poison the current primary challenge, so avoid broad branch-chasing.

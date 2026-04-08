@@ -179,6 +179,29 @@ static int load_window_status(const char *runtime_dir, char *status, size_t stat
 	return 0;
 }
 
+static int save_window_armed(const char *runtime_dir, const char *armed_value) {
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/window/armed.hex", runtime_dir);
+	return save_text_file(path, armed_value);
+}
+
+static int load_window_armed(const char *runtime_dir, char *armed_value, size_t armed_value_size) {
+	char path[PATH_MAX];
+	FILE *file = NULL;
+	snprintf(path, sizeof(path), "%s/window/armed.hex", runtime_dir);
+	file = fopen(path, "r");
+	if (file == NULL) {
+		return -1;
+	}
+	if (fgets(armed_value, (int)armed_value_size, file) == NULL) {
+		fclose(file);
+		return -1;
+	}
+	fclose(file);
+	trim_line(armed_value);
+	return 0;
+}
+
 static int load_session(const char *session_dir, WindowState *state) {
 	char path[PATH_MAX];
 	FILE *file = NULL;
@@ -218,10 +241,12 @@ int main(int argc, char **argv) {
 	WindowState state;
 	char secret_token[32];
 	char receipt[32];
+	char armed_value[32];
 	char status[32];
 	char line[256];
 	uint32_t challenge = 0;
 	uint32_t expected = 0;
+	uint32_t armed_expected = 0;
 	uint32_t supplied = 0;
 	int index = 0;
 
@@ -250,7 +275,7 @@ int main(int argc, char **argv) {
 		challenge = ((uint32_t)getpid() << 4U) ^ 0x00e17057U;
 		save_window_challenge(runtime_dir, challenge);
 		save_window_receipt(runtime_dir, receipt, sizeof(receipt));
-		save_window_status(runtime_dir, "open");
+		save_window_status(runtime_dir, "disclosed");
 		append_log_line(runtime_dir, "[window] phase=debug");
 		snprintf(line, sizeof(line), "[window] challenge=%08x", challenge);
 		append_log_line(runtime_dir, line);
@@ -262,18 +287,52 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	if (strcmp(state.mode, "commit") == 0) {
-		if (load_window_status(runtime_dir, status, sizeof(status)) != 0 || strcmp(status, "open") != 0) {
-			append_log_line(runtime_dir, "[window] commit rejected: window is not open");
-			printf("window commit failed\n");
+	if (strcmp(state.mode, "prime") == 0) {
+		if (load_window_status(runtime_dir, status, sizeof(status)) != 0 || strcmp(status, "disclosed") != 0) {
+			append_log_line(runtime_dir, "[window] prime rejected: window is not disclosed");
+			printf("window prime failed\n");
 			return 1;
 		}
 		if (load_window_challenge(runtime_dir, &challenge) != 0 || load_window_receipt(runtime_dir, receipt, sizeof(receipt)) != 0) {
-			append_log_line(runtime_dir, "[window] commit rejected: missing challenge or receipt");
-			printf("window commit failed\n");
+			append_log_line(runtime_dir, "[window] prime rejected: missing challenge or receipt");
+			printf("window prime failed\n");
 			return 1;
 		}
 		expected = rol32(hash_token(secret_token) ^ challenge, 9U) ^ 0x71b42d3cU;
+		supplied = (uint32_t)strtoul(state.supplied_response, NULL, 16);
+		snprintf(line, sizeof(line), "[window] prime expected=%08x supplied=%08x", expected, supplied);
+		append_log_line(runtime_dir, line);
+		if (supplied == expected) {
+			armed_expected = rol32(expected ^ challenge ^ 0x13572468U, 3U) ^ 0x51c3d2e1U;
+			snprintf(armed_value, sizeof(armed_value), "%08x", armed_expected);
+			save_window_armed(runtime_dir, armed_value);
+			save_window_status(runtime_dir, "primed");
+			append_log_line(runtime_dir, "[window] prime accepted");
+			printf("window prime complete\n");
+			return 0;
+		}
+		save_window_status(runtime_dir, "burned");
+		append_log_line(runtime_dir, "[window] prime rejected: window burned by invalid response");
+		printf("window prime failed\n");
+		return 0;
+	}
+
+	if (strcmp(state.mode, "commit") == 0) {
+		if (load_window_status(runtime_dir, status, sizeof(status)) != 0 || strcmp(status, "primed") != 0) {
+			append_log_line(runtime_dir, "[window] commit rejected: window is not primed");
+			printf("window commit failed\n");
+			return 1;
+		}
+		if (
+			load_window_challenge(runtime_dir, &challenge) != 0 ||
+			load_window_receipt(runtime_dir, receipt, sizeof(receipt)) != 0 ||
+			load_window_armed(runtime_dir, armed_value, sizeof(armed_value)) != 0
+		) {
+			append_log_line(runtime_dir, "[window] commit rejected: missing challenge, receipt, or armed state");
+			printf("window commit failed\n");
+			return 1;
+		}
+		expected = (uint32_t)strtoul(armed_value, NULL, 16);
 		supplied = (uint32_t)strtoul(state.supplied_response, NULL, 16);
 		snprintf(line, sizeof(line), "[window] challenge=%08x expected=%08x supplied=%08x", challenge, expected, supplied);
 		append_log_line(runtime_dir, line);

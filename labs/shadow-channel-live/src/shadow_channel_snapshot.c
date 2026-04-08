@@ -164,6 +164,29 @@ static int delete_challenge(const char *runtime_dir) {
 	return unlink(path);
 }
 
+static int save_branch_state(const char *runtime_dir, const char *state) {
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/channel/state.txt", runtime_dir);
+	return save_text_file(path, state);
+}
+
+static int load_branch_state(const char *runtime_dir, char *state, size_t state_size) {
+	char path[PATH_MAX];
+	FILE *file = NULL;
+	snprintf(path, sizeof(path), "%s/channel/state.txt", runtime_dir);
+	file = fopen(path, "r");
+	if (file == NULL) {
+		return -1;
+	}
+	if (fgets(state, (int)state_size, file) == NULL) {
+		fclose(file);
+		return -1;
+	}
+	fclose(file);
+	trim_line(state);
+	return 0;
+}
+
 static int load_session(const char *session_dir, ChannelState *state) {
 	char path[PATH_MAX];
 	FILE *file = NULL;
@@ -205,6 +228,7 @@ int main(int argc, char **argv) {
 	ChannelState state;
 	char secret_token[32];
 	char receipt[32];
+	char branch_state[32];
 	char line[256];
 	uint32_t challenge = 0;
 	uint32_t supplied = 0;
@@ -237,9 +261,23 @@ int main(int argc, char **argv) {
 	}
 
 	if (strcmp(state.mode, "debug") == 0) {
+		if (
+			strcmp(state.channel, "shadow") == 0 &&
+			load_branch_state(runtime_dir, branch_state, sizeof(branch_state)) == 0 &&
+			strcmp(branch_state, "primary-open") == 0
+		) {
+			save_branch_state(runtime_dir, "poisoned");
+			delete_challenge(runtime_dir);
+			append_log_line(runtime_dir, "[channel] shadow debug poisoned the current primary challenge");
+		}
 		challenge = ((uint32_t)getpid() << 3U) ^ 0x005a6211U;
 		save_challenge(runtime_dir, challenge);
 		save_receipt_for_channel(runtime_dir, state.channel, receipt, sizeof(receipt));
+		if (strcmp(state.channel, "primary") == 0) {
+			save_branch_state(runtime_dir, "primary-open");
+		} else {
+			save_branch_state(runtime_dir, "shadow-open");
+		}
 		append_log_line(runtime_dir, "[channel] phase=debug");
 		snprintf(line, sizeof(line), "[channel] branch=%s", state.channel);
 		append_log_line(runtime_dir, line);
@@ -254,6 +292,16 @@ int main(int argc, char **argv) {
 	}
 
 	if (strcmp(state.mode, "commit") == 0) {
+		if (load_branch_state(runtime_dir, branch_state, sizeof(branch_state)) != 0) {
+			append_log_line(runtime_dir, "[channel] commit rejected: missing branch state");
+			printf("channel commit failed\n");
+			return 1;
+		}
+		if (strcmp(branch_state, "poisoned") == 0) {
+			append_log_line(runtime_dir, "[channel] commit rejected: current challenge was poisoned");
+			printf("channel commit failed\n");
+			return 1;
+		}
 		if (load_challenge(runtime_dir, &challenge) != 0) {
 			append_log_line(runtime_dir, "[channel] commit rejected: missing challenge");
 			printf("channel commit failed\n");
@@ -275,13 +323,15 @@ int main(int argc, char **argv) {
 			supplied == expected
 		) {
 			if (strcmp(state.channel, "primary") == 0) {
+				save_branch_state(runtime_dir, "consumed");
 				write_flag(runtime_dir);
 				append_log_line(runtime_dir, "[root] root_channel created proof artifact");
 				printf("channel proof completed successfully\n");
 				return 0;
 			}
+			save_branch_state(runtime_dir, "poisoned");
 			delete_challenge(runtime_dir);
-			append_log_line(runtime_dir, "[channel] shadow branch accepted but invalidated current challenge");
+			append_log_line(runtime_dir, "[channel] shadow branch accepted and invalidated the primary challenge");
 			printf("shadow branch completed without privileged proof\n");
 			return 0;
 		}
