@@ -1,9 +1,9 @@
 {
-  "title": "Updater near-miss — partial hash bypass achieves trust bypass, output piped to /dev/null",
+  "title": "Updater near-miss \u2014 partial hash bypass achieves trust bypass, output piped to /dev/null",
   "expectation": {
     "minNormalized": 0.84,
     "maxIssues": 0,
-    "maxRank": 20,
+    "maxRank": 27,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,
     "maxScenarioFailed": 0

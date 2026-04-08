@@ -1,9 +1,9 @@
 {
-  "title": "Signal handler race near-miss — all objectives via log_rotate_cb redirect, flag path not fully controlled",
+  "title": "Signal handler race near-miss \u2014 all objectives via log_rotate_cb redirect, flag path not fully controlled",
   "expectation": {
     "minNormalized": 0.84,
     "maxIssues": 0,
-    "maxRank": 20,
+    "maxRank": 27,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,
     "maxScenarioFailed": 0

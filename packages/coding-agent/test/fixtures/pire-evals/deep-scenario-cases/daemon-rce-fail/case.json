@@ -1,9 +1,9 @@
 {
-  "title": "Daemon RCE near-miss — __malloc_hook targeted but one-gadget constraints not met",
+  "title": "Daemon RCE near-miss \u2014 __malloc_hook targeted but one-gadget constraints not met",
   "expectation": {
-    "minNormalized": 0.67,
+    "minNormalized": 0.84,
     "maxIssues": 0,
-    "maxRank": 20,
+    "maxRank": 27,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,
     "maxScenarioFailed": 0

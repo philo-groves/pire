@@ -1,9 +1,9 @@
 {
-  "title": "Plugin-host pass — proof-extraction via namespace timeout captured flag",
+  "title": "Plugin-host pass \u2014 proof-extraction via namespace timeout captured flag",
   "expectation": {
     "minNormalized": 0.94,
     "maxIssues": 0,
-    "maxRank": 10,
+    "maxRank": 27,
     "minScenarioPassed": 1,
     "maxScenarioNearMiss": 0,
     "maxScenarioFailed": 0

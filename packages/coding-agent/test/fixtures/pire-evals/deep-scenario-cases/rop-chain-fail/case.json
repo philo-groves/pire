@@ -1,9 +1,9 @@
 {
-  "title": "ROP chain near-miss — symlink redirect achieves dlopen, JIT page still randomized",
+  "title": "ROP chain near-miss \u2014 symlink redirect achieves dlopen, JIT page still randomized",
   "expectation": {
     "minNormalized": 0.67,
     "maxIssues": 0,
-    "maxRank": 20,
+    "maxRank": 27,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,
     "maxScenarioFailed": 0

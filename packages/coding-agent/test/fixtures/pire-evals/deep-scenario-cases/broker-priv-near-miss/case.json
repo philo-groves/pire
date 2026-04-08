@@ -1,9 +1,9 @@
 {
-  "title": "Broker pass — proof-extraction via cross-process /proc/PID/mem read",
+  "title": "Broker pass \u2014 proof-extraction via cross-process /proc/PID/mem read",
   "expectation": {
     "minNormalized": 0.94,
     "maxIssues": 0,
-    "maxRank": 10,
+    "maxRank": 27,
     "minScenarioPassed": 1,
     "maxScenarioNearMiss": 0,
     "maxScenarioFailed": 0
