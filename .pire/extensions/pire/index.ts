@@ -12,6 +12,8 @@ import {
 } from "./binary.js";
 import {
 	runDebugGdb,
+	runDebugGdbCommands,
+	runDebugGdbScript,
 	runDebugLldb,
 	runDebugLtrace,
 	runDebugStrace,
@@ -25,7 +27,13 @@ import {
 	type DecompToolDetails,
 } from "./decomp.js";
 import {
+	runExploitRopgadget,
+	type ExploitArtifactObservation,
+	type ExploitToolDetails,
+} from "./exploit.js";
+import {
 	runDisasmRadare2Disassembly,
+	runDisasmRadare2GadgetSearch,
 	runDisasmRizinFunctions,
 	runDisasmRizinInfo,
 	type DisasmArtifactObservation,
@@ -1810,6 +1818,50 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
+		name: "disasm_radare2_gadgets",
+		label: "Disasm Radare2 Gadgets",
+		description:
+			"Search for ROP gadgets in a binary using radare2. Returns instruction sequences ending in ret, syscall, or jmp reg that match the search pattern.",
+		promptSnippet:
+			"Use disasm_radare2_gadgets to find ROP gadgets for exploit chain construction. Search for specific instruction patterns like 'pop rdi' or 'mov rax'.",
+		promptGuidelines: [
+			"Use disasm_radare2_gadgets to search for specific gadget patterns (e.g., 'pop rdi', 'mov rax, [rsp]', 'syscall').",
+			"Filter results by combining with CFI policy analysis from decompilation to identify surviving gadgets.",
+			"For chain assembly, collect gadgets for: stack pivot, register control, memory write, and syscall/JIT entry.",
+			"Set maxResults to limit output for large binaries.",
+		],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary to search for gadgets." }),
+			pattern: Type.String({
+				description:
+					"Gadget search pattern for radare2 /R command. Examples: 'pop rdi', 'mov rax', 'syscall', 'jmp rax'.",
+			}),
+			maxResults: Type.Optional(
+				Type.Integer({
+					minimum: 1,
+					maximum: 500,
+					default: 100,
+					description: "Maximum number of gadgets to return.",
+				}),
+			),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDisasmRadare2GadgetSearch(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				{ pattern: params.pattern, maxResults: params.maxResults },
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
 		name: "decomp_ghidra_functions",
 		label: "Decomp Ghidra Functions",
 		description: "Run Ghidra headless analysis to export a function list into a durable artifact.",
@@ -1883,6 +1935,87 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
 				path,
 				params.view ?? "info-file",
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "debug_gdb_commands",
+		label: "Debug GDB Commands",
+		description:
+			"Run multiple GDB commands in batch mode against a target binary. Use this for multi-step debugging: set breakpoints, run, inspect registers, dump memory, examine data structures. Each command is passed as a separate -ex flag.",
+		promptSnippet:
+			"Use debug_gdb_commands for multi-step debugging sessions: breakpoints, register inspection, memory dumps, and heap state examination.",
+		promptGuidelines: [
+			"Use debug_gdb_commands when you need to set breakpoints and inspect state at specific points.",
+			"Combine with decompilation results to inspect allocator metadata, heap layouts, and object states.",
+			"Commands execute sequentially — set breakpoints before 'run', inspect after 'continue'.",
+			"For memory dumps use 'x/Nxw ADDRESS' format. For registers use 'info registers'.",
+		],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary to debug." }),
+			commands: Type.Array(Type.String(), {
+				description:
+					'Array of GDB commands to execute sequentially. Example: ["break *0x401234", "run", "info registers", "x/32xw $rsp"]',
+			}),
+			argv: Type.Optional(Type.Array(Type.String(), { description: "Arguments to pass to the target binary." })),
+			breakOnEntry: Type.Optional(
+				Type.Boolean({
+					description: "If true, automatically sets a breakpoint at main and runs before executing commands.",
+				}),
+			),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDebugGdbCommands(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				params.commands,
+				{ argv: params.argv, breakOnEntry: params.breakOnEntry },
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "debug_gdb_script",
+		label: "Debug GDB Script",
+		description:
+			"Execute a GDB Python script against a target binary. Use this for complex analysis that requires conditional logic, loops, or structured output — such as walking allocator free-lists, dumping heap metadata, or validating object layouts.",
+		promptSnippet:
+			"Use debug_gdb_script for programmatic GDB analysis: custom allocator reversal, heap walks, and complex data structure inspection.",
+		promptGuidelines: [
+			"Write GDB Python scripts using the gdb module API (gdb.execute, gdb.parse_and_eval, gdb.selected_frame).",
+			"Use gdb.execute('...', to_string=True) to capture command output for parsing.",
+			"Print structured output (JSON or tabular) so results are easy to interpret.",
+			"The script runs in --batch mode — it must complete without interactive input.",
+		],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary to debug." }),
+			script: Type.String({
+				description:
+					"GDB Python script content. Uses the gdb module API. Must print results to stdout. Example: import gdb; gdb.execute('break main'); gdb.execute('run'); print(gdb.execute('info registers', to_string=True))",
+			}),
+			argv: Type.Optional(Type.Array(Type.String(), { description: "Arguments to pass to the target binary." })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runDebugGdbScript(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				params.script,
+				{ argv: params.argv },
 				signal,
 			);
 			return {
@@ -1977,6 +2110,89 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					argv: params.argv ?? [],
 					followForks: params.followForks ?? true,
 					stringLimit: params.stringLimit ?? 256,
+				},
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "exploit_ropgadget",
+		label: "Exploit ROPgadget",
+		description:
+			"Search for ROP gadgets in a binary using ROPgadget. Supports filtering by instruction type, searching for specific patterns, controlling search depth, and auto-generating ROP chains for common goals.",
+		promptSnippet:
+			"Use exploit_ropgadget for comprehensive ROP gadget search, CFI-filtered gadget inventory, and automatic chain generation.",
+		promptGuidelines: [
+			"Use exploit_ropgadget for thorough gadget search — it finds more gadgets than radare2 /R and supports auto-chain generation.",
+			"Use --only to filter by instruction type (e.g., 'pop|ret' to find register-control gadgets).",
+			"Use --filter to exclude unwanted instructions (e.g., filter out 'jmp' to avoid indirect branches under CFI).",
+			"Use --search to find specific instruction sequences (e.g., 'pop rdi ; ret').",
+			"Use --ropchain to auto-generate a chain for execve('/bin/sh') — useful as a starting point.",
+			"Cross-reference results with CFI policy from decompilation to identify which gadgets survive enforcement.",
+		],
+		parameters: Type.Object({
+			path: Type.String({ description: "Path to the binary to search for gadgets." }),
+			only: Type.Optional(
+				Type.String({
+					description:
+						"Only show gadgets containing these instruction types (pipe-separated). Example: 'pop|ret', 'mov|pop|ret'.",
+				}),
+			),
+			filter: Type.Optional(
+				Type.String({
+					description: "Filter out gadgets containing these instructions. Example: 'jmp|call' to exclude indirect branches.",
+				}),
+			),
+			search: Type.Optional(
+				Type.String({
+					description: "Search for a specific gadget instruction sequence. Example: 'pop rdi ; ret'.",
+				}),
+			),
+			depth: Type.Optional(
+				Type.Integer({
+					minimum: 1,
+					maximum: 20,
+					description: "Maximum number of instructions per gadget (default: 10).",
+				}),
+			),
+			ropchain: Type.Optional(
+				Type.Boolean({
+					description: "If true, attempt to auto-generate a ROP chain for execve('/bin/sh').",
+				}),
+			),
+			multibr: Type.Optional(
+				Type.Boolean({
+					description: "If true, include gadgets with multiple branches (useful for complex chains).",
+				}),
+			),
+			maxResults: Type.Optional(
+				Type.Integer({
+					minimum: 1,
+					maximum: 500,
+					default: 200,
+					description: "Maximum number of result lines to return.",
+				}),
+			),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const path = resolveArtifactPath(ctx.cwd, params.path);
+			const details = await runExploitRopgadget(
+				(command, args, options) => pi.exec(command, args, { cwd: ctx.cwd, ...options }),
+				ctx.cwd,
+				path,
+				{
+					only: params.only,
+					filter: params.filter,
+					search: params.search,
+					depth: params.depth,
+					ropchain: params.ropchain,
+					multibr: params.multibr,
+					maxResults: params.maxResults,
 				},
 				signal,
 			);

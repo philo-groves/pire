@@ -94,6 +94,96 @@ function makeLogPath(cwd: string, prefix: string, targetPath: string): string {
 	return join(cwd, ".pire", "artifacts", `${prefix}-${stem}.log`);
 }
 
+export async function runDebugGdbCommands(
+	exec: ExecFn,
+	cwd: string,
+	targetPath: string,
+	commands: string[],
+	options?: { argv?: string[]; breakOnEntry?: boolean },
+	signal?: AbortSignal,
+): Promise<ToolExecResult> {
+	const logPath = makeLogPath(cwd, "gdb-commands", targetPath);
+	await mkdir(join(cwd, ".pire", "artifacts"), { recursive: true });
+
+	const args = ["--batch", "-q"];
+	if (options?.breakOnEntry) {
+		args.push("-ex", "break main", "-ex", "run");
+	}
+	for (const cmd of commands) {
+		args.push("-ex", cmd);
+	}
+	if (options?.argv && options.argv.length > 0) {
+		args.push("--args", targetPath, ...options.argv);
+	} else {
+		args.push(targetPath);
+	}
+
+	return runTool(
+		exec,
+		"gdb",
+		args,
+		targetPath,
+		"debug_gdb_commands",
+		[
+			{
+				path: targetPath,
+				type: "binary",
+				finding: `debug_gdb_commands ran ${commands.length} command(s) against ${targetPath}`,
+			},
+			{
+				path: logPath,
+				type: "log",
+				finding: `gdb command output for ${targetPath}`,
+			},
+		],
+		signal,
+	);
+}
+
+export async function runDebugGdbScript(
+	exec: ExecFn,
+	cwd: string,
+	targetPath: string,
+	script: string,
+	options?: { argv?: string[] },
+	signal?: AbortSignal,
+): Promise<ToolExecResult> {
+	const artifactDir = join(cwd, ".pire", "artifacts");
+	await mkdir(artifactDir, { recursive: true });
+	const stem = basename(targetPath).replace(/[^A-Za-z0-9._-]+/g, "_");
+	const scriptPath = join(artifactDir, `gdb-script-${stem}-${Date.now()}.py`);
+	const { writeFile } = await import("node:fs/promises");
+	await writeFile(scriptPath, script, "utf-8");
+
+	const args = ["--batch", "-q", "-x", scriptPath];
+	if (options?.argv && options.argv.length > 0) {
+		args.push("--args", targetPath, ...options.argv);
+	} else {
+		args.push(targetPath);
+	}
+
+	return runTool(
+		exec,
+		"gdb",
+		args,
+		targetPath,
+		"debug_gdb_script",
+		[
+			{
+				path: targetPath,
+				type: "binary",
+				finding: `debug_gdb_script executed Python script against ${targetPath}`,
+			},
+			{
+				path: scriptPath,
+				type: "log",
+				finding: `gdb Python script for ${targetPath}`,
+			},
+		],
+		signal,
+	);
+}
+
 export async function runDebugGdb(
 	exec: ExecFn,
 	targetPath: string,

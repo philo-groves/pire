@@ -119,7 +119,14 @@ Gap-targeting tasks added to the deep suite expose specific harness weaknesses:
 - `binre-scenario-007` (slab allocator heap exploitation): requires heap dump analysis, custom allocator metadata reversal, and fake object placement — the harness lacks heap introspection and interactive debugging, so it stalls at the allocator-reversal stage
 - `binre-scenario-008` (ROP-gated CFI bypass): requires programmatic gadget search, CFI-aware chain assembly, and JIT page pivot — the harness has no ROP tooling, so it can only manually identify a few gadgets via objdump but cannot assemble or validate a chain
 
-Both gap tasks currently produce only fail outcomes. Moving either to near-miss requires new harness capabilities (interactive debugging, heap dump parsing, gadget search, or chain assembly tooling).
+Both gap tasks currently produce only fail outcomes. New harness capabilities have been added to address these gaps:
+
+- `debug_gdb_commands`: multi-command GDB batch mode — set breakpoints, run, inspect registers, dump memory in a single tool call
+- `debug_gdb_script`: GDB Python script execution — write programmatic analysis (allocator walkers, heap metadata dumpers, conditional inspection) and run it in batch mode
+- `disasm_radare2_gadgets`: radare2-based ROP gadget search with pattern matching and result limiting
+- `exploit_ropgadget`: ROPgadget wrapper with instruction filtering, pattern search, depth control, and auto-chain generation
+
+The next eval iteration should re-run the gap-task fixtures with sessions that exercise these new tools to determine whether they move the outcomes from fail toward near-miss.
 
 ## What To Improve
 
@@ -133,8 +140,8 @@ Use eval results to drive changes in this order:
 
 Current priority inside that list:
 
-1. Heap introspection: interactive GDB breakpoints on allocator internals, heap dump parsing, fake object validation — would unblock binre-scenario-007 from fail to near-miss
-2. ROP/gadget tooling: programmatic gadget search with CFI-aware filtering, chain assembly, stack pivot validation — would unblock binre-scenario-008 from fail to near-miss
+1. Re-run gap-task fixtures using new tools (debug_gdb_commands, debug_gdb_script, disasm_radare2_gadgets, exploit_ropgadget) to measure actual capability improvement
+2. Prompt/skill authoring: teach the agent to compose effective GDB command sequences for heap analysis and to cross-reference gadget search results with CFI policy
 3. Batch decompilation: Ghidra cross-function data-flow analysis for multi-component chains
 4. Reduction of overclaiming and false positives in near-miss cases
 

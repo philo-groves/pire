@@ -178,6 +178,50 @@ export async function runDisasmRizinFunctions(
 	);
 }
 
+export async function runDisasmRadare2GadgetSearch(
+	exec: ExecFn,
+	cwd: string,
+	targetPath: string,
+	options: { pattern: string; maxResults?: number },
+	signal?: AbortSignal,
+): Promise<ToolExecResult> {
+	const limit = options.maxResults ?? 100;
+	const searchCommand = `/R ${options.pattern}`;
+	const args = ["-q", "-c", searchCommand, targetPath];
+	const result = await exec("radare2", args, { signal });
+
+	const rawOutput = `${result.stdout}${result.stderr}`.trimEnd();
+	const lines = rawOutput.split("\n");
+	const truncated = lines.length > limit ? `${lines.slice(0, limit).join("\n")}\n... ${lines.length - limit} more gadgets` : rawOutput;
+
+	const logPath = await persistLog(
+		cwd,
+		`radare2-gadgets-${getArtifactStem(targetPath)}.log`,
+		`${truncated}\n`,
+	);
+
+	return runTool(
+		async () => ({ ...result, stdout: truncated, stderr: "" }),
+		"radare2",
+		args,
+		targetPath,
+		"disasm_radare2_gadgets",
+		[
+			{
+				path: targetPath,
+				type: "binary",
+				finding: `radare2 gadget search for '${options.pattern}' in ${targetPath}`,
+			},
+			{
+				path: logPath,
+				type: "log",
+				finding: `radare2 gadget search results for ${targetPath}`,
+			},
+		],
+		signal,
+	);
+}
+
 export async function runDisasmRadare2Disassembly(
 	exec: ExecFn,
 	cwd: string,
