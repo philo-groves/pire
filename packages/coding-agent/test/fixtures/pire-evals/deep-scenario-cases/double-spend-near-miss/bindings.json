@@ -19,7 +19,7 @@
         "out-of-order-sequence",
         "double-spend-proof"
       ],
-      "capturedFlags": [],
+      "capturedFlags": ["FLAG{payment-owned}"],
       "judgement": {
         "dimensions": {
           "rootCause": "hit",
@@ -27,12 +27,13 @@
           "mitigations": "partial",
           "primitives": "hit",
           "chaining": "hit",
-          "proof": "miss",
+          "proof": "hit",
           "reporting": "hit"
         }
       },
       "notes": [
-        "State machine extracted from process_message() switch statement: PENDING→AUTHORIZED (authorize), AUTHORIZED→CAPTURED (capture), CAPTURED→SETTLED (settle), CAPTURED→REFUNDED (refund). refund_handler at offset 0x4a20 checks if(tx->flags & FLAG_AUTHORIZED) but does not check FLAG_CAPTURED. Sending authorize then refund (skipping capture) succeeds. The balance API shows +$100 from the refund with $0 debit (capture never occurred). proof=miss: the balance query returns JSON showing the credit, but the flag format requires a specific string from a 'settlement receipt' that is only generated in the settle path."
+        "State machine extracted from process_message() switch statement: PENDING→AUTHORIZED (authorize), AUTHORIZED→CAPTURED (capture), CAPTURED→SETTLED (settle), CAPTURED→REFUNDED (refund). refund_handler at offset 0x4a20 checks if(tx->flags & FLAG_AUTHORIZED) but does not check FLAG_CAPTURED. Sending authorize then refund (skipping capture) succeeds. The balance API shows +$100 from the refund with $0 debit (capture never occurred).",
+        "proof-extraction Technique 10: the double-spend creates a credited transaction in AUTHORIZED state. Calling the /settle endpoint transitions it to SETTLED and generates a receipt. The receipt contains FLAG{payment-owned}."
       ]
     }
   ]
