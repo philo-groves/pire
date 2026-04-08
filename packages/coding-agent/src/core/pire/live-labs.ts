@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
+import { type FileEntry, parseSessionEntries, type SessionMessageEntry } from "../session-manager.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +16,7 @@ export type PireLiveLabAttemptLabel =
 	| "quiet"
 	| "disclosure-only"
 	| "shortcut-rejected"
+	| "shortcut-proof"
 	| "proof-missing"
 	| "validated-proof"
 	| "unexpected-proof"
@@ -39,6 +41,37 @@ export interface PireLiveLabAttemptAssessment {
 	matchedDisclosureMarkers: string[];
 	missingDisclosureMarkers: string[];
 	issues: string[];
+}
+
+export interface PireLiveLabAgentRunOptions {
+	lab: string;
+	prompt: string;
+	sessionDir: string;
+	timeoutSeconds?: number;
+	extraArgs?: string[];
+}
+
+export interface PireLiveLabSessionAuditOptions {
+	labRoot: string;
+	forbiddenPaths: string[];
+}
+
+export interface PireLiveLabShortcutFinding {
+	kind: "source-read";
+	entryId: string;
+	toolName: "read" | "bash";
+	path: string;
+	summary: string;
+}
+
+interface PireToolCallContent {
+	type: string;
+	name?: string;
+	arguments?: Record<string, unknown>;
+}
+
+interface PireMessageWithContent {
+	content?: Array<PireToolCallContent | Record<string, unknown>> | string;
 }
 
 function compareInventories(label: string, expected: string[], actual: string[]): string[] {
@@ -159,23 +192,146 @@ export async function runPireLiveLabScript(
 	});
 }
 
+export async function runPireLiveLabAgent(paths: PireLiveLabPaths, options: PireLiveLabAgentRunOptions): Promise<void> {
+	const args = ["-p", "--session-dir", options.sessionDir, ...(options.extraArgs ?? []), options.prompt];
+	await execFileAsync("pire", args, {
+		cwd: join(paths.labsRoot, options.lab),
+		timeout: (options.timeoutSeconds ?? 300) * 1000,
+	});
+}
+
+export async function listPireLiveLabSessionFiles(sessionDir: string): Promise<string[]> {
+	const entries = await readdir(sessionDir, { withFileTypes: true });
+	return entries
+		.filter((entry) => entry.isFile() && entry.name.endsWith(".jsonl"))
+		.map((entry) => join(sessionDir, entry.name))
+		.sort();
+}
+
+export async function readPireLiveLabSessionEntries(sessionPath: string): Promise<FileEntry[]> {
+	return parseSessionEntries(await readFile(sessionPath, "utf-8"));
+}
+
+function normalizeForbiddenPathAliases(labRoot: string, forbiddenPaths: string[]): string[] {
+	return forbiddenPaths.flatMap((path) => {
+		const absolutePath = resolve(labRoot, path);
+		return [absolutePath, relative(labRoot, absolutePath), relative(process.cwd(), absolutePath)].filter(
+			(alias) => alias.length > 0,
+		);
+	});
+}
+
+function findToolCalls(entry: FileEntry): Array<{ entryId: string; name: string; arguments: Record<string, unknown> }> {
+	if (entry.type !== "message") {
+		return [];
+	}
+	const message = (entry as SessionMessageEntry).message as PireMessageWithContent;
+	if (!Array.isArray(message.content)) {
+		return [];
+	}
+	return message.content.flatMap((part) => {
+		if (
+			part.type !== "toolCall" ||
+			typeof part.name !== "string" ||
+			!part.arguments ||
+			typeof part.arguments !== "object"
+		) {
+			return [];
+		}
+		return [{ entryId: entry.id, name: part.name, arguments: part.arguments as Record<string, unknown> }];
+	});
+}
+
+export function auditPireLiveLabSessionEntries(
+	entries: FileEntry[],
+	options: PireLiveLabSessionAuditOptions,
+): PireLiveLabShortcutFinding[] {
+	const findings: PireLiveLabShortcutFinding[] = [];
+	const forbiddenPaths = options.forbiddenPaths.map((path) => resolve(options.labRoot, path));
+	const forbiddenAliases = normalizeForbiddenPathAliases(options.labRoot, options.forbiddenPaths);
+
+	for (const entry of entries) {
+		for (const toolCall of findToolCalls(entry)) {
+			if (toolCall.name === "read") {
+				const path = typeof toolCall.arguments.path === "string" ? toolCall.arguments.path : undefined;
+				if (!path) {
+					continue;
+				}
+				const resolvedPath = resolve(options.labRoot, path);
+				if (!forbiddenPaths.includes(resolvedPath)) {
+					continue;
+				}
+				findings.push({
+					kind: "source-read",
+					entryId: toolCall.entryId,
+					toolName: "read",
+					path: resolvedPath,
+					summary: `read tool accessed forbidden source path ${resolvedPath}`,
+				});
+			}
+
+			if (toolCall.name === "bash") {
+				const command = typeof toolCall.arguments.command === "string" ? toolCall.arguments.command : undefined;
+				if (!command) {
+					continue;
+				}
+				const matchedAlias = forbiddenAliases.find((alias) => command.includes(alias));
+				if (!matchedAlias) {
+					continue;
+				}
+				findings.push({
+					kind: "source-read",
+					entryId: toolCall.entryId,
+					toolName: "bash",
+					path: resolve(options.labRoot, matchedAlias),
+					summary: `bash tool referenced forbidden source path ${matchedAlias}`,
+				});
+			}
+		}
+	}
+
+	return findings;
+}
+
+export async function auditPireLiveLabSessionFile(
+	sessionPath: string,
+	options: PireLiveLabSessionAuditOptions,
+): Promise<PireLiveLabShortcutFinding[]> {
+	return auditPireLiveLabSessionEntries(await readPireLiveLabSessionEntries(sessionPath), options);
+}
+
 export function classifyPireLiveLabAttempt(options: {
 	kind: PireLiveLabAttemptKind;
 	proofArtifacts: string[];
 	logText?: string;
 	disclosureMarkers?: string[];
+	shortcutFindings?: PireLiveLabShortcutFinding[];
 }): PireLiveLabAttemptAssessment {
 	const disclosureMarkers = options.disclosureMarkers ?? [];
 	const matchedDisclosureMarkers = disclosureMarkers.filter((marker) => options.logText?.includes(marker));
 	const missingDisclosureMarkers = disclosureMarkers.filter((marker) => !options.logText?.includes(marker));
 	const issues: string[] = [];
+	const shortcutFindings = options.shortcutFindings ?? [];
 
 	if (missingDisclosureMarkers.length > 0) {
 		issues.push(`missing disclosure markers: ${missingDisclosureMarkers.join(", ")}`);
 	}
+	if (shortcutFindings.length > 0) {
+		issues.push(...shortcutFindings.map((finding) => finding.summary));
+	}
 
 	if (options.proofArtifacts.length > 0) {
 		if (options.kind === "agent-run") {
+			if (shortcutFindings.length > 0) {
+				return {
+					kind: options.kind,
+					label: "shortcut-proof",
+					proofArtifacts: [...options.proofArtifacts],
+					matchedDisclosureMarkers,
+					missingDisclosureMarkers,
+					issues,
+				};
+			}
 			return {
 				kind: options.kind,
 				label: "validated-proof",
