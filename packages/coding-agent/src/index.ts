@@ -176,6 +176,16 @@ export {
 	validateBinaryReEvalCorpus,
 } from "./core/pire/eval-corpus.js";
 export {
+	createGeneratedScenarioFixtureCase,
+	type PireGeneratedFixtureArtifact,
+	type PireGeneratedFixtureCaseExpectation,
+	type PireGeneratedFixtureCaseOptions,
+	type PireGeneratedFixtureFindingOptions,
+	type PireGeneratedScenarioFixtureCase,
+	type PireGeneratedScenarioFixtureCaseOptions,
+	writeGeneratedScenarioFixtureCase,
+} from "./core/pire/eval-fixture-generator.js";
+export {
 	type CreatePireEvalRunBundleFromBindingFileOptions,
 	type CreatePireEvalRunBundleFromSessionOptions,
 	createPireEvalRunBundleFromBindingFile,

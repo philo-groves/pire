@@ -46,6 +46,7 @@
 - Added an updater proof-gap variant to the deep-scenario ladder, so the eval harness can now separate “reached trust-bypass semantics” from “captured the final updater-owned proof artifact.”
 - Added a broker proof-gap variant to the deep-scenario ladder, so proof-discipline regressions can now be compared across both updater trust-boundary and broker privileged-action families.
 - Added a plugin-host proof-gap variant to the deep-scenario ladder, completing the chain-gap / proof-gap / full-proof split across all deep scenario families.
+- Added a small deep-scenario fixture generator and regression coverage for generating proof-gap cases on disk, so new eval ladders can be minted from structured inputs instead of handwritten JSON.
 
 ### Changed
 
