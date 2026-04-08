@@ -1,11 +1,11 @@
 {
-  "title": "ROP chain fail — gadgets found but CFI blocks all pivot sequences",
+  "title": "ROP chain near-miss — exploit-pivot found data-only path but .so search path blocks delivery",
   "expectation": {
-    "minNormalized": 0.31,
-    "maxIssues": 3,
+    "minNormalized": 0.59,
+    "maxIssues": 2,
     "maxRank": 20,
     "minScenarioPassed": 0,
-    "maxScenarioNearMiss": 0,
-    "maxScenarioFailed": 1
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
   }
 }

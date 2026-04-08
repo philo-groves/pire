@@ -105,8 +105,8 @@ Current direct eval runs show:
 All four suites pass expectation enforcement with zero regressions. The deep suite produces 16 cases:
 
 - `pass=3`
-- `near-miss=8`
-- `fail=5`
+- `near-miss=9`
+- `fail=4`
 
 Key scorer improvements:
 
@@ -131,7 +131,15 @@ These tools moved the gap-task near-miss fixtures from FAIL to NEAR-MISS:
 - `slab-heap-near-miss`: FAIL 52% → NEAR 62% (debug_gdb_commands + debug_gdb_script enabled heap inspection through vtable-hijack, 3→5 of 6 objectives)
 - `rop-chain-near-miss`: FAIL 56% → NEAR 65% (exploit_ropgadget + disasm_radare2_gadgets enabled chain assembly through stack-pivot, 3→5 of 7 objectives)
 
-Remaining gap-task fails represent harder blockers: slab-heap-fail is blocked by multi-tier allocator topology (needs a dedicated GDB Python walker per allocator variant), rop-chain-fail is blocked by CFI eliminating all pivot gadgets (needs a wider write primitive or a different exploitation strategy).
+Two new skills further improved the gap-task outcomes:
+
+- `heap-analysis`: structured workflow for custom allocator reversal (identify tiers via decompilation → write GDB Python walkers per tier → validate heap state → verify fake object placement). Moved slab-heap-fail from 15% to 52% (1→4 of 6 objectives), blocked only by safe-linking XOR key.
+- `exploit-pivot`: methodology for pivoting when the primary exploitation path is blocked (widen primitive → data-only attack → partial overwrite → indirect API misuse → race amplification). Moved rop-chain-fail from 32% to 60% NEAR (2→4 of 7 objectives), identifying a data-only path via config_path corruption.
+
+Remaining fails represent security mitigation walls:
+- `slab-heap-fail` (52%): safe-linking XOR key unrecoverable without a separate info leak — needs either an info leak primitive or a way to brute-force the per-slab key
+- `updater-trust-fail` (35%): early stall in the manifest parser — needs deeper chain through the update pipeline
+- `plugin-host-fail` (46%) / `broker-priv-fail` (44%): incomplete chains from the original task set
 
 ## What To Improve
 
@@ -145,10 +153,10 @@ Use eval results to drive changes in this order:
 
 Current priority inside that list:
 
-1. Move gap-task near-misses toward pass: slab-heap needs the missing info leak for the privileged callback; rop-chain needs the JIT page address leak
-2. Prompt/skill authoring: teach the agent to compose effective GDB command sequences for heap analysis and to cross-reference gadget search results with CFI policy
-3. Move gap-task fails toward near-miss: slab-heap-fail needs a per-variant GDB Python walker for the multi-tier allocator; rop-chain-fail needs a wider write primitive or alternative exploitation strategy
-4. Batch decompilation: Ghidra cross-function data-flow analysis for multi-component chains
+1. Move gap-task near-misses toward pass: slab-heap-near-miss needs the ASLR base leak for the privileged callback; rop-chain-near-miss needs the JIT page address leak
+2. Move slab-heap-fail past safe-linking: needs an info leak to recover the per-slab XOR key, or a brute-force strategy for the key space
+3. Batch decompilation: Ghidra cross-function data-flow analysis for multi-component chains
+4. Reduction of overclaiming and false positives in near-miss cases
 
 If the harness starts passing the current 3-stage and 4-stage chains too easily, add deeper tasks rather than relaxing the bar. The intended progression is:
 

@@ -1,31 +1,51 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T23:38:00.000Z",
+  "updatedAt": "2026-04-07T23:55:00.000Z",
   "findings": [
     {
       "id": "find-rop-fail-001",
-      "title": "Gadgets discovered but CFI policy eliminates all viable pivot sequences",
+      "title": "ROP blocked by CFI; data-only pivot via config_path corruption identified but path length insufficient",
       "status": "confirmed",
       "severity": "high",
-      "statement": "The parser OOB write primitive is confirmed with 4-byte reach past the vtable pointer. ROPgadget found 200+ raw gadgets, but after filtering indirect branches for CFI compliance only 8 gadgets survive. None provide a stack pivot (xchg/mov rsp sequences all land on non-CFI-valid addresses). Without a pivot, the 4-byte write cannot be chained into register control. The exploit path is blocked by the combination of narrow write reach and aggressive CFI enforcement.",
-      "basis": ["ev-rop-fail-001"],
-      "relatedEvidenceIds": ["ev-rop-fail-001"],
-      "relatedArtifactIds": ["artifact:/tmp/rop-chain-fail.log", "artifact:/tmp/rop-chain-fail.gadgets"],
-      "supports": [],
+      "statement": "ROPgadget found 200+ gadgets but only 8 survive CFI filtering, none providing a stack pivot. The exploit-pivot skill guided evaluation of 5 alternative strategies. Adjacent corruption (checklist item 1) revealed a config_path string 4 bytes past the OOB write target. Data-only attack (item 2) identified that config_path controls a privileged dlopen call. However, the reachable portion of config_path is only 12 bytes, limiting the redirect to same-directory relative paths. The service's .so search path does not include any writable directory, so the data-only attack cannot deliver a malicious library. Partial overwrite (item 3), indirect API misuse (item 4), and race amplification (item 5) were evaluated and recorded as non-viable.",
+      "basis": ["ev-rop-fail-001", "ev-rop-fail-002", "ev-rop-fail-003"],
+      "relatedEvidenceIds": ["ev-rop-fail-001", "ev-rop-fail-002", "ev-rop-fail-003"],
+      "relatedArtifactIds": ["artifact:/tmp/rop-chain-fail.log", "artifact:/tmp/rop-chain-fail.gadgets", "artifact:/tmp/rop-pivot-analysis.log"],
+      "reproStatus": "partial",
       "createdAt": "2026-04-07T23:28:00.000Z",
-      "updatedAt": "2026-04-07T23:36:00.000Z"
+      "updatedAt": "2026-04-07T23:53:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-rop-fail-001",
       "kind": "tool-result",
-      "summary": "exploit_ropgadget: 200+ raw gadgets, 8 CFI-surviving, no usable pivot; disasm_radare2_gadgets confirms no xchg/mov rsp in valid landing pads",
+      "summary": "exploit_ropgadget: 200+ raw, 8 CFI-surviving, no pivot — confirms ROP path is dead",
       "commandId": "tool:exploit_ropgadget:full-scan",
-      "artifactIds": ["artifact:/tmp/rop-chain-fail.log", "artifact:/tmp/rop-chain-fail.gadgets"],
+      "artifactIds": ["artifact:/tmp/rop-chain-fail.gadgets"],
       "supports": ["find-rop-fail-001"],
       "refutes": [],
       "createdAt": "2026-04-07T23:30:00.000Z"
+    },
+    {
+      "id": "ev-rop-fail-002",
+      "kind": "tool-result",
+      "summary": "debug_gdb_commands: heap layout shows config_path string 4 bytes past OOB target, 12 bytes writable",
+      "commandId": "tool:debug_gdb_commands:adjacent-layout",
+      "artifactIds": ["artifact:/tmp/rop-pivot-analysis.log"],
+      "supports": ["find-rop-fail-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T23:40:00.000Z"
+    },
+    {
+      "id": "ev-rop-fail-003",
+      "kind": "tool-result",
+      "summary": "decomp_ghidra_decompile: config_path feeds into dlopen call in privileged init; .so search path excludes writable dirs",
+      "commandId": "tool:decomp_ghidra_decompile:dlopen-trace",
+      "artifactIds": ["artifact:/tmp/rop-pivot-analysis.log"],
+      "supports": ["find-rop-fail-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T23:47:00.000Z"
     }
   ]
 }

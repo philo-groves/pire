@@ -1,8 +1,8 @@
 {
-  "title": "Slab allocator fail — allocator reversed but multi-tier topology blocks heap inference",
+  "title": "Slab allocator fail — heap-analysis walker works but safe-linking blocks fake pointer injection",
   "expectation": {
-    "minNormalized": 0.14,
-    "maxIssues": 3,
+    "minNormalized": 0.51,
+    "maxIssues": 2,
     "maxRank": 20,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 0,

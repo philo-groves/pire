@@ -1,31 +1,51 @@
 {
   "version": 1,
-  "updatedAt": "2026-04-07T23:12:00.000Z",
+  "updatedAt": "2026-04-07T23:30:00.000Z",
   "findings": [
     {
       "id": "find-slab-fail-001",
-      "title": "Slab allocator metadata layout reversed but heap state inference blocked",
-      "status": "candidate",
-      "severity": "medium",
-      "statement": "GDB breakpoints on the allocator init path confirmed slab header field offsets (size, free-count, next-free pointer). However, the allocator uses a multi-tier topology with thread-local caches and a central arena, making heap state inference after a controlled free sequence infeasible without a custom GDB Python walker script targeting this specific variant.",
-      "basis": ["ev-slab-fail-001"],
-      "relatedEvidenceIds": ["ev-slab-fail-001"],
-      "relatedArtifactIds": ["artifact:/tmp/slab-heap-fail.log"],
-      "reproStatus": "not-reproduced",
+      "title": "Custom slab allocator reversed and heap state confirmed but safe-linking blocks fake object injection",
+      "status": "confirmed",
+      "severity": "high",
+      "statement": "The heap-analysis skill guided construction of a GDB Python walker for both the thread-local cache tier and the central arena. Heap state after a controlled free sequence is deterministic: slot reuse follows a LIFO pattern in the thread-local cache. However, the allocator encodes free-list pointers using safe-linking (XOR with a per-slab random key stored at an unreadable offset). Without a separate leak to recover the XOR key, fake object placement fails the integrity check on re-allocation and the process aborts.",
+      "basis": ["ev-slab-fail-001", "ev-slab-fail-002", "ev-slab-fail-003"],
+      "relatedEvidenceIds": ["ev-slab-fail-001", "ev-slab-fail-002", "ev-slab-fail-003"],
+      "relatedArtifactIds": ["artifact:/tmp/slab-heap-fail.log", "artifact:/tmp/slab-walker-tlc.py", "artifact:/tmp/slab-safelink-check.log"],
+      "reproStatus": "partial",
       "createdAt": "2026-04-07T23:02:00.000Z",
-      "updatedAt": "2026-04-07T23:10:00.000Z"
+      "updatedAt": "2026-04-07T23:28:00.000Z"
     }
   ],
   "evidence": [
     {
       "id": "ev-slab-fail-001",
       "kind": "tool-result",
-      "summary": "debug_gdb_commands: breakpoints on allocator init confirm slab header offsets; multi-tier topology blocks further progress",
-      "commandId": "tool:debug_gdb_commands:slab-init",
+      "summary": "debug_gdb_script: tier-specific Python walker dumps thread-local cache free-list and central arena state",
+      "commandId": "tool:debug_gdb_script:slab-walker-tlc",
+      "artifactIds": ["artifact:/tmp/slab-walker-tlc.py", "artifact:/tmp/slab-heap-fail.log"],
+      "supports": ["find-slab-fail-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T23:08:00.000Z"
+    },
+    {
+      "id": "ev-slab-fail-002",
+      "kind": "tool-result",
+      "summary": "debug_gdb_commands: breakpoint on re-allocation confirms LIFO slot reuse in thread-local cache tier",
+      "commandId": "tool:debug_gdb_commands:slot-reuse",
       "artifactIds": ["artifact:/tmp/slab-heap-fail.log"],
       "supports": ["find-slab-fail-001"],
       "refutes": [],
-      "createdAt": "2026-04-07T23:04:00.000Z"
+      "createdAt": "2026-04-07T23:15:00.000Z"
+    },
+    {
+      "id": "ev-slab-fail-003",
+      "kind": "tool-result",
+      "summary": "debug_gdb_commands: safe-linking integrity check fails on injected pointer — XOR key unrecoverable without separate leak",
+      "commandId": "tool:debug_gdb_commands:safelink-verify",
+      "artifactIds": ["artifact:/tmp/slab-safelink-check.log"],
+      "supports": ["find-slab-fail-001"],
+      "refutes": [],
+      "createdAt": "2026-04-07T23:22:00.000Z"
     }
   ]
 }
