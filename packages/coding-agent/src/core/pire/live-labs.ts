@@ -471,7 +471,13 @@ function collectToolResults(entries: FileEntry[]): Map<string, { isError: boolea
 }
 
 function wasForbiddenAccessBlocked(result?: { isError: boolean; text: string }): boolean {
-	if (!result || !result.isError) {
+	if (!result) {
+		return false;
+	}
+	if (!result.isError && result.text.trim() === "(no output)") {
+		return true;
+	}
+	if (!result.isError) {
 		return false;
 	}
 	return (

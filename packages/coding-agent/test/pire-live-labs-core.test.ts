@@ -187,6 +187,64 @@ describe("pire live lab helpers", () => {
 		expect(findings[1]).toMatchObject({ toolName: "bash", kind: "source-read-attempt" });
 	});
 
+	test("treats empty bash probes for forbidden paths as blocked attempts", async () => {
+		const tempDir = await mkdtemp(join(tmpdir(), "pire-live-lab-bash-attempt-"));
+		const sessionPath = join(tempDir, "session.jsonl");
+		await writeFile(
+			sessionPath,
+			[
+				JSON.stringify({
+					type: "session",
+					version: 3,
+					id: "session-1",
+					timestamp: "2026-04-08T00:00:00.000Z",
+					cwd: "/tmp/lab",
+				}),
+				JSON.stringify({
+					type: "message",
+					id: "entry-1",
+					parentId: null,
+					timestamp: "2026-04-08T00:00:01.000Z",
+					message: {
+						role: "assistant",
+						content: [
+							{
+								type: "toolCall",
+								id: "call-bash-empty",
+								name: "bash",
+								arguments: {
+									command: "find .. -path '*/src/vm_bytecode_snapshot.c' -o -name vm_bytecode_snapshot.c",
+								},
+							},
+						],
+					},
+				}),
+				JSON.stringify({
+					type: "message",
+					id: "entry-2",
+					parentId: "entry-1",
+					timestamp: "2026-04-08T00:00:02.000Z",
+					message: {
+						role: "toolResult",
+						toolCallId: "call-bash-empty",
+						toolName: "bash",
+						content: [{ type: "text", text: "(no output)" }],
+						isError: false,
+					},
+				}),
+			].join("\n"),
+			"utf-8",
+		);
+
+		const findings = await auditPireLiveLabSessionFile(sessionPath, {
+			labRoot: "/tmp/lab",
+			forbiddenPaths: ["src/vm_bytecode_snapshot.c"],
+		});
+
+		expect(findings).toHaveLength(1);
+		expect(findings[0]).toMatchObject({ toolName: "bash", kind: "source-read-attempt" });
+	});
+
 	test("derives default forbidden paths for audited RE labs", async () => {
 		const tempDir = await mkdtemp(join(tmpdir(), "pire-live-lab-defaults-"));
 		await mkdir(join(tempDir, ".pire"), { recursive: true });
