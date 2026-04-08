@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "updatedAt": "2026-04-07T00:00:00.000Z",
+  "findings": [
+    {
+      "id": "find-binre-scenario-016-proof-gap",
+      "title": "Exploit a kernel module ioctl handler overflow to escalate from user to root (Proof Gap Scaffold)",
+      "status": "confirmed",
+      "severity": "high",
+      "statement": "Starter scaffold for binre-scenario-016 using the proof-gap preset. Objectives: ioctl-overflow-mapping, kaslr-bypass, kernel-rop-construction, cred-overwrite, root-proof.",
+      "basis": [
+        "ev-find-binre-scenario-016-proof-gap"
+      ],
+      "relatedEvidenceIds": [
+        "ev-find-binre-scenario-016-proof-gap"
+      ],
+      "relatedArtifactIds": [
+        "artifact:/tmp/kernel-ioctl-near-miss.log",
+        "artifact:/tmp/kernel-ioctl-near-miss.trace"
+      ],
+      "reproStatus": "reproduced",
+      "createdAt": "2026-04-07T00:00:00.000Z",
+      "updatedAt": "2026-04-07T00:00:00.000Z"
+    }
+  ],
+  "evidence": [
+    {
+      "id": "ev-find-binre-scenario-016-proof-gap",
+      "kind": "tool-result",
+      "summary": "Starter scaffold evidence for binre-scenario-016 (proof-gap)",
+      "commandId": "scaffold-binre-scenario-016",
+      "artifactIds": [
+        "artifact:/tmp/kernel-ioctl-near-miss.log",
+        "artifact:/tmp/kernel-ioctl-near-miss.trace"
+      ],
+      "supports": [
+        "find-binre-scenario-016-proof-gap"
+      ],
+      "refutes": [],
+      "createdAt": "2026-04-07T00:00:00.000Z"
+    }
+  ]
+}

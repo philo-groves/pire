@@ -7,6 +7,8 @@ export const PIRE_BINARY_BUG_CLASSES = [
 	"heap-overflow",
 	"double-free",
 	"toctou",
+	"integer-overflow",
+	"stack-overflow",
 ] as const;
 
 export const PIRE_BINARY_EVAL_FOCI = [

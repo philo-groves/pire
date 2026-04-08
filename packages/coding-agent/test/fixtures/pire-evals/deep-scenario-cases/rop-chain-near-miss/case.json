@@ -1,9 +1,9 @@
 {
-  "title": "ROP chain near-miss — gadgets found manually but chain assembly blocked",
+  "title": "ROP chain near-miss \u2014 gadgets found manually but chain assembly blocked",
   "expectation": {
     "minNormalized": 0.64,
     "maxIssues": 2,
-    "maxRank": 20,
+    "maxRank": 27,
     "minScenarioPassed": 0,
     "maxScenarioNearMiss": 1,
     "maxScenarioFailed": 0

@@ -1,0 +1,11 @@
+{
+  "title": "Chain an integer underflow in a protocol length field through heap spray to info leak and session hijack near-miss",
+  "expectation": {
+    "minNormalized": 0.62,
+    "maxIssues": 1,
+    "maxRank": 27,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
+  }
+}

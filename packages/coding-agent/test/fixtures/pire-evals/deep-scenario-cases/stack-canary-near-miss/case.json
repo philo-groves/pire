@@ -1,0 +1,11 @@
+{
+  "title": "Chain a stack buffer overflow with canary leak through ROP to privileged file read near-miss",
+  "expectation": {
+    "minNormalized": 0.72,
+    "maxIssues": 1,
+    "maxRank": 27,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
+  }
+}

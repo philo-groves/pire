@@ -1,0 +1,11 @@
+{
+  "title": "Exploit an integer overflow in an image decoder to achieve heap overflow and code execution near-miss",
+  "expectation": {
+    "minNormalized": 0.62,
+    "maxIssues": 1,
+    "maxRank": 27,
+    "minScenarioPassed": 0,
+    "maxScenarioNearMiss": 1,
+    "maxScenarioFailed": 0
+  }
+}
