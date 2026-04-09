@@ -138,6 +138,11 @@ type CompactionQueuedMessage = {
 	mode: "steer" | "followUp";
 };
 
+type ActivitySelection = {
+	kind: "backgroundTask" | "subagent";
+	id: string;
+};
+
 /**
  * Options for InteractiveMode initialization.
  */
@@ -196,11 +201,11 @@ export class InteractiveMode {
 	private pendingTools = new Map<string, ToolExecutionComponent>();
 	private backgroundTaskComponents = new Map<string, BackgroundTaskActivityComponent>();
 	private subagentComponents = new Map<string, SubagentActivityComponent>();
+	private activityOrder: ActivitySelection[] = [];
 
 	// Tool output expansion state
 	private toolOutputExpanded = false;
-	private selectedBackgroundTaskId: string | undefined = undefined;
-	private selectedSubagentId: string | undefined = undefined;
+	private selectedActivity: ActivitySelection | undefined = undefined;
 
 	// Thinking block visibility state
 	private hideThinkingBlock = false;
@@ -1329,9 +1334,9 @@ export class InteractiveMode {
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
 		this.backgroundTaskComponents.clear();
-		this.selectedBackgroundTaskId = undefined;
 		this.subagentComponents.clear();
-		this.selectedSubagentId = undefined;
+		this.activityOrder = [];
+		this.selectedActivity = undefined;
 		this.renderInitialMessages();
 	}
 
@@ -2092,8 +2097,8 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
-		this.defaultEditor.onAction("app.subagent.previous", () => this.selectSubagentActivity(-1));
-		this.defaultEditor.onAction("app.subagent.next", () => this.selectSubagentActivity(1));
+		this.defaultEditor.onAction("app.subagent.previous", () => this.selectActivity(-1));
+		this.defaultEditor.onAction("app.subagent.next", () => this.selectActivity(1));
 		this.defaultEditor.onAction("app.subagent.wait", () => {
 			void this.handleSelectedSubagentWait();
 		});
@@ -2103,8 +2108,8 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.subagent.copy", () => {
 			void this.handleSelectedSubagentCopy();
 		});
-		this.defaultEditor.onAction("app.backgroundTask.previous", () => this.selectBackgroundTaskActivity(-1));
-		this.defaultEditor.onAction("app.backgroundTask.next", () => this.selectBackgroundTaskActivity(1));
+		this.defaultEditor.onAction("app.backgroundTask.previous", () => this.selectActivity(-1));
+		this.defaultEditor.onAction("app.backgroundTask.next", () => this.selectActivity(1));
 		this.defaultEditor.onAction("app.backgroundTask.wait", () => {
 			void this.handleSelectedBackgroundTaskWait();
 		});
@@ -2705,10 +2710,11 @@ export class InteractiveMode {
 			component = new SubagentActivityComponent(subagent, this.toolOutputExpanded);
 			this.chatContainer.addChild(component);
 			this.subagentComponents.set(subagent.id, component);
-			if (!this.selectedSubagentId) {
-				this.selectedSubagentId = subagent.id;
+			this.activityOrder.push({ kind: "subagent", id: subagent.id });
+			if (!this.selectedActivity) {
+				this.selectedActivity = { kind: "subagent", id: subagent.id };
 			}
-			this.updateSelectedSubagentActivity();
+			this.updateSelectedActivity();
 		}
 		return component;
 	}
@@ -2719,78 +2725,58 @@ export class InteractiveMode {
 			component = new BackgroundTaskActivityComponent(task, this.toolOutputExpanded);
 			this.chatContainer.addChild(component);
 			this.backgroundTaskComponents.set(task.id, component);
-			if (!this.selectedBackgroundTaskId) {
-				this.selectedBackgroundTaskId = task.id;
+			this.activityOrder.push({ kind: "backgroundTask", id: task.id });
+			if (!this.selectedActivity) {
+				this.selectedActivity = { kind: "backgroundTask", id: task.id };
 			}
-			this.updateSelectedBackgroundTaskActivity();
+			this.updateSelectedActivity();
 		}
 		return component;
 	}
 
-	private updateSelectedBackgroundTaskActivity(): void {
+	private updateSelectedActivity(): void {
+		const selectedSubagentId = this.selectedActivity?.kind === "subagent" ? this.selectedActivity.id : undefined;
 		for (const [id, component] of this.backgroundTaskComponents.entries()) {
-			component.setSelected(id === this.selectedBackgroundTaskId);
+			component.setSelected(this.selectedActivity?.kind === "backgroundTask" && id === this.selectedActivity.id);
 		}
-	}
-
-	private selectBackgroundTaskActivity(delta: -1 | 1): void {
-		const ids = [...this.backgroundTaskComponents.keys()];
-		if (ids.length === 0) {
-			this.showStatus("No background task activity rows");
-			return;
-		}
-
-		if (!this.selectedBackgroundTaskId) {
-			this.selectedBackgroundTaskId = delta > 0 ? ids[0] : ids[ids.length - 1];
-		} else {
-			const currentIndex = ids.indexOf(this.selectedBackgroundTaskId);
-			const baseIndex = currentIndex === -1 ? 0 : currentIndex;
-			const nextIndex = (baseIndex + delta + ids.length) % ids.length;
-			this.selectedBackgroundTaskId = ids[nextIndex];
-		}
-
-		this.updateSelectedBackgroundTaskActivity();
-		this.ui.requestRender();
-	}
-
-	private getSelectedBackgroundTaskInfo(): BackgroundTaskInfo | undefined {
-		if (!this.selectedBackgroundTaskId) {
-			return undefined;
-		}
-		return this.session.listBackgroundTasks().find((task) => task.id === this.selectedBackgroundTaskId);
-	}
-
-	private updateSelectedSubagentActivity(): void {
 		for (const [id, component] of this.subagentComponents.entries()) {
-			component.setSelected(id === this.selectedSubagentId);
+			component.setSelected(id === selectedSubagentId);
 		}
 	}
 
-	private selectSubagentActivity(delta: -1 | 1): void {
-		const ids = [...this.subagentComponents.keys()];
-		if (ids.length === 0) {
-			this.showStatus("No subagent activity rows");
+	private selectActivity(delta: -1 | 1): void {
+		if (this.activityOrder.length === 0) {
+			this.showStatus("No activity rows");
 			return;
 		}
 
-		if (!this.selectedSubagentId) {
-			this.selectedSubagentId = delta > 0 ? ids[0] : ids[ids.length - 1];
+		if (!this.selectedActivity) {
+			this.selectedActivity = delta > 0 ? this.activityOrder[0] : this.activityOrder[this.activityOrder.length - 1];
 		} else {
-			const currentIndex = ids.indexOf(this.selectedSubagentId);
+			const currentIndex = this.activityOrder.findIndex(
+				(entry) => entry.kind === this.selectedActivity?.kind && entry.id === this.selectedActivity?.id,
+			);
 			const baseIndex = currentIndex === -1 ? 0 : currentIndex;
-			const nextIndex = (baseIndex + delta + ids.length) % ids.length;
-			this.selectedSubagentId = ids[nextIndex];
+			const nextIndex = (baseIndex + delta + this.activityOrder.length) % this.activityOrder.length;
+			this.selectedActivity = this.activityOrder[nextIndex];
 		}
 
-		this.updateSelectedSubagentActivity();
+		this.updateSelectedActivity();
 		this.ui.requestRender();
 	}
 
 	private getSelectedSubagentInfo(): SubagentInfo | undefined {
-		if (!this.selectedSubagentId) {
+		if (this.selectedActivity?.kind !== "subagent") {
 			return undefined;
 		}
-		return this.session.listSubagents().find((subagent) => subagent.id === this.selectedSubagentId);
+		return this.session.listSubagents().find((subagent) => subagent.id === this.selectedActivity?.id);
+	}
+
+	private getSelectedBackgroundTaskInfo(): BackgroundTaskInfo | undefined {
+		if (this.selectedActivity?.kind !== "backgroundTask") {
+			return undefined;
+		}
+		return this.session.listBackgroundTasks().find((task) => task.id === this.selectedActivity?.id);
 	}
 
 	private async handleSelectedSubagentWait(): Promise<void> {
@@ -3120,9 +3106,9 @@ export class InteractiveMode {
 	private rebuildChatFromMessages(): void {
 		this.chatContainer.clear();
 		this.backgroundTaskComponents.clear();
-		this.selectedBackgroundTaskId = undefined;
 		this.subagentComponents.clear();
-		this.selectedSubagentId = undefined;
+		this.activityOrder = [];
+		this.selectedActivity = undefined;
 		const context = this.sessionManager.buildSessionContext();
 		this.renderSessionContext(context);
 	}

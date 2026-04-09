@@ -6,7 +6,8 @@ import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
 type InteractiveModePrototypeWithEnsureBackgroundTaskActivity = {
 	ensureBackgroundTaskActivity(this: Record<string, unknown>, task: Record<string, unknown>): unknown;
-	updateSelectedBackgroundTaskActivity(this: Record<string, unknown>): void;
+	updateSelectedActivity(this: Record<string, unknown>): void;
+	selectActivity(this: Record<string, unknown>, delta: -1 | 1): void;
 	getSelectedBackgroundTaskInfo(this: Record<string, unknown>): unknown;
 };
 
@@ -65,13 +66,14 @@ describe("InteractiveMode background task events", () => {
 			chatContainer: new Container(),
 			toolOutputExpanded: true,
 			backgroundTaskComponents: new Map(),
-			selectedBackgroundTaskId: undefined,
+			subagentComponents: new Map(),
+			activityOrder: [],
+			selectedActivity: undefined,
 		};
 		const interactiveModePrototype =
 			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureBackgroundTaskActivity;
 		fakeThis.ensureBackgroundTaskActivity = interactiveModePrototype.ensureBackgroundTaskActivity.bind(fakeThis);
-		fakeThis.updateSelectedBackgroundTaskActivity =
-			interactiveModePrototype.updateSelectedBackgroundTaskActivity.bind(fakeThis);
+		fakeThis.updateSelectedActivity = interactiveModePrototype.updateSelectedActivity.bind(fakeThis);
 
 		const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 			this: typeof fakeThis,
@@ -123,17 +125,16 @@ describe("InteractiveMode background task events", () => {
 			chatContainer: new Container(),
 			toolOutputExpanded: false,
 			backgroundTaskComponents: new Map(),
-			selectedBackgroundTaskId: undefined,
+			subagentComponents: new Map(),
+			activityOrder: [],
+			selectedActivity: undefined,
 			showStatus: vi.fn(),
 		};
 		const interactiveModePrototype =
-			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureBackgroundTaskActivity & {
-				selectBackgroundTaskActivity(this: Record<string, unknown>, delta: -1 | 1): void;
-			};
+			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureBackgroundTaskActivity;
 		fakeThis.ensureBackgroundTaskActivity = interactiveModePrototype.ensureBackgroundTaskActivity.bind(fakeThis);
-		fakeThis.updateSelectedBackgroundTaskActivity =
-			interactiveModePrototype.updateSelectedBackgroundTaskActivity.bind(fakeThis);
-		const selectBackgroundTaskActivity = interactiveModePrototype.selectBackgroundTaskActivity.bind(fakeThis);
+		fakeThis.updateSelectedActivity = interactiveModePrototype.updateSelectedActivity.bind(fakeThis);
+		const selectActivity = interactiveModePrototype.selectActivity.bind(fakeThis);
 
 		fakeThis.ensureBackgroundTaskActivity({
 			id: "task-a",
@@ -152,10 +153,10 @@ describe("InteractiveMode background task events", () => {
 			updatedAt: 1,
 		});
 
-		expect(fakeThis.selectedBackgroundTaskId).toBe("task-a");
+		expect(fakeThis.selectedActivity).toEqual({ kind: "backgroundTask", id: "task-a" });
 
-		selectBackgroundTaskActivity(1);
-		expect(fakeThis.selectedBackgroundTaskId).toBe("task-b");
+		selectActivity(1);
+		expect(fakeThis.selectedActivity).toEqual({ kind: "backgroundTask", id: "task-b" });
 
 		const rendered = fakeThis.chatContainer.children
 			.flatMap((child: { render: (width: number) => string[] }) => child.render(120))
@@ -212,7 +213,7 @@ describe("InteractiveMode background task events", () => {
 		};
 		const fakeThis: any = {
 			session,
-			selectedBackgroundTaskId: "task-b",
+			selectedActivity: { kind: "backgroundTask", id: "task-b" },
 			showStatus: vi.fn(),
 			showWarning: vi.fn(),
 			showError: vi.fn(),

@@ -6,7 +6,8 @@ import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
 type InteractiveModePrototypeWithEnsureSubagentActivity = {
 	ensureSubagentActivity(this: Record<string, unknown>, subagent: Record<string, unknown>): unknown;
-	updateSelectedSubagentActivity(this: Record<string, unknown>): void;
+	updateSelectedActivity(this: Record<string, unknown>): void;
+	selectActivity(this: Record<string, unknown>, delta: -1 | 1): void;
 	getSelectedSubagentInfo(this: Record<string, unknown>): unknown;
 };
 
@@ -69,12 +70,14 @@ describe("InteractiveMode subagent events", () => {
 			chatContainer: new Container(),
 			toolOutputExpanded: true,
 			subagentComponents: new Map(),
-			selectedSubagentId: undefined,
+			backgroundTaskComponents: new Map(),
+			activityOrder: [],
+			selectedActivity: undefined,
 		};
 		const interactiveModePrototype =
 			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureSubagentActivity;
 		fakeThis.ensureSubagentActivity = interactiveModePrototype.ensureSubagentActivity.bind(fakeThis);
-		fakeThis.updateSelectedSubagentActivity = interactiveModePrototype.updateSelectedSubagentActivity.bind(fakeThis);
+		fakeThis.updateSelectedActivity = interactiveModePrototype.updateSelectedActivity.bind(fakeThis);
 
 		const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 			this: typeof fakeThis,
@@ -130,16 +133,16 @@ describe("InteractiveMode subagent events", () => {
 			chatContainer: new Container(),
 			toolOutputExpanded: false,
 			subagentComponents: new Map(),
-			selectedSubagentId: undefined,
+			backgroundTaskComponents: new Map(),
+			activityOrder: [],
+			selectedActivity: undefined,
 			showStatus: vi.fn(),
 		};
 		const interactiveModePrototype =
-			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureSubagentActivity & {
-				selectSubagentActivity(this: Record<string, unknown>, delta: -1 | 1): void;
-			};
+			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureSubagentActivity;
 		fakeThis.ensureSubagentActivity = interactiveModePrototype.ensureSubagentActivity.bind(fakeThis);
-		fakeThis.updateSelectedSubagentActivity = interactiveModePrototype.updateSelectedSubagentActivity.bind(fakeThis);
-		const selectSubagentActivity = interactiveModePrototype.selectSubagentActivity.bind(fakeThis);
+		fakeThis.updateSelectedActivity = interactiveModePrototype.updateSelectedActivity.bind(fakeThis);
+		const selectActivity = interactiveModePrototype.selectActivity.bind(fakeThis);
 
 		fakeThis.ensureSubagentActivity({
 			id: "subagent-a",
@@ -164,10 +167,10 @@ describe("InteractiveMode subagent events", () => {
 			updatedAt: 1,
 		});
 
-		expect(fakeThis.selectedSubagentId).toBe("subagent-a");
+		expect(fakeThis.selectedActivity).toEqual({ kind: "subagent", id: "subagent-a" });
 
-		selectSubagentActivity(1);
-		expect(fakeThis.selectedSubagentId).toBe("subagent-b");
+		selectActivity(1);
+		expect(fakeThis.selectedActivity).toEqual({ kind: "subagent", id: "subagent-b" });
 
 		const rendered = fakeThis.chatContainer.children
 			.flatMap((child: { render: (width: number) => string[] }) => child.render(120))
@@ -220,7 +223,7 @@ describe("InteractiveMode subagent events", () => {
 		};
 		const fakeThis: any = {
 			session,
-			selectedSubagentId: "subagent-b",
+			selectedActivity: { kind: "subagent", id: "subagent-b" },
 			showStatus: vi.fn(),
 			showWarning: vi.fn(),
 			showError: vi.fn(),
@@ -243,5 +246,67 @@ describe("InteractiveMode subagent events", () => {
 		expect(session.closeSubagent).toHaveBeenCalledWith("subagent-b");
 		expect(fakeThis.showStatus).toHaveBeenCalledWith("Subagent settled: Final child report");
 		expect(fakeThis.showStatus).toHaveBeenCalledWith("Closed subagent subagent");
+	});
+
+	test("cycles across mixed activity rows in insertion order", async () => {
+		const fakeThis: any = {
+			isInitialized: true,
+			footer: { invalidate: vi.fn() },
+			ui: { requestRender: vi.fn() },
+			chatContainer: new Container(),
+			toolOutputExpanded: false,
+			subagentComponents: new Map(),
+			backgroundTaskComponents: new Map(),
+			activityOrder: [],
+			selectedActivity: undefined,
+			showStatus: vi.fn(),
+		};
+		const interactiveModePrototype =
+			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureSubagentActivity & {
+				ensureBackgroundTaskActivity(this: Record<string, unknown>, task: Record<string, unknown>): unknown;
+			};
+		fakeThis.ensureSubagentActivity = interactiveModePrototype.ensureSubagentActivity.bind(fakeThis);
+		fakeThis.ensureBackgroundTaskActivity = interactiveModePrototype.ensureBackgroundTaskActivity.bind(fakeThis);
+		fakeThis.updateSelectedActivity = interactiveModePrototype.updateSelectedActivity.bind(fakeThis);
+		const selectActivity = interactiveModePrototype.selectActivity.bind(fakeThis);
+
+		fakeThis.ensureSubagentActivity({
+			id: "subagent-a",
+			status: "running",
+			depth: 1,
+			parentDepth: 0,
+			task: "First",
+			turns: 0,
+			maxTurns: 6,
+			createdAt: 1,
+			updatedAt: 1,
+		});
+		fakeThis.ensureBackgroundTaskActivity({
+			id: "task-a",
+			status: "running",
+			command: "sleep 1",
+			pid: 101,
+			createdAt: 1,
+			updatedAt: 1,
+		});
+		fakeThis.ensureSubagentActivity({
+			id: "subagent-b",
+			status: "running",
+			depth: 1,
+			parentDepth: 0,
+			task: "Second",
+			turns: 0,
+			maxTurns: 6,
+			createdAt: 1,
+			updatedAt: 1,
+		});
+
+		expect(fakeThis.selectedActivity).toEqual({ kind: "subagent", id: "subagent-a" });
+
+		selectActivity(1);
+		expect(fakeThis.selectedActivity).toEqual({ kind: "backgroundTask", id: "task-a" });
+
+		selectActivity(1);
+		expect(fakeThis.selectedActivity).toEqual({ kind: "subagent", id: "subagent-b" });
 	});
 });

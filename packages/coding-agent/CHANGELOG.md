@@ -5,7 +5,7 @@
 ### Added
 
 - Added built-in `spawn_agent`, `send_input`, `wait_agent`, and `close_agent` tools plus matching SDK/RPC subagent lifecycle APIs, allowing bounded background delegation with isolated child contexts and a maximum nesting depth of 2.
-- Added interactive subagent activity rendering so delegated child progress appears as distinct live rows instead of being buried in the parent event stream, with keyboard selection plus direct wait / close / copy actions for the active child row.
+- Added interactive subagent activity rendering so delegated child progress appears as distinct live rows instead of being buried in the parent event stream, with keyboard selection plus direct wait / close / copy actions for the active child row and unified activity navigation across subagents and background tasks.
 - Added an RPC `get_subagent_report` command and `RpcClient.getSubagentReport()` helper so external hosts can mirror the interactive subagent copy action without scraping event history.
 - Added tracked detached background shell tasks with session events, built-in `start_background_task` / `wait_background_task` / `cancel_background_task` tools, matching RPC/client APIs, and interactive live activity rows with keyboard selection plus direct wait / cancel / copy actions for the active task.
 - Added repo-local `.pire/` profile discovery for coding-agent forks, including `.pire/APPEND_SYSTEM.md`, `.pire/TARGET.md`, `.pire/NOTES.md`, `.pire/prompts/`, and `.pire/skills/` so research-oriented projects can layer reverse-engineering context and workflows on top of the standard pi runtime.
