@@ -7,7 +7,7 @@
 
 import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { ImageContent, Model } from "@mariozechner/pi-ai";
-import type { AgentSessionEvent, SessionStats, SubagentInfo } from "../../core/agent-session.js";
+import type { AgentSessionEvent, BackgroundTaskInfo, SessionStats, SubagentInfo } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
 import type { SourceInfo } from "../../core/source-info.js";
@@ -66,6 +66,11 @@ export type RpcCommand =
 	| { id?: string; type: "close_subagent"; agentId: string }
 	| { id?: string; type: "get_subagent_report"; agentId: string }
 	| { id?: string; type: "list_subagents" }
+	| { id?: string; type: "start_background_task"; command: string }
+	| { id?: string; type: "wait_background_task"; taskId: string; timeoutMs?: number }
+	| { id?: string; type: "cancel_background_task"; taskId: string }
+	| { id?: string; type: "get_background_task_report"; taskId: string }
+	| { id?: string; type: "list_background_tasks" }
 
 	// Messages
 	| { id?: string; type: "get_messages" }
@@ -205,6 +210,23 @@ export type RpcResponse =
 			data: { subagent: SubagentInfo; text: string | null };
 	  }
 	| { id?: string; type: "response"; command: "list_subagents"; success: true; data: { agents: SubagentInfo[] } }
+	| { id?: string; type: "response"; command: "start_background_task"; success: true; data: BackgroundTaskInfo }
+	| { id?: string; type: "response"; command: "wait_background_task"; success: true; data: BackgroundTaskInfo }
+	| { id?: string; type: "response"; command: "cancel_background_task"; success: true; data: BackgroundTaskInfo }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_background_task_report";
+			success: true;
+			data: { task: BackgroundTaskInfo; text: string | null };
+	  }
+	| {
+			id?: string;
+			type: "response";
+			command: "list_background_tasks";
+			success: true;
+			data: { tasks: BackgroundTaskInfo[] };
+	  }
 
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }

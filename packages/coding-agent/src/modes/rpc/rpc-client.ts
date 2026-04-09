@@ -7,7 +7,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { ImageContent } from "@mariozechner/pi-ai";
-import type { SessionStats, SubagentInfo } from "../../core/agent-session.js";
+import type { BackgroundTaskInfo, SessionStats, SubagentInfo } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
@@ -398,6 +398,31 @@ export class RpcClient {
 	async listSubagents(): Promise<SubagentInfo[]> {
 		const response = await this.send({ type: "list_subagents" });
 		return this.getData<{ agents: SubagentInfo[] }>(response).agents;
+	}
+
+	async startBackgroundTask(command: string): Promise<BackgroundTaskInfo> {
+		const response = await this.send({ type: "start_background_task", command });
+		return this.getData(response);
+	}
+
+	async waitBackgroundTask(taskId: string, timeoutMs?: number): Promise<BackgroundTaskInfo> {
+		const response = await this.send({ type: "wait_background_task", taskId, timeoutMs });
+		return this.getData(response);
+	}
+
+	async cancelBackgroundTask(taskId: string): Promise<BackgroundTaskInfo> {
+		const response = await this.send({ type: "cancel_background_task", taskId });
+		return this.getData(response);
+	}
+
+	async getBackgroundTaskReport(taskId: string): Promise<{ task: BackgroundTaskInfo; text: string | null }> {
+		const response = await this.send({ type: "get_background_task_report", taskId });
+		return this.getData(response);
+	}
+
+	async listBackgroundTasks(): Promise<BackgroundTaskInfo[]> {
+		const response = await this.send({ type: "list_background_tasks" });
+		return this.getData<{ tasks: BackgroundTaskInfo[] }>(response).tasks;
 	}
 
 	/**

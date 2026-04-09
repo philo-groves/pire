@@ -595,6 +595,30 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				return success(id, "list_subagents", { agents: session.listSubagents() });
 			}
 
+			case "start_background_task": {
+				const info = await session.startBackgroundTask({ command: command.command });
+				return success(id, "start_background_task", info);
+			}
+
+			case "wait_background_task": {
+				const info = await session.waitForBackgroundTask(command.taskId, command.timeoutMs);
+				return success(id, "wait_background_task", info);
+			}
+
+			case "cancel_background_task": {
+				const info = await session.cancelBackgroundTask(command.taskId);
+				return success(id, "cancel_background_task", info);
+			}
+
+			case "get_background_task_report": {
+				const report = session.getBackgroundTaskReport(command.taskId);
+				return success(id, "get_background_task_report", report);
+			}
+
+			case "list_background_tasks": {
+				return success(id, "list_background_tasks", { tasks: session.listBackgroundTasks() });
+			}
+
 			// =================================================================
 			// Messages
 			// =================================================================

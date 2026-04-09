@@ -13,6 +13,7 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
+import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import {
@@ -30,7 +31,12 @@ import { getDocsPath } from "../config.js";
 import { theme } from "../modes/interactive/theme/theme.js";
 import { stripFrontmatter } from "../utils/frontmatter.js";
 import { sleep } from "../utils/sleep.js";
-import { type BashResult, executeBashWithOperations } from "./bash-executor.js";
+import {
+	type BackgroundBashTask,
+	type BashResult,
+	executeBashWithOperations,
+	startBackgroundBash,
+} from "./bash-executor.js";
 import {
 	type CompactionResult,
 	calculateContextTokens,
@@ -157,6 +163,21 @@ export type AgentSessionEvent =
 			type: "subagent_end";
 			subagent: SubagentInfo;
 	  }
+	| {
+			type: "background_task_start";
+			task: BackgroundTaskInfo;
+	  }
+	| {
+			type: "background_task_update";
+			task: BackgroundTaskInfo;
+			eventType: "output" | "exit" | "cancel_requested";
+			delta?: string;
+			text?: string;
+	  }
+	| {
+			type: "background_task_end";
+			task: BackgroundTaskInfo;
+	  }
 	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow" }
 	| {
 			type: "compaction_end";
@@ -279,6 +300,26 @@ export type SubagentSessionEvent = Extract<
 	{ type: "subagent_start" | "subagent_update" | "subagent_end" }
 >;
 
+export type BackgroundTaskStatus = "running" | "completed" | "failed" | "cancelled";
+
+export interface BackgroundTaskInfo {
+	id: string;
+	status: BackgroundTaskStatus;
+	command: string;
+	pid?: number;
+	exitCode?: number;
+	lastOutput?: string;
+	errorMessage?: string;
+	fullOutputPath?: string;
+	createdAt: number;
+	updatedAt: number;
+}
+
+export type BackgroundTaskSessionEvent = Extract<
+	AgentSessionEvent,
+	{ type: "background_task_start" | "background_task_update" | "background_task_end" }
+>;
+
 const SUBAGENT_MAX_DEPTH = 2;
 const SUBAGENT_DEFAULT_MAX_TURNS = 6;
 const SUBAGENT_MAX_TURNS = 12;
@@ -326,6 +367,25 @@ const closeAgentSchema = Type.Object({
 
 type CloseAgentToolInput = Static<typeof closeAgentSchema>;
 
+const startBackgroundTaskSchema = Type.Object({
+	command: Type.String({ description: "Shell command to launch in the background" }),
+});
+
+type StartBackgroundTaskToolInput = Static<typeof startBackgroundTaskSchema>;
+
+const waitBackgroundTaskSchema = Type.Object({
+	taskId: Type.String({ description: "The background task id returned by start_background_task" }),
+	timeoutMs: Type.Optional(Type.Number({ description: "Optional wait timeout in milliseconds" })),
+});
+
+type WaitBackgroundTaskToolInput = Static<typeof waitBackgroundTaskSchema>;
+
+const cancelBackgroundTaskSchema = Type.Object({
+	taskId: Type.String({ description: "The background task id returned by start_background_task" }),
+});
+
+type CancelBackgroundTaskToolInput = Static<typeof cancelBackgroundTaskSchema>;
+
 interface ManagedSubagent {
 	info: SubagentInfo;
 	session: AgentSession;
@@ -334,6 +394,13 @@ interface ManagedSubagent {
 	unsubscribe: () => void;
 	activeRun?: Promise<void>;
 	resolveRun?: () => void;
+}
+
+interface ManagedBackgroundTask {
+	info: BackgroundTaskInfo;
+	handle: BackgroundBashTask;
+	waitPromise: Promise<BashResult>;
+	result?: BashResult;
 }
 
 // ============================================================================
@@ -426,6 +493,7 @@ export class AgentSession {
 	private _baseSystemPrompt = "";
 	private _subagentDepth: number;
 	private _subagents: Map<string, ManagedSubagent> = new Map();
+	private _backgroundTasks: Map<string, ManagedBackgroundTask> = new Map();
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -584,6 +652,31 @@ export class AgentSession {
 		this._emit({
 			type: "subagent_end",
 			subagent: { ...record.info },
+		});
+	}
+
+	private _emitBackgroundTaskStart(record: ManagedBackgroundTask): void {
+		this._emit({
+			type: "background_task_start",
+			task: { ...record.info },
+		});
+	}
+
+	private _emitBackgroundTaskUpdate(
+		record: ManagedBackgroundTask,
+		update: Omit<Extract<AgentSessionEvent, { type: "background_task_update" }>, "type" | "task">,
+	): void {
+		this._emit({
+			type: "background_task_update",
+			task: { ...record.info },
+			...update,
+		});
+	}
+
+	private _emitBackgroundTaskEnd(record: ManagedBackgroundTask): void {
+		this._emit({
+			type: "background_task_end",
+			task: { ...record.info },
 		});
 	}
 
@@ -976,10 +1069,16 @@ export class AgentSession {
 	 * Call this when completely done with the session.
 	 */
 	dispose(): void {
+		for (const record of this._backgroundTasks.values()) {
+			if (record.info.status === "running") {
+				record.handle.cancel();
+			}
+		}
 		for (const record of this._subagents.values()) {
 			record.unsubscribe();
 			record.session.dispose();
 		}
+		this._backgroundTasks.clear();
 		this._subagents.clear();
 		this._disconnectFromAgent();
 		this._eventListeners = [];
@@ -1126,6 +1225,10 @@ export class AgentSession {
 
 	listSubagents(): SubagentInfo[] {
 		return Array.from(this._subagents.values()).map((record) => ({ ...record.info }));
+	}
+
+	listBackgroundTasks(): BackgroundTaskInfo[] {
+		return Array.from(this._backgroundTasks.values()).map((record) => ({ ...record.info }));
 	}
 
 	private _normalizePromptSnippet(text: string | undefined): string | undefined {
@@ -1597,6 +1700,164 @@ export class AgentSession {
 		return { ...record.info };
 	}
 
+	private _getBackgroundTaskRecord(taskId: string): ManagedBackgroundTask {
+		const record = this._backgroundTasks.get(taskId);
+		if (!record) {
+			throw new Error(`Unknown background task: ${taskId}`);
+		}
+		return record;
+	}
+
+	private _setBackgroundTaskInfo(
+		record: ManagedBackgroundTask,
+		update: Partial<Omit<BackgroundTaskInfo, "id" | "command" | "createdAt">>,
+	): void {
+		record.info = {
+			...record.info,
+			...update,
+			updatedAt: Date.now(),
+		};
+	}
+
+	private _formatBackgroundOutput(text: string | undefined): string | undefined {
+		if (!text) {
+			return undefined;
+		}
+		const preview = text.replace(/\s+/g, " ").trim();
+		return preview.length > 0 ? preview.slice(-240) : undefined;
+	}
+
+	async startBackgroundTask(input: StartBackgroundTaskToolInput): Promise<BackgroundTaskInfo> {
+		const command = input.command.trim();
+		if (!command) {
+			throw new Error("Background task command cannot be empty");
+		}
+
+		const prefix = this.settingsManager.getShellCommandPrefix();
+		const resolvedCommand = prefix ? `${prefix}\n${command}` : command;
+		const now = Date.now();
+		const id = `task-${randomBytes(6).toString("hex")}`;
+		const handle = startBackgroundBash(resolvedCommand, this.sessionManager.getCwd(), {
+			onChunk: (chunk) => {
+				const record = this._backgroundTasks.get(id);
+				if (!record) {
+					return;
+				}
+				const nextOutput = `${record.info.lastOutput ?? ""}${chunk}`;
+				this._setBackgroundTaskInfo(record, {
+					lastOutput: this._formatBackgroundOutput(nextOutput),
+				});
+				this._emitBackgroundTaskUpdate(record, {
+					eventType: "output",
+					delta: chunk,
+					text: record.info.lastOutput,
+				});
+			},
+		});
+
+		const record: ManagedBackgroundTask = {
+			info: {
+				id,
+				status: "running",
+				command,
+				pid: handle.pid,
+				createdAt: now,
+				updatedAt: now,
+			},
+			handle,
+			waitPromise: Promise.resolve({
+				output: "",
+				exitCode: undefined,
+				cancelled: false,
+				truncated: false,
+			}),
+		};
+		this._backgroundTasks.set(id, record);
+		record.waitPromise = handle
+			.wait()
+			.then((result) => {
+				record.result = result;
+				const status: BackgroundTaskStatus = result.cancelled
+					? "cancelled"
+					: result.exitCode !== undefined && result.exitCode !== 0
+						? "failed"
+						: "completed";
+				this._setBackgroundTaskInfo(record, {
+					status,
+					exitCode: result.exitCode,
+					lastOutput: this._formatBackgroundOutput(result.output) ?? record.info.lastOutput,
+					fullOutputPath: result.fullOutputPath,
+					errorMessage:
+						status === "failed" && result.exitCode !== undefined
+							? `Command exited with code ${result.exitCode}`
+							: undefined,
+				});
+				this._emitBackgroundTaskUpdate(record, {
+					eventType: "exit",
+					text: result.output || record.info.lastOutput,
+				});
+				this._emitBackgroundTaskEnd(record);
+				return result;
+			})
+			.catch((error) => {
+				record.result = {
+					output: "",
+					exitCode: undefined,
+					cancelled: false,
+					truncated: false,
+				};
+				this._setBackgroundTaskInfo(record, {
+					status: "failed",
+					errorMessage: error instanceof Error ? error.message : String(error),
+				});
+				this._emitBackgroundTaskEnd(record);
+				return record.result;
+			});
+
+		this._emitBackgroundTaskStart(record);
+		return { ...record.info };
+	}
+
+	async waitForBackgroundTask(taskId: string, timeoutMs?: number): Promise<BackgroundTaskInfo> {
+		const record = this._getBackgroundTaskRecord(taskId);
+		if (record.info.status !== "running") {
+			return { ...record.info };
+		}
+		if (timeoutMs === undefined || timeoutMs < 0) {
+			await record.waitPromise;
+			return { ...record.info };
+		}
+		await Promise.race([
+			record.waitPromise,
+			new Promise<void>((resolve) => {
+				setTimeout(resolve, timeoutMs);
+			}),
+		]);
+		return { ...record.info };
+	}
+
+	async cancelBackgroundTask(taskId: string): Promise<BackgroundTaskInfo> {
+		const record = this._getBackgroundTaskRecord(taskId);
+		if (record.info.status !== "running") {
+			return { ...record.info };
+		}
+		record.handle.cancel();
+		this._emitBackgroundTaskUpdate(record, {
+			eventType: "cancel_requested",
+			text: record.info.lastOutput,
+		});
+		await record.waitPromise.catch(() => {});
+		return { ...record.info };
+	}
+
+	getBackgroundTaskReport(taskId: string): { task: BackgroundTaskInfo; text: string | null } {
+		const record = this._getBackgroundTaskRecord(taskId);
+		return {
+			task: { ...record.info },
+			text: record.result?.output ?? record.info.lastOutput ?? null,
+		};
+	}
+
 	private _createSpawnAgentToolDefinition(): ToolDefinition<typeof spawnAgentSchema, SpawnAgentToolDetails> {
 		return {
 			name: "spawn_agent",
@@ -1681,6 +1942,78 @@ export class AgentSession {
 				const info = await this.closeSubagent(input.agentId);
 				return {
 					content: [{ type: "text", text: `Closed subagent ${info.id}.` }],
+					details: info,
+				};
+			},
+		};
+	}
+
+	private _createStartBackgroundTaskToolDefinition(): ToolDefinition<
+		typeof startBackgroundTaskSchema,
+		{ taskId: string; status: BackgroundTaskStatus; pid?: number }
+	> {
+		return {
+			name: "start_background_task",
+			label: "start_background_task",
+			description: "Launch a detached shell command that can be tracked or cancelled later.",
+			promptSnippet: "Launch a detached background shell command with a persistent handle",
+			promptGuidelines: [
+				"Use start_background_task for long-running shell work that should continue while you do other tasks.",
+				"Keep the command bounded and use wait_background_task or cancel_background_task later if needed.",
+			],
+			parameters: startBackgroundTaskSchema,
+			execute: async (_toolCallId, input: StartBackgroundTaskToolInput) => {
+				const info = await this.startBackgroundTask(input);
+				return {
+					content: [{ type: "text", text: `Started background task ${info.id} for command: ${info.command}` }],
+					details: { taskId: info.id, status: info.status, pid: info.pid },
+				};
+			},
+		};
+	}
+
+	private _createWaitBackgroundTaskToolDefinition(): ToolDefinition<
+		typeof waitBackgroundTaskSchema,
+		BackgroundTaskInfo
+	> {
+		return {
+			name: "wait_background_task",
+			label: "wait_background_task",
+			description: "Wait for a tracked background task to finish and return its latest output.",
+			parameters: waitBackgroundTaskSchema,
+			execute: async (_toolCallId, input: WaitBackgroundTaskToolInput) => {
+				const info = await this.waitForBackgroundTask(input.taskId, input.timeoutMs);
+				const report = this.getBackgroundTaskReport(info.id);
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								report.text ??
+								(info.status === "running"
+									? `Background task ${info.id} is still running.`
+									: (info.errorMessage ?? `Background task ${info.id} has no output yet.`)),
+						},
+					],
+					details: info,
+				};
+			},
+		};
+	}
+
+	private _createCancelBackgroundTaskToolDefinition(): ToolDefinition<
+		typeof cancelBackgroundTaskSchema,
+		BackgroundTaskInfo
+	> {
+		return {
+			name: "cancel_background_task",
+			label: "cancel_background_task",
+			description: "Cancel a tracked background task.",
+			parameters: cancelBackgroundTaskSchema,
+			execute: async (_toolCallId, input: CancelBackgroundTaskToolInput) => {
+				const info = await this.cancelBackgroundTask(input.taskId);
+				return {
+					content: [{ type: "text", text: `Cancelled background task ${info.id}.` }],
 					details: info,
 				};
 			},
@@ -3084,6 +3417,9 @@ export class AgentSession {
 		baseToolDefinitions.send_input = this._createSendInputToolDefinition();
 		baseToolDefinitions.wait_agent = this._createWaitAgentToolDefinition();
 		baseToolDefinitions.close_agent = this._createCloseAgentToolDefinition();
+		baseToolDefinitions.start_background_task = this._createStartBackgroundTaskToolDefinition();
+		baseToolDefinitions.wait_background_task = this._createWaitBackgroundTaskToolDefinition();
+		baseToolDefinitions.cancel_background_task = this._createCancelBackgroundTaskToolDefinition();
 
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
@@ -3118,7 +3454,20 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: ["read", "webfetch", "bash", "edit", "write", "spawn_agent", "send_input", "wait_agent", "close_agent"];
+			: [
+					"read",
+					"webfetch",
+					"bash",
+					"edit",
+					"write",
+					"spawn_agent",
+					"send_input",
+					"wait_agent",
+					"close_agent",
+					"start_background_task",
+					"wait_background_task",
+					"cancel_background_task",
+				];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
