@@ -390,6 +390,11 @@ export class RpcClient {
 		return this.getData(response);
 	}
 
+	async getSubagentReport(agentId: string): Promise<{ subagent: SubagentInfo; text: string | null }> {
+		const response = await this.send({ type: "get_subagent_report", agentId });
+		return this.getData(response);
+	}
+
 	async listSubagents(): Promise<SubagentInfo[]> {
 		const response = await this.send({ type: "list_subagents" });
 		return this.getData<{ agents: SubagentInfo[] }>(response).agents;

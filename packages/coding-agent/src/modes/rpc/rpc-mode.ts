@@ -580,6 +580,17 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				return success(id, "close_subagent", info);
 			}
 
+			case "get_subagent_report": {
+				const info = session.listSubagents().find((subagent) => subagent.id === command.agentId);
+				if (!info) {
+					return error(id, "get_subagent_report", `Unknown subagent: ${command.agentId}`);
+				}
+				return success(id, "get_subagent_report", {
+					subagent: info,
+					text: info.lastAssistantText ?? null,
+				});
+			}
+
 			case "list_subagents": {
 				return success(id, "list_subagents", { agents: session.listSubagents() });
 			}

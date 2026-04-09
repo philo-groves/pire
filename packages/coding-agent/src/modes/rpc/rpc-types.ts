@@ -64,6 +64,7 @@ export type RpcCommand =
 	| { id?: string; type: "send_subagent_input"; agentId: string; message: string }
 	| { id?: string; type: "wait_subagent"; agentId: string; timeoutMs?: number }
 	| { id?: string; type: "close_subagent"; agentId: string }
+	| { id?: string; type: "get_subagent_report"; agentId: string }
 	| { id?: string; type: "list_subagents" }
 
 	// Messages
@@ -196,6 +197,13 @@ export type RpcResponse =
 	| { id?: string; type: "response"; command: "send_subagent_input"; success: true; data: SubagentInfo }
 	| { id?: string; type: "response"; command: "wait_subagent"; success: true; data: SubagentInfo }
 	| { id?: string; type: "response"; command: "close_subagent"; success: true; data: SubagentInfo }
+	| {
+			id?: string;
+			type: "response";
+			command: "get_subagent_report";
+			success: true;
+			data: { subagent: SubagentInfo; text: string | null };
+	  }
 	| { id?: string; type: "response"; command: "list_subagents"; success: true; data: { agents: SubagentInfo[] } }
 
 	// Messages
