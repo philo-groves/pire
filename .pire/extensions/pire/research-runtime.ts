@@ -172,6 +172,8 @@ export const PIRE_SESSION_TYPE_PROFILES: Record<PireSessionType, SessionTypeProf
 		modelHints: ["claude-sonnet-4-5", "gemini-2.5-pro"],
 		instructions: [
 			"Prioritize surface mapping, request/response evidence, exposed headers, routing hints, and trust-boundary questions.",
+			"If the target exposes Chrome DevTools Protocol or another browser debugging surface, pivot early to runtime browser inspection instead of treating it as a static web-only task.",
+			"Capture browser-owned evidence such as /json/version, target inventory, and read-only Runtime.evaluate results before escalating into heavier probing.",
 			"Stay in sanctioned, low-impact inspection unless the user explicitly escalates posture.",
 			"Do not overconstrain local evidence collection or harmless tooling just because the engagement has not escalated to active probing.",
 		],

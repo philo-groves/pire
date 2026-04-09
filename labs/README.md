@@ -52,10 +52,11 @@ Current labs:
 - `daemon-seed-live`: runtime-daemon lab focused on debugger-driven seed recovery, persistent helper state, and stale-response invalidation after bad proof attempts
 - `stack-seed-live`: stack-runtime lab focused on stack-local helper state, debugger-driven seed recovery, and stale-response invalidation after bad proof attempts
 - `thread-seed-live`: threaded-runtime lab focused on live thread coordination, runtime-only seed recovery, and stale-response invalidation after bad proof attempts
+- `browser-relay-live`: browser-runtime lab focused on DevTools target inventory, worker-owned nonce recovery, and stale commit invalidation after bad proof attempts
 
 Category snapshots:
 - `static-re`: labs where the decisive path is primarily binary or source reversing plus disciplined state carryover. Examples: `archive-index-live`, `module-graph-live`, `symbol-relay-live`, `dual-view-live`, `alias-maze-live`, `parity-weave-live`, `ledger-lock-live`, `vm-bytecode-live`, `reloc-record-live`, `license-fsm-live`, `opensmtpd-rce-live`, `sudo-argv-live`, `dnsmasq-packet-live`, `sudo-baron-samedit-live`
-- `runtime-re`: labs where the decisive state lives in a running process and the agent should shift early to debugger or process inspection. Examples: `daemon-seed-live`, `stack-seed-live`, `thread-seed-live`
+- `runtime-re`: labs where the decisive state lives in a running process and the agent should shift early to debugger or process inspection. Examples: `daemon-seed-live`, `stack-seed-live`, `thread-seed-live`, `browser-relay-live`
 - `stateful-runtime`: labs where the target punishes wrong ordering, stale assumptions, or branch chasing across runs or phases. Examples: `ephemeral-window-live`, `shadow-channel-live`, `multi-stage-live`, `thread-rendezvous-live`
 
 Recommended workflow:

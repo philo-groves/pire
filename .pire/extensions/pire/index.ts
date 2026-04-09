@@ -47,6 +47,12 @@ import {
 	type NetToolDetails,
 } from "./net.js";
 import {
+	runWebCdpDiscover,
+	runWebCdpRuntimeEval,
+	type WebArtifactObservation,
+	type WebToolDetails,
+} from "./web.js";
+import {
 	runUnpackArchiveList,
 	runUnpackBinwalkExtract,
 	runUnpackBinwalkScan,
@@ -221,6 +227,9 @@ const MODE_TOOLS: Record<PireMode, string[]> = {
 	dynamic: ["research_tracker", "read", "bash", "environment_inventory"],
 	proofing: ["research_tracker", "read", "bash", "edit", "write", "environment_inventory"],
 	report: ["research_tracker", "read", "bash", "edit", "write", "environment_inventory"],
+};
+const SESSION_TYPE_TOOLS: Partial<Record<PireSessionType, string[]>> = {
+	"web-security-review": ["net_curl_head", "web_cdp_discover", "web_cdp_runtime_eval"],
 };
 
 const DESTRUCTIVE_PATTERNS = [
@@ -453,6 +462,13 @@ function getNetToolDetails(eventDetails: unknown): NetToolDetails | undefined {
 	return eventDetails as NetToolDetails;
 }
 
+function getWebToolDetails(eventDetails: unknown): WebToolDetails | undefined {
+	if (!eventDetails || typeof eventDetails !== "object" || !("artifacts" in eventDetails)) {
+		return undefined;
+	}
+	return eventDetails as WebToolDetails;
+}
+
 function getUnpackToolDetails(eventDetails: unknown): UnpackToolDetails | undefined {
 	if (!eventDetails || typeof eventDetails !== "object" || !("artifacts" in eventDetails)) {
 		return undefined;
@@ -585,9 +601,14 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		return paths;
 	};
 
+	const getActiveToolsForContext = (mode: PireMode, sessionType?: PireSessionType): string[] => {
+		const sessionTools = sessionType ? (SESSION_TYPE_TOOLS[sessionType] ?? []) : [];
+		return Array.from(new Set([...MODE_TOOLS[mode], ...sessionTools]));
+	};
+
 	const applyMode = (ctx: ExtensionContext, mode: PireMode, options?: { notify?: boolean }): void => {
 		currentMode = mode;
-		pi.setActiveTools(MODE_TOOLS[mode]);
+		pi.setActiveTools(getActiveToolsForContext(mode, currentSessionType));
 		updateStatus(ctx, mode);
 		updateRoleStatus(ctx, currentRole);
 		updateSessionTypeStatus(ctx, currentSessionType);
@@ -2295,6 +2316,85 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerTool({
+		name: "web_cdp_discover",
+		label: "Web CDP Discover",
+		description: "Inspect a Chrome DevTools Protocol endpoint, capture version metadata, and optionally inventory available targets.",
+		promptSnippet: "Use web_cdp_discover when a local browser or WebView exposes a DevTools endpoint.",
+		promptGuidelines: [
+			"Start with web_cdp_discover before trying Runtime.evaluate so you know which page, iframe, or worker you are attaching to.",
+			"Use the targetType filter when you want to focus on page, iframe, worker, or service_worker targets.",
+		],
+		parameters: Type.Object({
+			endpoint: Type.String({ description: "CDP HTTP or websocket endpoint, for example http://127.0.0.1:9222 or ws://127.0.0.1:9222/devtools/browser/..." }),
+			includeTargets: Type.Optional(Type.Boolean({ default: true })),
+			targetType: Type.Optional(Type.String({ description: "Optional target type filter, for example page, iframe, worker, or service_worker." })),
+			maxTargets: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, default: 10 })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const details = await runWebCdpDiscover(
+				ctx.cwd,
+				params.endpoint,
+				{
+					includeTargets: params.includeTargets ?? true,
+					targetType: params.targetType,
+					maxTargets: params.maxTargets ?? 10,
+				},
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "web_cdp_runtime_eval",
+		label: "Web CDP Runtime Eval",
+		description: "Run a read-oriented Runtime.evaluate call against a selected CDP page or worker target and persist the full transcript.",
+		promptSnippet: "Use web_cdp_runtime_eval for narrow, read-only browser-state questions once you know the right target.",
+		promptGuidelines: [
+			"Pick the target deliberately using id, type, or URL substring instead of assuming the first page is correct.",
+			"Keep expressions narrow and question-driven: URL, readyState, globals, storage markers, or app state relevant to the current hypothesis.",
+			"Leave throwOnSideEffect enabled unless you have an explicit reason to risk mutating browser state.",
+		],
+		parameters: Type.Object({
+			endpoint: Type.String({ description: "CDP HTTP or websocket endpoint, for example http://127.0.0.1:9222." }),
+			expression: Type.String({ description: "JavaScript expression to evaluate in the selected target context." }),
+			targetId: Type.Optional(Type.String({ description: "Optional exact CDP target id." })),
+			targetType: Type.Optional(Type.String({ description: "Optional target type such as page, iframe, worker, or service_worker." })),
+			targetUrlContains: Type.Optional(Type.String({ description: "Optional substring that must appear in the target URL." })),
+			awaitPromise: Type.Optional(Type.Boolean({ default: false })),
+			returnByValue: Type.Optional(Type.Boolean({ default: true })),
+			includeCommandLineApi: Type.Optional(Type.Boolean({ default: false })),
+			throwOnSideEffect: Type.Optional(Type.Boolean({ default: true })),
+			timeoutMs: Type.Optional(Type.Integer({ minimum: 100, maximum: 60000, default: 5000 })),
+		}),
+		async execute(_toolCallId, params, signal, _onUpdate, ctx) {
+			const details = await runWebCdpRuntimeEval(
+				ctx.cwd,
+				params.endpoint,
+				{
+					targetId: params.targetId,
+					targetType: params.targetType,
+					targetUrlContains: params.targetUrlContains,
+					expression: params.expression,
+					awaitPromise: params.awaitPromise ?? false,
+					returnByValue: params.returnByValue ?? true,
+					includeCommandLineApi: params.includeCommandLineApi ?? false,
+					throwOnSideEffect: params.throwOnSideEffect ?? true,
+					timeoutMs: params.timeoutMs ?? 5000,
+				},
+				signal,
+			);
+			return {
+				content: [{ type: "text", text: details.summary }],
+				details,
+			};
+		},
+	});
+
+	pi.registerTool({
 		name: "unpack_binwalk_scan",
 		label: "Unpack Binwalk Scan",
 		description: "Run binwalk in scan mode and persist the scan log as an artifact.",
@@ -3213,6 +3313,17 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				};
 			}
 		}
+
+		if (event.toolName === "web_cdp_discover" || event.toolName === "web_cdp_runtime_eval") {
+			const endpoint = typeof event.input.endpoint === "string" ? event.input.endpoint : "";
+			const decision = allowObservationTarget(currentSafety, endpoint);
+			if (!decision.allowed) {
+				return {
+					block: true,
+					reason: decision.reason ?? `safety posture blocked access to ${endpoint}`,
+				};
+			}
+		}
 	});
 
 	(pi as ExtensionAPI).on("tool_result", async (event, ctx) => {
@@ -3408,6 +3519,24 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
+		const webDetails = getWebToolDetails(event.details);
+		if (webDetails) {
+			for (const artifact of webDetails.artifacts as WebArtifactObservation[]) {
+				await observeArtifact(ctx, artifact.path, `tool:${event.toolName}`, {
+					type: artifact.type as ArtifactType | undefined,
+					command: artifact.command ?? webDetails.commandString,
+					finding: artifact.finding,
+				});
+			}
+			recordToolActivity(ctx, {
+				tool: event.toolName,
+				target: webDetails.target,
+				summary: webDetails.summary.split("\n")[0] ?? event.toolName,
+				artifacts: webDetails.artifacts.map((artifact) => artifact.path),
+			});
+			return;
+		}
+
 		const unpackDetails = getUnpackToolDetails(event.details);
 		if (unpackDetails) {
 			for (const artifact of unpackDetails.artifacts as UnpackArtifactObservation[]) {
@@ -3457,6 +3586,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				event.toolName.startsWith("decomp_") ||
 				event.toolName.startsWith("debug_") ||
 				event.toolName.startsWith("net_") ||
+				event.toolName.startsWith("web_") ||
 				event.toolName.startsWith("unpack_") ||
 				event.toolName.startsWith("platform_")
 			) {

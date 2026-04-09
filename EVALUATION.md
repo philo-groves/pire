@@ -135,6 +135,7 @@ Current live labs under `labs/` include:
 - `daemon-seed-live`
 - `stack-seed-live`
 - `thread-seed-live`
+- `browser-relay-live`
 
 ### 3. Real-Task Sessions
 

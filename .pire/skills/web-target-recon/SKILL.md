@@ -16,6 +16,7 @@ Prefer:
 - Read-only browsing, passive response analysis, and low-volume probing
 - Capturing exact requests, routes, parameters, and response codes
 - Identifying trust boundaries and attacker-controlled inputs
+- If a local browser target exposes remote debugging, capture `/json/version`, enumerate targets, and use read-only CDP evaluation before broader guesswork
 
 Keep notes on:
 - Reachable attack surface and hidden-but-referenced routes
