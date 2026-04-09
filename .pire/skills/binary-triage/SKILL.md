@@ -6,6 +6,8 @@ description: Use when triaging an executable, library, object file, or firmware 
 
 Start with low-risk inventory. Prefer commands such as `file`, hashes, `readelf`, `objdump`, `nm`, `strings`, and hex inspection before mutation.
 
+If runtime artifacts appear immediately during triage, do not stay in static mode by inertia. When the binary launches helpers, writes PID or socket files, or discloses transient values only after execution, pivot to [`runtime-state-recovery`](../runtime-state-recovery/SKILL.md) instead of continuing broad static inventory.
+
 Collect first:
 - Exact path and file size
 - Cryptographic hashes if available
