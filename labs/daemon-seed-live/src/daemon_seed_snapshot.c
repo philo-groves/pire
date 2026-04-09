@@ -261,6 +261,31 @@ static int parse_request_text(const char *buffer, SeedDaemonRequest *request) {
 	return request->token[0] != '\0' && request->receipt[0] != '\0' && request->response[0] != '\0' ? 0 : -1;
 }
 
+static int is_simple_command(const char *buffer, const char *command) {
+	char local[128];
+	size_t length = 0;
+	snprintf(local, sizeof(local), "%s", buffer);
+	trim_line(local);
+	length = strlen(local);
+	while (length > 0 && (local[length - 1] == ' ' || local[length - 1] == '\t')) {
+		local[--length] = '\0';
+	}
+	return strcmp(local, command) == 0;
+}
+
+static int is_blank_command(const char *buffer) {
+	char local[128];
+	size_t index = 0;
+	snprintf(local, sizeof(local), "%s", buffer);
+	trim_line(local);
+	for (; local[index] != '\0'; index++) {
+		if (local[index] != ' ' && local[index] != '\t') {
+			return 0;
+		}
+	}
+	return 1;
+}
+
 static void sleep_millis(long milliseconds) {
 	struct timespec delay;
 	delay.tv_sec = milliseconds / 1000L;
@@ -322,7 +347,30 @@ static int run_seed_daemon(void) {
 		}
 		memset(buffer, 0, sizeof(buffer));
 		bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
-		if (bytes_read <= 0 || parse_request_text(buffer, &request) != 0) {
+		if (bytes_read <= 0) {
+			write(client_fd, "bad-request\n", 12);
+			close(client_fd);
+			client_fd = -1;
+			continue;
+		}
+		if (is_blank_command(buffer) || is_simple_command(buffer, "help")) {
+			write(
+				client_fd,
+				"usage: token=<token> receipt=<receipt> response=<8hex>\nprobe=daemon-magic\n",
+				74
+			);
+			close(client_fd);
+			client_fd = -1;
+			continue;
+		}
+		if (is_simple_command(buffer, "probe=daemon-magic")) {
+			snprintf(line, sizeof(line), "daemon_magic=%08x\n", g_runtime_seed_daemon.magic);
+			write(client_fd, line, strlen(line));
+			close(client_fd);
+			client_fd = -1;
+			continue;
+		}
+		if (parse_request_text(buffer, &request) != 0) {
 			write(client_fd, "bad-request\n", 12);
 			close(client_fd);
 			client_fd = -1;

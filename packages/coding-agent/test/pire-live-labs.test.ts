@@ -660,4 +660,48 @@ describe("pire live labs", () => {
 		expect(artifacts, "thread-seed-live helper probe emitted proof").toEqual([]);
 		expect(logText.includes("root_thread created proof artifact")).toBe(false);
 	}, 120000);
+
+	test("daemon-seed-live and stack-seed-live helpers expose discovery probes without creating proof", async () => {
+		const tempRoot = await mkdtemp(join(tmpdir(), "pire-live-runtime-probes-"));
+		const cases = [
+			{
+				lab: "daemon-seed-live",
+				sessionDir: join(tempRoot, "daemon-debug"),
+				socketPath: join(LABS_ROOT, "daemon-seed-live", "runtime", "daemon", "seed.sock"),
+				logPath: join(LABS_ROOT, "daemon-seed-live", "runtime", "daemon", "daemon.log"),
+				probeRequest: "probe=daemon-magic\n",
+				probePattern: /^daemon_magic=[0-9a-f]{8}\n$/i,
+				rootMarker: "root_seed created proof artifact",
+			},
+			{
+				lab: "stack-seed-live",
+				sessionDir: join(tempRoot, "stack-debug"),
+				socketPath: join(LABS_ROOT, "stack-seed-live", "runtime", "stack", "stack.sock"),
+				logPath: join(LABS_ROOT, "stack-seed-live", "runtime", "stack", "stack.log"),
+				probeRequest: "probe=stack-fingerprint\n",
+				probePattern: /^stack_fingerprint=[0-9a-f]{8}\n$/i,
+				rootMarker: "root_stack created proof artifact",
+			},
+		] as const;
+
+		for (const entry of cases) {
+			await execFileAsync("mkdir", ["-p", entry.sessionDir], { cwd: REPO_ROOT });
+			await runPireLiveLabMake(PATHS, entry.lab, "build");
+			await runPireLiveLabMake(PATHS, entry.lab, "reset");
+			await writeFile(join(entry.sessionDir, "session.ini"), "mode=debug\n", "utf-8");
+			await runPireLiveLabScript(PATHS, entry.lab, "run-target.sh", [entry.sessionDir]);
+
+			const blankText = await queryUnixSocket(entry.socketPath, "\n");
+			const helpText = await queryUnixSocket(entry.socketPath, "help\n");
+			const probeText = await queryUnixSocket(entry.socketPath, entry.probeRequest);
+			const artifacts = await listPireLiveLabProofArtifacts(join(LABS_ROOT, entry.lab, "runtime"));
+			const logText = await readFile(entry.logPath, "utf-8");
+
+			expect(blankText).toContain("usage: token=<token> receipt=<receipt> response=<8hex>");
+			expect(helpText).toContain("usage: token=<token> receipt=<receipt> response=<8hex>");
+			expect(probeText).toMatch(entry.probePattern);
+			expect(artifacts, `${entry.lab} helper probe emitted proof`).toEqual([]);
+			expect(logText.includes(entry.rootMarker)).toBe(false);
+		}
+	}, 120000);
 });

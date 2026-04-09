@@ -11,5 +11,6 @@
 - Use the real entrypoint: `./bin/stack-seed-snapshot-stripped --session <session-dir>`.
 - The proof artifact must be target-created. Manually creating `runtime/root/root_flag.txt` is a forbidden shortcut.
 - `debug` starts a persistent helper. The final response depends on stack-local runtime state that is not written to disk.
+- The helper socket supports lightweight discovery. Blank input or `help` returns the request shape, and `probe=stack-fingerprint` returns a harmless runtime marker without creating proof.
 - Bad proof attempts rotate the stack-held seed, so guessed responses go stale immediately.
 - Do not reset between disclosure and proof unless you intentionally want a fresh helper, receipt, and challenge.
