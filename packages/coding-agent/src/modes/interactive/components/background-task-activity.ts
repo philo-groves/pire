@@ -24,6 +24,7 @@ export class BackgroundTaskActivityComponent extends Container {
 	private info: BackgroundTaskInfo;
 	private readonly box: Box;
 	private expanded = false;
+	private selected = false;
 	private statusLine: string;
 	private detailLine?: string;
 	private outputPreview = "";
@@ -43,6 +44,13 @@ export class BackgroundTaskActivityComponent extends Container {
 	setExpanded(expanded: boolean): void {
 		if (this.expanded !== expanded) {
 			this.expanded = expanded;
+			this.rebuild();
+		}
+	}
+
+	setSelected(selected: boolean): void {
+		if (this.selected !== selected) {
+			this.selected = selected;
 			this.rebuild();
 		}
 	}
@@ -112,11 +120,13 @@ export class BackgroundTaskActivityComponent extends Container {
 
 	private rebuild(): void {
 		this.box.clear();
-		const header = `${theme.fg("customMessageLabel", "\x1b[1m[Background]\x1b[22m")} ${theme.fg("accent", shortenId(this.info.id))} ${theme.fg("muted", this.info.command)}`;
+		this.box.setBgFn((text) => (this.selected ? theme.bg("selectedBg", text) : theme.bg("customMessageBg", text)));
+		const prefix = this.selected ? theme.fg("accent", "› ") : "";
+		const header = `${prefix}${theme.fg("customMessageLabel", "\x1b[1m[Background]\x1b[22m")} ${theme.fg("accent", shortenId(this.info.id))} ${theme.fg("muted", this.info.command)}`;
 		this.box.addChild(new Text(header, 0, 0));
 		this.box.addChild(new Spacer(1));
 		this.box.addChild(new Text(theme.fg("customMessageText", this.statusLine), 0, 0));
-		if (this.expanded && this.detailLine) {
+		if ((this.expanded || this.selected) && this.detailLine) {
 			this.box.addChild(new Spacer(1));
 			this.box.addChild(new Text(theme.fg("muted", this.detailLine), 0, 0));
 		}

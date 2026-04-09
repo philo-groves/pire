@@ -6,7 +6,13 @@ import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
 type InteractiveModePrototypeWithEnsureBackgroundTaskActivity = {
 	ensureBackgroundTaskActivity(this: Record<string, unknown>, task: Record<string, unknown>): unknown;
+	updateSelectedBackgroundTaskActivity(this: Record<string, unknown>): void;
+	getSelectedBackgroundTaskInfo(this: Record<string, unknown>): unknown;
 };
+
+function stripAnsi(text: string): string {
+	return text.replace(/\x1b\[[0-9;]*m/g, "");
+}
 
 describe("BackgroundTaskActivityComponent", () => {
 	beforeAll(() => {
@@ -59,10 +65,13 @@ describe("InteractiveMode background task events", () => {
 			chatContainer: new Container(),
 			toolOutputExpanded: true,
 			backgroundTaskComponents: new Map(),
+			selectedBackgroundTaskId: undefined,
 		};
 		const interactiveModePrototype =
 			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureBackgroundTaskActivity;
 		fakeThis.ensureBackgroundTaskActivity = interactiveModePrototype.ensureBackgroundTaskActivity.bind(fakeThis);
+		fakeThis.updateSelectedBackgroundTaskActivity =
+			interactiveModePrototype.updateSelectedBackgroundTaskActivity.bind(fakeThis);
 
 		const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
 			this: typeof fakeThis,
@@ -104,5 +113,128 @@ describe("InteractiveMode background task events", () => {
 		expect(rendered).toContain("sleep 1; echo done");
 		expect(rendered).toContain("done");
 		expect(rendered).toContain("Completed");
+	});
+
+	test("cycles the selected background task row", async () => {
+		const fakeThis: any = {
+			isInitialized: true,
+			footer: { invalidate: vi.fn() },
+			ui: { requestRender: vi.fn() },
+			chatContainer: new Container(),
+			toolOutputExpanded: false,
+			backgroundTaskComponents: new Map(),
+			selectedBackgroundTaskId: undefined,
+			showStatus: vi.fn(),
+		};
+		const interactiveModePrototype =
+			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureBackgroundTaskActivity & {
+				selectBackgroundTaskActivity(this: Record<string, unknown>, delta: -1 | 1): void;
+			};
+		fakeThis.ensureBackgroundTaskActivity = interactiveModePrototype.ensureBackgroundTaskActivity.bind(fakeThis);
+		fakeThis.updateSelectedBackgroundTaskActivity =
+			interactiveModePrototype.updateSelectedBackgroundTaskActivity.bind(fakeThis);
+		const selectBackgroundTaskActivity = interactiveModePrototype.selectBackgroundTaskActivity.bind(fakeThis);
+
+		fakeThis.ensureBackgroundTaskActivity({
+			id: "task-a",
+			status: "running",
+			command: "sleep 1",
+			pid: 101,
+			createdAt: 1,
+			updatedAt: 1,
+		});
+		fakeThis.ensureBackgroundTaskActivity({
+			id: "task-b",
+			status: "running",
+			command: "sleep 2",
+			pid: 202,
+			createdAt: 1,
+			updatedAt: 1,
+		});
+
+		expect(fakeThis.selectedBackgroundTaskId).toBe("task-a");
+
+		selectBackgroundTaskActivity(1);
+		expect(fakeThis.selectedBackgroundTaskId).toBe("task-b");
+
+		const rendered = fakeThis.chatContainer.children
+			.flatMap((child: { render: (width: number) => string[] }) => child.render(120))
+			.join("\n");
+		const plainRendered = stripAnsi(rendered);
+		expect(plainRendered).toContain("› [Background]");
+		expect(plainRendered).toContain("sleep 2");
+	});
+
+	test("performs actions on the selected background task row", async () => {
+		const session = {
+			listBackgroundTasks: vi.fn(() => [
+				{
+					id: "task-b",
+					status: "running",
+					command: "npm run watch",
+					pid: 202,
+					createdAt: 1,
+					updatedAt: 1,
+					lastOutput: "watching files",
+				},
+			]),
+			waitForBackgroundTask: vi.fn(async () => ({
+				id: "task-b",
+				status: "completed",
+				command: "npm run watch",
+				pid: 202,
+				exitCode: 0,
+				createdAt: 1,
+				updatedAt: 2,
+				lastOutput: "build complete",
+			})),
+			cancelBackgroundTask: vi.fn(async () => ({
+				id: "task-b",
+				status: "cancelled",
+				command: "npm run watch",
+				pid: 202,
+				createdAt: 1,
+				updatedAt: 3,
+				lastOutput: "stopped",
+			})),
+			getBackgroundTaskReport: vi.fn((taskId: string) => ({
+				task: {
+					id: taskId,
+					status: "completed",
+					command: "npm run watch",
+					pid: 202,
+					createdAt: 1,
+					updatedAt: 2,
+					lastOutput: "build complete",
+				},
+				text: "build complete",
+			})),
+		};
+		const fakeThis: any = {
+			session,
+			selectedBackgroundTaskId: "task-b",
+			showStatus: vi.fn(),
+			showWarning: vi.fn(),
+			showError: vi.fn(),
+			copyTextToClipboard: vi.fn(async () => {}),
+		};
+		const interactiveModePrototype =
+			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureBackgroundTaskActivity & {
+				handleSelectedBackgroundTaskWait(this: Record<string, unknown>): Promise<void>;
+				handleSelectedBackgroundTaskCancel(this: Record<string, unknown>): Promise<void>;
+				handleSelectedBackgroundTaskCopy(this: Record<string, unknown>): Promise<void>;
+			};
+		fakeThis.getSelectedBackgroundTaskInfo = interactiveModePrototype.getSelectedBackgroundTaskInfo.bind(fakeThis);
+
+		await interactiveModePrototype.handleSelectedBackgroundTaskWait.call(fakeThis);
+		await interactiveModePrototype.handleSelectedBackgroundTaskCopy.call(fakeThis);
+		await interactiveModePrototype.handleSelectedBackgroundTaskCancel.call(fakeThis);
+
+		expect(session.waitForBackgroundTask).toHaveBeenCalledWith("task-b");
+		expect(session.getBackgroundTaskReport).toHaveBeenCalledWith("task-b");
+		expect(fakeThis.copyTextToClipboard).toHaveBeenCalledWith("build complete");
+		expect(session.cancelBackgroundTask).toHaveBeenCalledWith("task-b");
+		expect(fakeThis.showStatus).toHaveBeenCalledWith("Background task settled: build complete");
+		expect(fakeThis.showStatus).toHaveBeenCalledWith("Cancelled background task task-b");
 	});
 });

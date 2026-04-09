@@ -199,6 +199,7 @@ export class InteractiveMode {
 
 	// Tool output expansion state
 	private toolOutputExpanded = false;
+	private selectedBackgroundTaskId: string | undefined = undefined;
 	private selectedSubagentId: string | undefined = undefined;
 
 	// Thinking block visibility state
@@ -486,6 +487,11 @@ export class InteractiveMode {
 				hint("app.subagent.wait", "wait subagent"),
 				hint("app.subagent.close", "close subagent"),
 				hint("app.subagent.copy", "copy subagent"),
+				hint("app.backgroundTask.previous", "prev task"),
+				hint("app.backgroundTask.next", "next task"),
+				hint("app.backgroundTask.wait", "wait task"),
+				hint("app.backgroundTask.cancel", "cancel task"),
+				hint("app.backgroundTask.copy", "copy task"),
 				hint("app.autopilot.toggle", "to toggle autopilot"),
 				hint("app.message.dequeue", "to edit all queued messages"),
 				hint("app.clipboard.pasteImage", "to paste image"),
@@ -1322,6 +1328,8 @@ export class InteractiveMode {
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
+		this.backgroundTaskComponents.clear();
+		this.selectedBackgroundTaskId = undefined;
 		this.subagentComponents.clear();
 		this.selectedSubagentId = undefined;
 		this.renderInitialMessages();
@@ -2095,6 +2103,17 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.subagent.copy", () => {
 			void this.handleSelectedSubagentCopy();
 		});
+		this.defaultEditor.onAction("app.backgroundTask.previous", () => this.selectBackgroundTaskActivity(-1));
+		this.defaultEditor.onAction("app.backgroundTask.next", () => this.selectBackgroundTaskActivity(1));
+		this.defaultEditor.onAction("app.backgroundTask.wait", () => {
+			void this.handleSelectedBackgroundTaskWait();
+		});
+		this.defaultEditor.onAction("app.backgroundTask.cancel", () => {
+			void this.handleSelectedBackgroundTaskCancel();
+		});
+		this.defaultEditor.onAction("app.backgroundTask.copy", () => {
+			void this.handleSelectedBackgroundTaskCopy();
+		});
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -2700,8 +2719,45 @@ export class InteractiveMode {
 			component = new BackgroundTaskActivityComponent(task, this.toolOutputExpanded);
 			this.chatContainer.addChild(component);
 			this.backgroundTaskComponents.set(task.id, component);
+			if (!this.selectedBackgroundTaskId) {
+				this.selectedBackgroundTaskId = task.id;
+			}
+			this.updateSelectedBackgroundTaskActivity();
 		}
 		return component;
+	}
+
+	private updateSelectedBackgroundTaskActivity(): void {
+		for (const [id, component] of this.backgroundTaskComponents.entries()) {
+			component.setSelected(id === this.selectedBackgroundTaskId);
+		}
+	}
+
+	private selectBackgroundTaskActivity(delta: -1 | 1): void {
+		const ids = [...this.backgroundTaskComponents.keys()];
+		if (ids.length === 0) {
+			this.showStatus("No background task activity rows");
+			return;
+		}
+
+		if (!this.selectedBackgroundTaskId) {
+			this.selectedBackgroundTaskId = delta > 0 ? ids[0] : ids[ids.length - 1];
+		} else {
+			const currentIndex = ids.indexOf(this.selectedBackgroundTaskId);
+			const baseIndex = currentIndex === -1 ? 0 : currentIndex;
+			const nextIndex = (baseIndex + delta + ids.length) % ids.length;
+			this.selectedBackgroundTaskId = ids[nextIndex];
+		}
+
+		this.updateSelectedBackgroundTaskActivity();
+		this.ui.requestRender();
+	}
+
+	private getSelectedBackgroundTaskInfo(): BackgroundTaskInfo | undefined {
+		if (!this.selectedBackgroundTaskId) {
+			return undefined;
+		}
+		return this.session.listBackgroundTasks().find((task) => task.id === this.selectedBackgroundTaskId);
 	}
 
 	private updateSelectedSubagentActivity(): void {
@@ -2798,6 +2854,70 @@ export class InteractiveMode {
 		try {
 			await this.copyTextToClipboard(text);
 			this.showStatus(`Copied subagent ${selected.id.slice(0, 8)} report to clipboard`);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async handleSelectedBackgroundTaskWait(): Promise<void> {
+		const selected = this.getSelectedBackgroundTaskInfo();
+		if (!selected) {
+			this.showStatus("No background task selected");
+			return;
+		}
+		if (selected.status !== "running") {
+			this.showWarning("Selected background task is not running");
+			return;
+		}
+
+		try {
+			const info = await this.session.waitForBackgroundTask(selected.id);
+			const report = this.session.getBackgroundTaskReport(info.id);
+			if (report.text) {
+				this.showStatus(`Background task settled: ${report.text}`);
+			} else {
+				this.showStatus(`Background task ${info.id.slice(0, 8)} settled`);
+			}
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async handleSelectedBackgroundTaskCancel(): Promise<void> {
+		const selected = this.getSelectedBackgroundTaskInfo();
+		if (!selected) {
+			this.showStatus("No background task selected");
+			return;
+		}
+		if (selected.status !== "running") {
+			this.showWarning("Selected background task is not running");
+			return;
+		}
+
+		try {
+			const info = await this.session.cancelBackgroundTask(selected.id);
+			this.showStatus(`Cancelled background task ${info.id.slice(0, 8)}`);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async handleSelectedBackgroundTaskCopy(): Promise<void> {
+		const selected = this.getSelectedBackgroundTaskInfo();
+		if (!selected) {
+			this.showStatus("No background task selected");
+			return;
+		}
+		const report = this.session.getBackgroundTaskReport(selected.id);
+		const text = report.text?.trim();
+		if (!text) {
+			this.showWarning("Selected background task has no output yet");
+			return;
+		}
+
+		try {
+			await this.copyTextToClipboard(text);
+			this.showStatus(`Copied background task ${selected.id.slice(0, 8)} output to clipboard`);
 		} catch (error) {
 			this.showError(error instanceof Error ? error.message : String(error));
 		}
@@ -2999,6 +3119,8 @@ export class InteractiveMode {
 
 	private rebuildChatFromMessages(): void {
 		this.chatContainer.clear();
+		this.backgroundTaskComponents.clear();
+		this.selectedBackgroundTaskId = undefined;
 		this.subagentComponents.clear();
 		this.selectedSubagentId = undefined;
 		const context = this.sessionManager.buildSessionContext();
@@ -4625,6 +4747,11 @@ export class InteractiveMode {
 		const waitSubagent = this.getAppKeyDisplay("app.subagent.wait");
 		const closeSubagent = this.getAppKeyDisplay("app.subagent.close");
 		const copySubagent = this.getAppKeyDisplay("app.subagent.copy");
+		const previousBackgroundTask = this.getAppKeyDisplay("app.backgroundTask.previous");
+		const nextBackgroundTask = this.getAppKeyDisplay("app.backgroundTask.next");
+		const waitBackgroundTask = this.getAppKeyDisplay("app.backgroundTask.wait");
+		const cancelBackgroundTask = this.getAppKeyDisplay("app.backgroundTask.cancel");
+		const copyBackgroundTask = this.getAppKeyDisplay("app.backgroundTask.copy");
 		const pasteImage = this.getAppKeyDisplay("app.clipboard.pasteImage");
 
 		let hotkeys = `
@@ -4671,6 +4798,8 @@ export class InteractiveMode {
 | \`${dequeue}\` | Restore queued messages |
 | \`${previousSubagent}\` / \`${nextSubagent}\` | Select previous / next subagent row |
 | \`${waitSubagent}\` / \`${closeSubagent}\` / \`${copySubagent}\` | Wait / close / copy selected subagent |
+| \`${previousBackgroundTask}\` / \`${nextBackgroundTask}\` | Select previous / next background task row |
+| \`${waitBackgroundTask}\` / \`${cancelBackgroundTask}\` / \`${copyBackgroundTask}\` | Wait / cancel / copy selected background task |
 | \`${pasteImage}\` | Paste image from clipboard |
 | \`/\` | Slash commands |
 | \`!\` | Run bash command |
