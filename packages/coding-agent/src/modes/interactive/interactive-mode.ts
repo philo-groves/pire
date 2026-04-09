@@ -50,6 +50,7 @@ import {
 import {
 	type AgentSession,
 	type AgentSessionEvent,
+	type BackgroundTaskInfo,
 	parseSkillBlock,
 	type SubagentInfo,
 } from "../../core/agent-session.js";
@@ -80,6 +81,7 @@ import { parseGitUrl } from "../../utils/git.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import { ArminComponent } from "./components/armin.js";
 import { AssistantMessageComponent } from "./components/assistant-message.js";
+import { BackgroundTaskActivityComponent } from "./components/background-task-activity.js";
 import { BashExecutionComponent } from "./components/bash-execution.js";
 import { BorderedLoader } from "./components/bordered-loader.js";
 import { BranchSummaryMessageComponent } from "./components/branch-summary-message.js";
@@ -192,6 +194,7 @@ export class InteractiveMode {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+	private backgroundTaskComponents = new Map<string, BackgroundTaskActivityComponent>();
 	private subagentComponents = new Map<string, SubagentActivityComponent>();
 
 	// Tool output expansion state
@@ -2366,6 +2369,21 @@ export class InteractiveMode {
 				this.ui.requestRender();
 				break;
 
+			case "background_task_start":
+				this.ensureBackgroundTaskActivity(event.task).applyStart(event.task);
+				this.ui.requestRender();
+				break;
+
+			case "background_task_update":
+				this.ensureBackgroundTaskActivity(event.task).applyUpdate(event);
+				this.ui.requestRender();
+				break;
+
+			case "background_task_end":
+				this.ensureBackgroundTaskActivity(event.task).applyEnd(event.task);
+				this.ui.requestRender();
+				break;
+
 			case "message_start":
 				if (event.message.role === "custom") {
 					this.addMessageToChat(event.message);
@@ -2672,6 +2690,16 @@ export class InteractiveMode {
 				this.selectedSubagentId = subagent.id;
 			}
 			this.updateSelectedSubagentActivity();
+		}
+		return component;
+	}
+
+	private ensureBackgroundTaskActivity(task: BackgroundTaskInfo): BackgroundTaskActivityComponent {
+		let component = this.backgroundTaskComponents.get(task.id);
+		if (!component) {
+			component = new BackgroundTaskActivityComponent(task, this.toolOutputExpanded);
+			this.chatContainer.addChild(component);
+			this.backgroundTaskComponents.set(task.id, component);
 		}
 		return component;
 	}
