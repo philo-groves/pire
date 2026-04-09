@@ -120,6 +120,8 @@ Current live labs under `labs/` include:
 - `symbol-relay-live`
 - `dual-view-live`
 - `alias-maze-live`
+- `parity-weave-live`
+- `ledger-lock-live`
 - `vm-bytecode-live`
 - `reloc-record-live`
 - `license-fsm-live`

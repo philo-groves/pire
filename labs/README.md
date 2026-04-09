@@ -37,6 +37,8 @@ Current labs:
 - `symbol-relay-live`: relay bundle RE lab focused on symbol alias resolution, relay-plan reduction, and non-obvious proof gating across helper modules
 - `dual-view-live`: reconciled-view RE lab focused on merging inconsistent tables, rejecting primary-only near-solutions, and carrying the merged state into proof
 - `alias-maze-live`: alias-graph RE lab focused on cross-file symbol resolution, misleading alias paths, and non-obvious proof gating across bundle and policy helpers
+- `parity-weave-live`: weave-bundle RE lab focused on exact full-bundle coverage, decoy local optima, and non-obvious proof gating across three static inputs
+- `ledger-lock-live`: ledger-graph RE lab focused on whole-ledger consistency, misleading local closures, and non-obvious proof gating across accounts, links, and journal replay
 - `vm-bytecode-live`: VM bytecode RE lab focused on opcode recovery, register-state reconstruction, and hidden commit discovery
 - `reloc-record-live`: packed relocation stream RE lab focused on bitfield decoding, encoded record reconstruction, and handler mapping
 - `license-fsm-live`: custom alphabet and FSM RE lab focused on decoder recovery, checksum reconstruction, and proof-state activation
@@ -52,7 +54,7 @@ Current labs:
 - `thread-seed-live`: threaded-runtime lab focused on live thread coordination, runtime-only seed recovery, and stale-response invalidation after bad proof attempts
 
 Category snapshots:
-- `static-re`: labs where the decisive path is primarily binary or source reversing plus disciplined state carryover. Examples: `archive-index-live`, `module-graph-live`, `symbol-relay-live`, `dual-view-live`, `alias-maze-live`, `vm-bytecode-live`, `reloc-record-live`, `license-fsm-live`, `opensmtpd-rce-live`, `sudo-argv-live`, `dnsmasq-packet-live`, `sudo-baron-samedit-live`
+- `static-re`: labs where the decisive path is primarily binary or source reversing plus disciplined state carryover. Examples: `archive-index-live`, `module-graph-live`, `symbol-relay-live`, `dual-view-live`, `alias-maze-live`, `parity-weave-live`, `ledger-lock-live`, `vm-bytecode-live`, `reloc-record-live`, `license-fsm-live`, `opensmtpd-rce-live`, `sudo-argv-live`, `dnsmasq-packet-live`, `sudo-baron-samedit-live`
 - `runtime-re`: labs where the decisive state lives in a running process and the agent should shift early to debugger or process inspection. Examples: `daemon-seed-live`, `stack-seed-live`, `thread-seed-live`
 - `stateful-runtime`: labs where the target punishes wrong ordering, stale assumptions, or branch chasing across runs or phases. Examples: `ephemeral-window-live`, `shadow-channel-live`, `multi-stage-live`, `thread-rendezvous-live`
 

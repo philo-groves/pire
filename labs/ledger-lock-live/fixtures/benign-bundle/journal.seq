@@ -1,0 +1,3 @@
+gate ADD 01
+vault XOR 02
+relay ROL 03

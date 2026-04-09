@@ -363,6 +363,84 @@ describe("pire live labs", () => {
 				logPath: join(LABS_ROOT, "alias-maze-live", "runtime", "maze", "maze.log"),
 			},
 			{
+				lab: "parity-weave-live",
+				makeDir: "weave-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "request.ini"),
+						"mode=debug\nphase=trace\nspan=1a\nresponse=00000000\n",
+						"utf-8",
+					);
+					await writeFile(
+						join(dir, "threads.tbl"),
+						"red 11 21\nblue 13 23\ngreen 15 25\namber 17 27\nviolet 19 29\nwhite 1b 2b\n",
+						"utf-8",
+					);
+					await writeFile(
+						join(dir, "masks.tbl"),
+						"red 05 31\nblue 07 33\ngreen 09 35\namber 0b 37\nviolet 0d 39\nwhite 0f 3b\n",
+						"utf-8",
+					);
+					await writeFile(
+						join(dir, "weave.seq"),
+						"red ADD 01\nblue XOR 02\ngreen ROL 03\namber ADD 04\nviolet XOR 05\nwhite ROL 06\n",
+						"utf-8",
+					);
+				},
+				naiveDir: "weave-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "request.ini"),
+						"mode=commit\nphase=stitch\nspan=73\nresponse=11111111\n",
+						"utf-8",
+					);
+					await writeFile(join(dir, "threads.tbl"), "red 31 41\nblue 33 43\ngreen 35 45\n", "utf-8");
+					await writeFile(join(dir, "masks.tbl"), "red 15 51\nblue 17 53\ngreen 19 55\n", "utf-8");
+					await writeFile(join(dir, "weave.seq"), "red ADD 01\nblue XOR 02\ngreen ROL 03\n", "utf-8");
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "parity-weave-live", "runtime", "weave", "weave.log"),
+			},
+			{
+				lab: "ledger-lock-live",
+				makeDir: "ledger-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "request.ini"),
+						"mode=debug\nphase=trace\nwindow=19\nresponse=00000000\n",
+						"utf-8",
+					);
+					await writeFile(
+						join(dir, "accounts.tbl"),
+						"gate 21 03\nvault 41 05\nrelay 61 07\nhinge 81 09\ncrown a1 0b\n",
+						"utf-8",
+					);
+					await writeFile(
+						join(dir, "links.tbl"),
+						"gate vault 01\nvault relay 02\nrelay hinge 03\nhinge crown 04\ncrown gate 05\n",
+						"utf-8",
+					);
+					await writeFile(
+						join(dir, "journal.seq"),
+						"gate ADD 01\nvault XOR 02\nrelay ROL 03\nhinge ADD 04\ncrown XOR 05\n",
+						"utf-8",
+					);
+				},
+				naiveDir: "ledger-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "request.ini"),
+						"mode=commit\nphase=seal\nwindow=61\nresponse=11111111\n",
+						"utf-8",
+					);
+					await writeFile(join(dir, "accounts.tbl"), "gate 31 11\nvault 51 13\nrelay 71 17\n", "utf-8");
+					await writeFile(join(dir, "links.tbl"), "gate vault 05\nvault relay 07\nrelay gate 09\n", "utf-8");
+					await writeFile(join(dir, "journal.seq"), "gate ADD 01\nvault XOR 02\nrelay ROL 03\n", "utf-8");
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "ledger-lock-live", "runtime", "ledger", "ledger.log"),
+			},
+			{
 				lab: "vm-bytecode-live",
 				makeDir: "program-debug",
 				makeFiles: async (dir: string) => {
