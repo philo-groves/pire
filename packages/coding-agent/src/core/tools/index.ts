@@ -73,6 +73,17 @@ export {
 	truncateTail,
 } from "./truncate.js";
 export {
+	createWebfetchTool,
+	createWebfetchToolDefinition,
+	type WebfetchOperations,
+	type WebfetchResponse,
+	type WebfetchToolDetails,
+	type WebfetchToolInput,
+	type WebfetchToolOptions,
+	webfetchTool,
+	webfetchToolDefinition,
+} from "./webfetch.js";
+export {
 	createWriteTool,
 	createWriteToolDefinition,
 	type WriteOperations,
@@ -102,16 +113,24 @@ import {
 	readTool,
 	readToolDefinition,
 } from "./read.js";
+import {
+	createWebfetchTool,
+	createWebfetchToolDefinition,
+	type WebfetchToolOptions,
+	webfetchTool,
+	webfetchToolDefinition,
+} from "./webfetch.js";
 import { createWriteTool, createWriteToolDefinition, writeTool, writeToolDefinition } from "./write.js";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
 
-export const codingTools: Tool[] = [readTool, bashTool, editTool, writeTool];
+export const codingTools: Tool[] = [readTool, webfetchTool, bashTool, editTool, writeTool];
 export const readOnlyTools: Tool[] = [readTool, grepTool, findTool, lsTool];
 
 export const allTools = {
 	read: readTool,
+	webfetch: webfetchTool,
 	bash: bashTool,
 	edit: editTool,
 	write: writeTool,
@@ -122,6 +141,7 @@ export const allTools = {
 
 export const allToolDefinitions = {
 	read: readToolDefinition,
+	webfetch: webfetchToolDefinition,
 	bash: bashToolDefinition,
 	edit: editToolDefinition,
 	write: writeToolDefinition,
@@ -134,12 +154,14 @@ export type ToolName = keyof typeof allTools;
 
 export interface ToolsOptions {
 	read?: ReadToolOptions;
+	webfetch?: WebfetchToolOptions;
 	bash?: BashToolOptions;
 }
 
 export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
 	return [
 		createReadToolDefinition(cwd, options?.read),
+		createWebfetchToolDefinition(options?.webfetch),
 		createBashToolDefinition(cwd, options?.bash),
 		createEditToolDefinition(cwd),
 		createWriteToolDefinition(cwd),
@@ -158,6 +180,7 @@ export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOption
 export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
 	return {
 		read: createReadToolDefinition(cwd, options?.read),
+		webfetch: createWebfetchToolDefinition(options?.webfetch),
 		bash: createBashToolDefinition(cwd, options?.bash),
 		edit: createEditToolDefinition(cwd),
 		write: createWriteToolDefinition(cwd),
@@ -170,6 +193,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 	return [
 		createReadTool(cwd, options?.read),
+		createWebfetchTool(options?.webfetch),
 		createBashTool(cwd, options?.bash),
 		createEditTool(cwd),
 		createWriteTool(cwd),
@@ -183,6 +207,7 @@ export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[]
 export function createAllTools(cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
 	return {
 		read: createReadTool(cwd, options?.read),
+		webfetch: createWebfetchTool(options?.webfetch),
 		bash: createBashTool(cwd, options?.bash),
 		edit: createEditTool(cwd),
 		write: createWriteTool(cwd),
