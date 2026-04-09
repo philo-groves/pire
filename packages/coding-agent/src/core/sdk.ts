@@ -246,8 +246,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = "off";
 	}
 
-	const defaultActiveToolNames: ToolName[] = ["read", "webfetch", "bash", "edit", "write"];
-	const initialActiveToolNames: ToolName[] = options.tools
+	const defaultActiveToolNames: string[] = ["read", "webfetch", "bash", "edit", "write", "spawn_agent"];
+	const initialActiveToolNames: string[] = options.tools
 		? options.tools.map((t) => t.name).filter((n): n is ToolName => n in allTools)
 		: defaultActiveToolNames;
 

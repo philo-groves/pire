@@ -15,16 +15,17 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import type {
+import {
 	Agent,
-	AgentEvent,
-	AgentMessage,
-	AgentState,
-	AgentTool,
-	ThinkingLevel,
+	type AgentEvent,
+	type AgentMessage,
+	type AgentState,
+	type AgentTool,
+	type ThinkingLevel,
 } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@mariozechner/pi-ai";
-import { isContextOverflow, modelsAreEqual, resetApiProviders, supportsXhigh } from "@mariozechner/pi-ai";
+import { isContextOverflow, modelsAreEqual, resetApiProviders, streamSimple, supportsXhigh } from "@mariozechner/pi-ai";
+import { type Static, Type } from "@sinclair/typebox";
 import { getDocsPath } from "../config.js";
 import { theme } from "../modes/interactive/theme/theme.js";
 import { stripFrontmatter } from "../utils/frontmatter.js";
@@ -72,12 +73,17 @@ import {
 	IMPLICIT_CONTINUATION_MESSAGE,
 	isImplicitContinuationUserMessage,
 } from "./implicit-continuation.js";
-import type { BashExecutionMessage, CustomMessage } from "./messages.js";
+import { type BashExecutionMessage, type CustomMessage, convertToLlm } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
-import type { BranchSummaryEntry, CompactionEntry, SessionManager } from "./session-manager.js";
-import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.js";
+import type { BranchSummaryEntry, CompactionEntry } from "./session-manager.js";
+import {
+	CURRENT_SESSION_VERSION,
+	getLatestCompactionEntry,
+	type SessionHeader,
+	SessionManager,
+} from "./session-manager.js";
 import type { SettingsManager } from "./settings-manager.js";
 import type { SlashCommandInfo } from "./slash-commands.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
@@ -145,6 +151,8 @@ export interface AgentSessionConfig {
 	sessionManager: SessionManager;
 	settingsManager: SettingsManager;
 	cwd: string;
+	/** Current subagent nesting depth. Root sessions start at 0. */
+	subagentDepth?: number;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	/** Resource loader for skills, prompts, themes, context files, system prompt */
@@ -218,6 +226,32 @@ export interface SessionStats {
 interface ToolDefinitionEntry {
 	definition: ToolDefinition;
 	sourceInfo: SourceInfo;
+}
+
+const SUBAGENT_MAX_DEPTH = 2;
+const SUBAGENT_DEFAULT_MAX_TURNS = 6;
+const SUBAGENT_MAX_TURNS = 12;
+
+const spawnAgentSchema = Type.Object({
+	task: Type.String({ description: "Bounded task for the subagent to complete" }),
+	context: Type.Optional(Type.String({ description: "Additional context the subagent should use" })),
+	maxTurns: Type.Optional(
+		Type.Number({
+			description: `Maximum turns for the subagent before it is aborted (default ${SUBAGENT_DEFAULT_MAX_TURNS})`,
+		}),
+	),
+});
+
+type SpawnAgentToolInput = Static<typeof spawnAgentSchema>;
+
+interface SpawnAgentToolDetails {
+	subagentId: string;
+	depth: number;
+	parentDepth: number;
+	maxTurns: number;
+	turns: number;
+	stopReason: AssistantMessage["stopReason"] | "no_response";
+	model?: { provider: string; id: string };
 }
 
 // ============================================================================
@@ -308,6 +342,7 @@ export class AgentSession {
 
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
+	private _subagentDepth: number;
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -317,6 +352,7 @@ export class AgentSession {
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
+		this._subagentDepth = config.subagentDepth ?? 0;
 		this._modelRegistry = config.modelRegistry;
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
@@ -947,6 +983,10 @@ export class AgentSession {
 		return this._resourceLoader.getPrompts().prompts;
 	}
 
+	get subagentDepth(): number {
+		return this._subagentDepth;
+	}
+
 	private _normalizePromptSnippet(text: string | undefined): string | undefined {
 		if (!text) return undefined;
 		const oneLine = text
@@ -1004,6 +1044,250 @@ export class AgentSession {
 			toolSnippets,
 			promptGuidelines,
 		});
+	}
+
+	private _getRecentSubagentContext(): string {
+		const lines: string[] = [];
+		for (let i = this.agent.state.messages.length - 1; i >= 0 && lines.length < 6; i--) {
+			const message = this.agent.state.messages[i];
+			if (message.role === "assistant") {
+				const text = this._getAssistantText(message).trim();
+				if (text) {
+					lines.unshift(`assistant: ${text}`);
+				}
+				continue;
+			}
+			if (message.role === "user") {
+				const text = this._getUserMessageText(message).trim();
+				if (text && !isImplicitContinuationUserMessage(message)) {
+					lines.unshift(`user: ${text}`);
+				}
+				continue;
+			}
+			if (message.role === "custom") {
+				const text =
+					typeof message.content === "string"
+						? message.content
+						: message.content
+								.filter((part): part is TextContent => part.type === "text")
+								.map((part) => part.text)
+								.join("\n");
+				if (text.trim()) {
+					lines.unshift(`context: ${text.trim()}`);
+				}
+			}
+		}
+
+		return lines.join("\n").slice(-4000);
+	}
+
+	private _createSubagentResourceLoader(): ResourceLoader {
+		const base = this._resourceLoader;
+		return {
+			getExtensions: () => ({
+				extensions: [],
+				errors: [],
+				runtime: base.getExtensions().runtime,
+			}),
+			getSkills: () => base.getSkills(),
+			getPrompts: () => base.getPrompts(),
+			getThemes: () => base.getThemes(),
+			getAgentsFiles: () => base.getAgentsFiles(),
+			getSystemPrompt: () => base.getSystemPrompt(),
+			getAppendSystemPrompt: () => base.getAppendSystemPrompt(),
+			extendResources: () => {},
+			reload: async () => {},
+		};
+	}
+
+	private _buildSubagentPrompt(input: SpawnAgentToolInput): string {
+		const sections = [
+			"You are a delegated subagent working for another Pi agent.",
+			"Do the task independently, use tools when needed, and finish with a concise report containing summary, evidence, and next steps.",
+			"",
+			`Task:\n${input.task.trim()}`,
+		];
+
+		if (input.context?.trim()) {
+			sections.push("", `Provided context:\n${input.context.trim()}`);
+		}
+
+		const recentContext = this._getRecentSubagentContext();
+		if (recentContext) {
+			sections.push("", `Recent parent context:\n${recentContext}`);
+		}
+
+		return sections.join("\n");
+	}
+
+	private async _createSubagentSession(): Promise<AgentSession> {
+		const extensionRunnerRef: { current?: ExtensionRunner } = {};
+		const childAgent = new Agent({
+			initialState: {
+				systemPrompt: "",
+				model: this.model,
+				thinkingLevel: this.thinkingLevel,
+				tools: [],
+			},
+			convertToLlm,
+			streamFn: async (model, context, options) => {
+				const auth = await this._modelRegistry.getApiKeyAndHeaders(model);
+				if (!auth.ok) {
+					throw new Error(auth.error);
+				}
+				return streamSimple(model, context, {
+					...options,
+					apiKey: auth.apiKey,
+					headers: auth.headers || options?.headers ? { ...auth.headers, ...options?.headers } : undefined,
+				});
+			},
+			onPayload: async (payload) => {
+				const runner = extensionRunnerRef.current;
+				if (!runner?.hasHandlers("before_provider_request")) {
+					return payload;
+				}
+				return runner.emitBeforeProviderRequest(payload);
+			},
+			sessionId: `${this.sessionId}:subagent:${Date.now()}`,
+			transformContext: async (messages) => {
+				const runner = extensionRunnerRef.current;
+				if (!runner) return messages;
+				return runner.emitContext(messages);
+			},
+			steeringMode: this.steeringMode,
+			followUpMode: this.followUpMode,
+			transport: this.agent.transport,
+			thinkingBudgets: this.agent.thinkingBudgets,
+			maxRetryDelayMs: this.settingsManager.getRetrySettings().maxDelayMs,
+		});
+
+		const childSession = new AgentSession({
+			agent: childAgent,
+			sessionManager: SessionManager.inMemory(this._cwd),
+			settingsManager: this.settingsManager,
+			cwd: this._cwd,
+			subagentDepth: this._subagentDepth + 1,
+			scopedModels: [...this._scopedModels],
+			resourceLoader: this._createSubagentResourceLoader(),
+			customTools: [],
+			modelRegistry: this._modelRegistry,
+			initialActiveToolNames: this.getActiveToolNames().filter((name) => this._baseToolDefinitions.has(name)),
+			extensionRunnerRef,
+			sessionStartEvent: { type: "session_start", reason: "startup" },
+		});
+
+		childSession.agent.state.systemPrompt = `${childSession.systemPrompt}\n\nYou are a delegated subagent. Work on the assigned task only and return a compact report for the parent agent.`;
+		return childSession;
+	}
+
+	private _createSpawnAgentToolDefinition(): ToolDefinition<typeof spawnAgentSchema, SpawnAgentToolDetails> {
+		return {
+			name: "spawn_agent",
+			label: "spawn_agent",
+			description:
+				"Delegate a bounded side task to a subagent with its own isolated context. Use this for focused research, tool use, or exploration that should return a concise summary to the main agent.",
+			promptSnippet: "Delegate a bounded side task to an isolated subagent",
+			promptGuidelines: [
+				"Use spawn_agent for bounded side tasks that benefit from independent tool use and a separate context.",
+				"Give the subagent a concrete task and only the context it actually needs.",
+			],
+			parameters: spawnAgentSchema,
+			execute: async (_toolCallId, input, _signal, onUpdate) => {
+				if (this._subagentDepth >= SUBAGENT_MAX_DEPTH) {
+					throw new Error(`Maximum subagent depth of ${SUBAGENT_MAX_DEPTH} reached`);
+				}
+				if (!this.model) {
+					throw new Error("No model selected for subagent");
+				}
+
+				const maxTurns = Math.max(
+					1,
+					Math.min(Math.floor(input.maxTurns ?? SUBAGENT_DEFAULT_MAX_TURNS), SUBAGENT_MAX_TURNS),
+				);
+				const childSession = await this._createSubagentSession();
+				const progressLines = [
+					`Started subagent ${childSession.sessionId} at depth ${childSession.subagentDepth}.`,
+				];
+				let turns = 0;
+				let lastAssistant: AssistantMessage | undefined;
+				let abortedForTurnLimit = false;
+
+				const pushProgress = () => {
+					onUpdate?.({
+						content: [{ type: "text", text: progressLines.join("\n") }],
+						details: {
+							subagentId: childSession.sessionId,
+							depth: childSession.subagentDepth,
+							parentDepth: this._subagentDepth,
+							maxTurns,
+							turns,
+							stopReason: lastAssistant?.stopReason ?? "no_response",
+							model: this.model ? { provider: this.model.provider, id: this.model.id } : undefined,
+						} satisfies SpawnAgentToolDetails,
+					});
+				};
+
+				const unsubscribe = childSession.subscribe((event) => {
+					if (event.type === "turn_end") {
+						turns++;
+						progressLines.push(`Completed subagent turn ${turns}.`);
+						if (turns >= maxTurns && childSession.isStreaming) {
+							abortedForTurnLimit = true;
+							progressLines.push(`Reached turn limit (${maxTurns}); aborting subagent.`);
+							void childSession.abort().catch(() => {});
+						}
+						pushProgress();
+						return;
+					}
+					if (event.type === "tool_execution_start") {
+						progressLines.push(`Running ${event.toolName} in subagent.`);
+						pushProgress();
+						return;
+					}
+					if (event.type === "message_end" && event.message.role === "assistant") {
+						lastAssistant = event.message;
+						const text = this._getAssistantText(event.message).trim();
+						if (text) {
+							progressLines.push(`Latest subagent report: ${text.slice(0, 240)}`);
+							pushProgress();
+						}
+					}
+				});
+
+				try {
+					await childSession.prompt(this._buildSubagentPrompt(input), {
+						expandPromptTemplates: false,
+						source: "extension",
+					});
+					const finalAssistant =
+						lastAssistant ??
+						[...childSession.messages]
+							.reverse()
+							.find((message): message is AssistantMessage => message.role === "assistant");
+					const finalText = finalAssistant ? this._getAssistantText(finalAssistant).trim() : "";
+					const finalReport =
+						finalText ||
+						(abortedForTurnLimit
+							? `Subagent aborted after reaching the turn limit of ${maxTurns}.`
+							: "Subagent completed without a textual report.");
+					return {
+						content: [{ type: "text", text: finalReport }],
+						details: {
+							subagentId: childSession.sessionId,
+							depth: childSession.subagentDepth,
+							parentDepth: this._subagentDepth,
+							maxTurns,
+							turns,
+							stopReason: finalAssistant?.stopReason ?? "no_response",
+							model: this.model ? { provider: this.model.provider, id: this.model.id } : undefined,
+						} satisfies SpawnAgentToolDetails,
+					};
+				} finally {
+					unsubscribe();
+					childSession.dispose();
+				}
+			},
+		};
 	}
 
 	// =========================================================================
@@ -2388,7 +2672,7 @@ export class AgentSession {
 	}): void {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
-		const baseToolDefinitions = this._baseToolsOverride
+		const baseToolDefinitions: Record<string, ToolDefinition<any, any>> = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
 						name,
@@ -2399,6 +2683,7 @@ export class AgentSession {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix },
 				});
+		baseToolDefinitions.spawn_agent = this._createSpawnAgentToolDefinition();
 
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
@@ -2433,7 +2718,7 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: ["read", "webfetch", "bash", "edit", "write"];
+			: ["read", "webfetch", "bash", "edit", "write", "spawn_agent"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
