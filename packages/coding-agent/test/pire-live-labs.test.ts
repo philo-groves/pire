@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -109,6 +110,31 @@ async function runScriptExpectFailure(lab: string, sessionDir: string): Promise<
 		throw error;
 	}
 	throw new Error(`expected ${lab} run-target.sh to fail for ${sessionDir}`);
+}
+
+async function queryUnixSocket(socketPath: string, payload: string): Promise<string> {
+	return await new Promise((resolve, reject) => {
+		const chunks: Buffer[] = [];
+		const client = net.createConnection(socketPath);
+
+		client.setTimeout(2000);
+		client.on("connect", () => {
+			client.write(payload);
+			client.end();
+		});
+		client.on("data", (chunk) => {
+			chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+		});
+		client.on("end", () => {
+			resolve(Buffer.concat(chunks).toString("utf-8"));
+		});
+		client.on("timeout", () => {
+			client.destroy(new Error(`timed out querying ${socketPath}`));
+		});
+		client.on("error", (error) => {
+			reject(error);
+		});
+	});
 }
 
 describe("pire live labs", () => {
@@ -606,5 +632,32 @@ describe("pire live labs", () => {
 			expect(artifacts, `${entry.lab} bad proof attempt emitted proof`).toEqual([]);
 			expect(logText.includes(entry.rotationMarker), `${entry.lab} did not rotate live state`).toBe(true);
 		}
+	}, 120000);
+
+	test("thread-seed-live helper exposes protocol help and worker probe without creating proof", async () => {
+		const tempRoot = await mkdtemp(join(tmpdir(), "pire-live-thread-probe-"));
+		const debugDir = join(tempRoot, "thread-debug");
+		const socketPath = join(LABS_ROOT, "thread-seed-live", "runtime", "thread", "thread.sock");
+		const logPath = join(LABS_ROOT, "thread-seed-live", "runtime", "thread", "thread.log");
+
+		await execFileAsync("mkdir", ["-p", debugDir], { cwd: REPO_ROOT });
+		await runPireLiveLabMake(PATHS, "thread-seed-live", "build");
+		await runPireLiveLabMake(PATHS, "thread-seed-live", "reset");
+		await writeFile(join(debugDir, "session.ini"), "mode=debug\n", "utf-8");
+		await runPireLiveLabScript(PATHS, "thread-seed-live", "run-target.sh", [debugDir]);
+
+		const blankText = await queryUnixSocket(socketPath, "\n");
+		const helpText = await queryUnixSocket(socketPath, "help\n");
+		const probeText = await queryUnixSocket(socketPath, "probe=worker-mix\n");
+		const artifacts = await listPireLiveLabProofArtifacts(join(LABS_ROOT, "thread-seed-live", "runtime"));
+		const logText = await readFile(logPath, "utf-8");
+
+		expect(blankText).toContain("usage: token=<token> receipt=<receipt> response=<8hex>");
+		expect(blankText).toContain("probe=worker-mix");
+		expect(helpText).toContain("usage: token=<token> receipt=<receipt> response=<8hex>");
+		expect(helpText).toContain("probe=worker-mix");
+		expect(probeText).toMatch(/^worker_mix=[0-9a-f]{8}\n$/);
+		expect(artifacts, "thread-seed-live helper probe emitted proof").toEqual([]);
+		expect(logText.includes("root_thread created proof artifact")).toBe(false);
 	}, 120000);
 });

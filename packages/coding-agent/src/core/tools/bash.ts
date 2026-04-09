@@ -12,7 +12,12 @@ import { theme } from "../../modes/interactive/theme/theme.js";
 import { waitForChildProcess } from "../../utils/child-process.js";
 import { getShellConfig, getShellEnv, killProcessTree } from "../../utils/shell.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
-import { getToolForbiddenPaths, getToolWorkspaceRoot, isPathWithinRoot } from "./path-utils.js";
+import {
+	getToolBashBlockedCommands,
+	getToolForbiddenPaths,
+	getToolWorkspaceRoot,
+	isPathWithinRoot,
+} from "./path-utils.js";
 import { getTextOutput, invalidArgText, str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateTail } from "./truncate.js";
@@ -148,8 +153,9 @@ function extractCommandPathCandidates(command: string): string[] {
 function assertCommandWithinWorkspace(command: string, cwd: string): void {
 	const workspaceRoot = getToolWorkspaceRoot(cwd);
 	const forbiddenPaths = getToolForbiddenPaths(cwd);
+	const blockedCommands = getToolBashBlockedCommands();
 	if (!workspaceRoot) {
-		if (forbiddenPaths.length === 0) {
+		if (forbiddenPaths.length === 0 && blockedCommands.length === 0) {
 			return;
 		}
 	}
@@ -179,6 +185,14 @@ function assertCommandWithinWorkspace(command: string, cwd: string): void {
 			(relativeForbiddenPath !== undefined && command.includes(relativeForbiddenPath))
 		) {
 			throw new Error(`Command references forbidden audited path: ${relativeForbiddenPath ?? forbiddenPath}`);
+		}
+	}
+	for (const blockedCommand of blockedCommands) {
+		const commandPattern = new RegExp(
+			`(^|[^A-Za-z0-9_-])${blockedCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=\\s|$)`,
+		);
+		if (commandPattern.test(command)) {
+			throw new Error(`Command references blocked runtime-analysis tool: ${blockedCommand}`);
 		}
 	}
 }

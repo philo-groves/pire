@@ -4,11 +4,16 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import type { ExtensionContext } from "../src/core/extensions/types.js";
 import { createBashToolDefinition } from "../src/core/tools/bash.js";
-import { PIRE_TOOL_FORBIDDEN_PATHS_ENV, PIRE_TOOL_WORKSPACE_ROOT_ENV } from "../src/core/tools/path-utils.js";
+import {
+	PIRE_TOOL_BASH_BLOCKED_COMMANDS_ENV,
+	PIRE_TOOL_FORBIDDEN_PATHS_ENV,
+	PIRE_TOOL_WORKSPACE_ROOT_ENV,
+} from "../src/core/tools/path-utils.js";
 import { createReadToolDefinition } from "../src/core/tools/read.js";
 
 const previousWorkspaceRoot = process.env[PIRE_TOOL_WORKSPACE_ROOT_ENV];
 const previousForbiddenPaths = process.env[PIRE_TOOL_FORBIDDEN_PATHS_ENV];
+const previousBlockedCommands = process.env[PIRE_TOOL_BASH_BLOCKED_COMMANDS_ENV];
 
 afterEach(() => {
 	if (previousWorkspaceRoot === undefined) {
@@ -20,6 +25,11 @@ afterEach(() => {
 		delete process.env[PIRE_TOOL_FORBIDDEN_PATHS_ENV];
 	} else {
 		process.env[PIRE_TOOL_FORBIDDEN_PATHS_ENV] = previousForbiddenPaths;
+	}
+	if (previousBlockedCommands === undefined) {
+		delete process.env[PIRE_TOOL_BASH_BLOCKED_COMMANDS_ENV];
+	} else {
+		process.env[PIRE_TOOL_BASH_BLOCKED_COMMANDS_ENV] = previousBlockedCommands;
 	}
 });
 
@@ -101,5 +111,18 @@ describe("audited workspace guard", () => {
 				context,
 			),
 		).rejects.toThrow("Command references forbidden audited path");
+	});
+
+	test("blocks configured runtime-analysis commands in bash", async () => {
+		const tempRoot = await mkdtemp(join(tmpdir(), "pire-bash-blocked-"));
+		await mkdir(tempRoot, { recursive: true });
+
+		process.env[PIRE_TOOL_BASH_BLOCKED_COMMANDS_ENV] = JSON.stringify(["objdump", "readelf"]);
+		const bashTool = createBashToolDefinition(tempRoot);
+		const context = createToolContext(tempRoot);
+
+		await expect(
+			bashTool.execute("tool-4", { command: "objdump -d ./bin/sample" }, undefined, undefined, context),
+		).rejects.toThrow("Command references blocked runtime-analysis tool: objdump");
 	});
 });

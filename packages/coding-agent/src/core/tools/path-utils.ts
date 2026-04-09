@@ -4,6 +4,7 @@ import { isAbsolute, resolve as resolvePath } from "node:path";
 
 export const PIRE_TOOL_WORKSPACE_ROOT_ENV = "PIRE_TOOL_WORKSPACE_ROOT";
 export const PIRE_TOOL_FORBIDDEN_PATHS_ENV = "PIRE_TOOL_FORBIDDEN_PATHS";
+export const PIRE_TOOL_BASH_BLOCKED_COMMANDS_ENV = "PIRE_TOOL_BASH_BLOCKED_COMMANDS";
 
 const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
 const NARROW_NO_BREAK_SPACE = "\u202F";
@@ -116,6 +117,18 @@ export function getToolForbiddenPaths(cwd: string): string[] {
 	return parsed
 		.filter((entry): entry is string => typeof entry === "string" && entry.length > 0)
 		.map((entry) => resolvePath(cwd, entry));
+}
+
+export function getToolBashBlockedCommands(): string[] {
+	const configuredCommands = process.env[PIRE_TOOL_BASH_BLOCKED_COMMANDS_ENV];
+	if (!configuredCommands) {
+		return [];
+	}
+	const parsed = JSON.parse(configuredCommands) as unknown;
+	if (!Array.isArray(parsed)) {
+		return [];
+	}
+	return parsed.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
 }
 
 export function isPathWithinRoot(targetPath: string, rootPath: string): boolean {

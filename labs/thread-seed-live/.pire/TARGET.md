@@ -11,5 +11,6 @@
 - Use the real entrypoint: `./bin/thread-seed-snapshot-stripped --session <session-dir>`.
 - The proof artifact must be target-created. Manually creating `runtime/root/root_flag.txt` is a forbidden shortcut.
 - `debug` starts a persistent threaded helper. The final response depends on runtime-only state held across live threads.
+- The helper socket supports lightweight discovery. `help` returns the request shape, and `probe=worker-mix` returns the current worker-side mix without creating proof.
 - Bad proof attempts rotate both the main-thread and worker-thread seeds, so guessed responses go stale immediately.
 - Do not reset between disclosure and proof unless you intentionally want a fresh helper, receipt, and challenge.

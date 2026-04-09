@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
 import { type FileEntry, parseSessionEntries, type SessionMessageEntry } from "../session-manager.js";
-import { PIRE_TOOL_FORBIDDEN_PATHS_ENV, PIRE_TOOL_WORKSPACE_ROOT_ENV } from "../tools/path-utils.js";
+import {
+	PIRE_TOOL_BASH_BLOCKED_COMMANDS_ENV,
+	PIRE_TOOL_FORBIDDEN_PATHS_ENV,
+	PIRE_TOOL_WORKSPACE_ROOT_ENV,
+} from "../tools/path-utils.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -55,6 +59,7 @@ export interface PireLiveLabAgentRunOptions {
 	extraArgs?: string[];
 	hideHints?: boolean;
 	hiddenPaths?: string[];
+	blockedCommands?: string[];
 }
 
 export interface PireLiveLabSessionAuditOptions {
@@ -84,6 +89,11 @@ export interface PireLiveLabAgentRunResult {
 	assessment: PireLiveLabAttemptAssessment;
 }
 
+interface PireLiveLabPhaseTimeouts {
+	initialSeconds: number;
+	followUpSeconds: number;
+}
+
 interface PireLiveLabRunMetadata {
 	lab: string;
 	workspaceRoot: string;
@@ -94,6 +104,14 @@ interface PireLiveLabRunMetadata {
 interface PireLiveLabRuntimeLedger {
 	paths: string[];
 	values: Array<{ path: string; value: string }>;
+}
+
+function getPireLiveLabSocketPaths(ledger: PireLiveLabRuntimeLedger): string[] {
+	return ledger.paths.filter((path) => path.endsWith(".sock"));
+}
+
+function getPireLiveLabPidValues(ledger: PireLiveLabRuntimeLedger): string[] {
+	return ledger.values.filter((value) => value.path.endsWith(".pid")).map((value) => value.value);
 }
 
 export interface InspectPireLiveLabAgentRunOptions {
@@ -120,6 +138,8 @@ interface PireMessageWithContent {
 }
 
 const RUNTIME_FIRST_LIVE_LABS = new Set(["daemon-seed-live", "stack-seed-live", "thread-seed-live"]);
+const RUNTIME_FIRST_HIDDEN_PATHS = ["fixtures/benign-session/session.ini"];
+const RUNTIME_SECOND_PHASE_BLOCKED_COMMANDS = ["objdump", "strings", "readelf", "nm"];
 const RUNTIME_FIRST_PROMPT_PREFIX = [
 	"This is a runtime-state recovery task, not a generic repo-review task.",
 	"Start with a fresh local disclosure run in a scratch session inside the lab workspace.",
@@ -266,15 +286,35 @@ export function createPireLiveLabSecondPhasePrompt(
 	logText: string,
 	ledger: PireLiveLabRuntimeLedger,
 ): string {
+	const socketPaths = getPireLiveLabSocketPaths(ledger);
+	const pidValues = getPireLiveLabPidValues(ledger);
 	const ledgerLines = [
 		"Second phase: the disclosure run already succeeded, so do not restart or widen into static analysis first.",
 		"Use the current live runtime state from this ledger and make one concrete live inspection attempt before any objdump/strings/readelf/nm step.",
 		"If a socket path exists, prefer a small local client or probe inside the workspace.",
+		"If a socket interaction returns usage text, help text, or an advertised probe verb, invoke that advertised probe exactly once before any PID walk or binary inspection.",
 		"If a PID exists, prefer one concrete live-process inspection attempt next.",
 		"Do not guess the proof response from the disclosure values alone.",
+	];
+
+	if (socketPaths.length > 0) {
+		ledgerLines.push(
+			`Next action: interact once with ${socketPaths[0]} from a small local helper or benign client request before any more filesystem discovery.`,
+		);
+		ledgerLines.push(
+			"If that interaction returns usage text or a probe name, call the advertised probe next instead of restarting or widening the search.",
+		);
+	} else if (pidValues.length > 0) {
+		ledgerLines.push(
+			`Next action: inspect live process ${pidValues[0]} once before any more filesystem discovery or binary inventory.`,
+		);
+	}
+
+	ledgerLines.push(
+		"Do not spend another turn on broad find/ls/script-reading after this ledger; take the live observation first.",
 		"",
 		"Live runtime ledger:",
-	];
+	);
 
 	for (const value of ledger.values) {
 		ledgerLines.push(`- ${value.path}: ${value.value}`);
@@ -304,6 +344,29 @@ export function createPireLiveLabSecondPhasePrompt(
 
 function mergeForbiddenPaths(defaults: string[], overrides?: string[]): string[] {
 	return [...new Set([...defaults, ...(overrides ?? [])])];
+}
+
+export function resolvePireLiveLabPhaseTimeouts(timeoutSeconds: number): PireLiveLabPhaseTimeouts {
+	if (timeoutSeconds <= 90) {
+		return {
+			initialSeconds: timeoutSeconds,
+			followUpSeconds: 0,
+		};
+	}
+	const initialSeconds = Math.min(90, Math.max(45, Math.floor(timeoutSeconds / 2)));
+	return {
+		initialSeconds,
+		followUpSeconds: Math.max(0, timeoutSeconds - initialSeconds),
+	};
+}
+
+async function prepareRuntimeFirstWorkspace(lab: string, workspaceRoot: string): Promise<void> {
+	if (!RUNTIME_FIRST_LIVE_LABS.has(lab)) {
+		return;
+	}
+	const scratchDir = join(workspaceRoot, "scratch");
+	await mkdir(scratchDir, { recursive: true });
+	await writeFile(join(scratchDir, "session.ini"), "mode=debug\ntoken=\nreceipt=\nresponse=00000000\n", "utf-8");
 }
 
 export async function readPireLiveLabInventory(paths: PireLiveLabPaths): Promise<PireLiveLabInventorySnapshot> {
@@ -402,6 +465,8 @@ export async function stagePireLiveLabWorkspace(
 		}),
 	);
 
+	await prepareRuntimeFirstWorkspace(lab, workspaceRoot);
+
 	return {
 		workspaceRoot,
 		hiddenPaths: mergedHiddenPaths,
@@ -449,12 +514,24 @@ async function executePireLiveLabAgentRun(
 	paths: PireLiveLabPaths,
 	workspaceRoot: string,
 	options: PireLiveLabAgentRunOptions,
-): Promise<void> {
+	allowTimeout = false,
+): Promise<{ timedOut: boolean }> {
 	const forbiddenPaths = mergeForbiddenPaths(
 		await resolvePireLiveLabDefaultForbiddenPaths(workspaceRoot),
 		options.hiddenPaths,
 	);
-	await new Promise<void>((resolvePromise, reject) => {
+	return await new Promise<{ timedOut: boolean }>((resolvePromise, reject) => {
+		const killProcessGroup = (signal: NodeJS.Signals): void => {
+			if (child.pid === undefined) {
+				return;
+			}
+			try {
+				process.kill(-child.pid, signal);
+				return;
+			} catch {
+				child.kill(signal);
+			}
+		};
 		const child = spawn(
 			"npx",
 			[
@@ -472,15 +549,29 @@ async function executePireLiveLabAgentRun(
 					...process.env,
 					[PIRE_TOOL_WORKSPACE_ROOT_ENV]: workspaceRoot,
 					[PIRE_TOOL_FORBIDDEN_PATHS_ENV]: JSON.stringify(forbiddenPaths),
+					...(options.blockedCommands && options.blockedCommands.length > 0
+						? {
+								[PIRE_TOOL_BASH_BLOCKED_COMMANDS_ENV]: JSON.stringify(options.blockedCommands),
+							}
+						: {}),
 				},
+				detached: true,
 				stdio: ["ignore", "pipe", "pipe"],
 			},
 		);
 		let stderr = "";
+		let didTimeout = false;
+		let hardKillTimeout: NodeJS.Timeout | undefined;
 		const timeout = setTimeout(
 			() => {
-				child.kill("SIGTERM");
-				reject(new Error(`live lab agent run timed out after ${options.timeoutSeconds ?? 300}s`));
+				didTimeout = true;
+				killProcessGroup("SIGTERM");
+				hardKillTimeout = setTimeout(() => {
+					killProcessGroup("SIGKILL");
+				}, 2000);
+				if (!allowTimeout) {
+					reject(new Error(`live lab agent run timed out after ${options.timeoutSeconds ?? 300}s`));
+				}
 			},
 			(options.timeoutSeconds ?? 300) * 1000,
 		);
@@ -490,12 +581,22 @@ async function executePireLiveLabAgentRun(
 		});
 		child.on("error", (error) => {
 			clearTimeout(timeout);
+			if (hardKillTimeout) {
+				clearTimeout(hardKillTimeout);
+			}
 			reject(error);
 		});
 		child.on("close", (code, signal) => {
 			clearTimeout(timeout);
+			if (hardKillTimeout) {
+				clearTimeout(hardKillTimeout);
+			}
+			if (didTimeout && allowTimeout) {
+				resolvePromise({ timedOut: true });
+				return;
+			}
 			if (code === 0) {
-				resolvePromise();
+				resolvePromise({ timedOut: false });
 				return;
 			}
 			reject(
@@ -509,7 +610,14 @@ export async function runPireLiveLabAgent(paths: PireLiveLabPaths, options: Pire
 	const stagedWorkspace =
 		options.hideHints === false
 			? undefined
-			: await stagePireLiveLabWorkspace(paths, options.lab, options.hiddenPaths);
+			: await stagePireLiveLabWorkspace(
+					paths,
+					options.lab,
+					mergeForbiddenPaths(
+						resolvePireLiveLabRunStrategy(options.lab) === "runtime-first" ? RUNTIME_FIRST_HIDDEN_PATHS : [],
+						options.hiddenPaths,
+					),
+				);
 	const workspaceRoot = stagedWorkspace?.workspaceRoot ?? join(paths.labsRoot, options.lab);
 	await executePireLiveLabAgentRun(paths, workspaceRoot, options);
 }
@@ -693,7 +801,14 @@ export async function evaluatePireLiveLabAgentRun(
 	const stagedWorkspace =
 		options.hideHints === false
 			? undefined
-			: await stagePireLiveLabWorkspace(paths, options.lab, options.hiddenPaths);
+			: await stagePireLiveLabWorkspace(
+					paths,
+					options.lab,
+					mergeForbiddenPaths(
+						resolvePireLiveLabRunStrategy(options.lab) === "runtime-first" ? RUNTIME_FIRST_HIDDEN_PATHS : [],
+						options.hiddenPaths,
+					),
+				);
 	const workspaceRoot = stagedWorkspace?.workspaceRoot ?? join(paths.labsRoot, options.lab);
 	const hiddenPaths = stagedWorkspace?.hiddenPaths ?? mergeForbiddenPaths([], options.hiddenPaths);
 
@@ -704,19 +819,35 @@ export async function evaluatePireLiveLabAgentRun(
 		hiddenPaths,
 	});
 
-	await executePireLiveLabAgentRun(paths, workspaceRoot, options);
+	const runStrategy = resolvePireLiveLabRunStrategy(options.lab);
+	const phaseTimeouts = resolvePireLiveLabPhaseTimeouts(options.timeoutSeconds ?? 300);
+	await executePireLiveLabAgentRun(
+		paths,
+		workspaceRoot,
+		{
+			...options,
+			timeoutSeconds: runStrategy === "runtime-first" ? phaseTimeouts.initialSeconds : options.timeoutSeconds,
+		},
+		runStrategy === "runtime-first" && phaseTimeouts.followUpSeconds > 0,
+	);
 	let result = await inspectPireLiveLabAgentRun(paths, {
 		...options,
 		labRootOverride: workspaceRoot,
 		forbiddenPaths: hiddenPaths,
 	});
 
-	if (resolvePireLiveLabRunStrategy(options.lab) === "runtime-first" && result.assessment.label === "proof-missing") {
+	if (
+		runStrategy === "runtime-first" &&
+		result.assessment.label === "proof-missing" &&
+		phaseTimeouts.followUpSeconds > 0
+	) {
 		const runtimeLedger = await collectPireLiveLabRuntimeLedger(workspaceRoot);
 		if (runtimeLedger.paths.length > 0 || runtimeLedger.values.length > 0) {
 			await executePireLiveLabAgentRun(paths, workspaceRoot, {
 				...options,
 				prompt: createPireLiveLabSecondPhasePrompt(options.prompt, result.logText, runtimeLedger),
+				timeoutSeconds: phaseTimeouts.followUpSeconds,
+				blockedCommands: RUNTIME_SECOND_PHASE_BLOCKED_COMMANDS,
 			});
 			result = await inspectPireLiveLabAgentRun(paths, {
 				...options,

@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
@@ -10,6 +10,7 @@ import {
 	inspectPireLiveLabAgentRun,
 	resolvePireLiveLabDefaultForbiddenPaths,
 	resolvePireLiveLabPaths,
+	resolvePireLiveLabPhaseTimeouts,
 	resolvePireLiveLabRunStrategy,
 	stagePireLiveLabWorkspace,
 	validatePireLiveLabInventory,
@@ -313,10 +314,54 @@ describe("pire live lab helpers", () => {
 		);
 
 		expect(prompt).toContain("Second phase: the disclosure run already succeeded");
+		expect(prompt).toContain(
+			"Next action: interact once with runtime/stack/stack.sock from a small local helper or benign client request before any more filesystem discovery.",
+		);
 		expect(prompt).toContain("- runtime/stack/stack.pid: 3842433");
 		expect(prompt).toContain("- runtime/stack/stack.sock: (path exists)");
 		expect(prompt).toContain("[stack] debug token disclosure: stack-token-74");
 		expect(prompt).toContain("Task:\nRecover the live stack-held helper seed and recover the proof artifact.");
+	});
+
+	test("second-phase prompt explicitly blocks static-analysis drift before live inspection", () => {
+		const prompt = createPireLiveLabSecondPhasePrompt(
+			"Recover the live threaded helper state and recover the proof artifact.",
+			"",
+			{ paths: ["runtime/thread/thread.sock"], values: [{ path: "runtime/thread/thread.pid", value: "3845921" }] },
+		);
+
+		expect(prompt).toContain("before any objdump/strings/readelf/nm step");
+		expect(prompt).toContain("If a socket path exists, prefer a small local client or probe inside the workspace.");
+		expect(prompt).toContain(
+			"Do not spend another turn on broad find/ls/script-reading after this ledger; take the live observation first.",
+		);
+	});
+
+	test("second-phase prompt falls back to a concrete pid inspection when no socket is present", () => {
+		const prompt = createPireLiveLabSecondPhasePrompt(
+			"Recover the live daemon-held helper state and recover the proof artifact.",
+			"",
+			{ paths: [], values: [{ path: "runtime/daemon/seed.pid", value: "5555" }] },
+		);
+
+		expect(prompt).toContain(
+			"Next action: inspect live process 5555 once before any more filesystem discovery or binary inventory.",
+		);
+	});
+
+	test("splits runtime-first phase budgets to preserve a proof-focused follow-up", () => {
+		expect(resolvePireLiveLabPhaseTimeouts(180)).toEqual({
+			initialSeconds: 90,
+			followUpSeconds: 90,
+		});
+		expect(resolvePireLiveLabPhaseTimeouts(120)).toEqual({
+			initialSeconds: 60,
+			followUpSeconds: 60,
+		});
+		expect(resolvePireLiveLabPhaseTimeouts(75)).toEqual({
+			initialSeconds: 75,
+			followUpSeconds: 0,
+		});
 	});
 
 	test("stages stripped lab workspaces without hint files", async () => {
@@ -340,6 +385,35 @@ describe("pire live lab helpers", () => {
 		await expect(access(join(staged.workspaceRoot, "src", "demo_snapshot.c"))).rejects.toThrow();
 		await expect(access(join(staged.workspaceRoot, "runtime", "state.txt"))).resolves.toBeUndefined();
 		expect(staged.hiddenPaths).toEqual(["README.md", ".pire/TARGET.md", "src/demo_snapshot.c"]);
+	});
+
+	test("stages runtime-first labs with seeded scratch session and hidden benign fixture", async () => {
+		const repoRoot = await mkdtemp(join(tmpdir(), "pire-live-lab-runtime-stage-"));
+		const packageRoot = join(repoRoot, "packages", "coding-agent");
+		const labsRoot = join(repoRoot, "labs");
+		const labRoot = join(labsRoot, "daemon-seed-live");
+		await mkdir(join(packageRoot, "src"), { recursive: true });
+		await mkdir(join(labRoot, ".pire"), { recursive: true });
+		await mkdir(join(labRoot, "src"), { recursive: true });
+		await mkdir(join(labRoot, "fixtures", "benign-session"), { recursive: true });
+		await writeFile(join(labRoot, "README.md"), "# Demo\n", "utf-8");
+		await writeFile(join(labRoot, ".pire", "TARGET.md"), "# Target\n", "utf-8");
+		await writeFile(join(labRoot, "src", "daemon_seed_snapshot.c"), "int main(void) { return 0; }\n", "utf-8");
+		await writeFile(
+			join(labRoot, "fixtures", "benign-session", "session.ini"),
+			"mode=observe\ntoken=\nreceipt=\nresponse=00000000\n",
+			"utf-8",
+		);
+
+		const staged = await stagePireLiveLabWorkspace(resolvePireLiveLabPaths(packageRoot), "daemon-seed-live", [
+			"fixtures/benign-session/session.ini",
+		]);
+
+		await expect(access(join(staged.workspaceRoot, "fixtures", "benign-session", "session.ini"))).rejects.toThrow();
+		const scratchSession = await access(join(staged.workspaceRoot, "scratch", "session.ini")).then(
+			async () => await readFile(join(staged.workspaceRoot, "scratch", "session.ini"), "utf-8"),
+		);
+		expect(scratchSession).toBe("mode=debug\ntoken=\nreceipt=\nresponse=00000000\n");
 	});
 
 	test("inspects staged audited runs via session metadata", async () => {
