@@ -59,7 +59,7 @@ export interface CreateAgentSessionOptions {
 	/** Models available for cycling (Ctrl+P in interactive mode) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 
-	/** Built-in tools to use. Default: codingTools [read, webfetch, bash, edit, write] */
+	/** Built-in tools to use. Default: codingTools plus subagent/background task lifecycle tools */
 	tools?: Tool[];
 	/** Custom tools to register (in addition to built-in tools). */
 	customTools?: ToolDefinition[];
@@ -246,7 +246,20 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		thinkingLevel = "off";
 	}
 
-	const defaultActiveToolNames: string[] = ["read", "webfetch", "bash", "edit", "write", "spawn_agent"];
+	const defaultActiveToolNames: string[] = [
+		"read",
+		"webfetch",
+		"bash",
+		"edit",
+		"write",
+		"spawn_agent",
+		"send_input",
+		"wait_agent",
+		"close_agent",
+		"start_background_task",
+		"wait_background_task",
+		"cancel_background_task",
+	];
 	const initialActiveToolNames: string[] = options.tools
 		? options.tools.map((t) => t.name).filter((n): n is ToolName => n in allTools)
 		: defaultActiveToolNames;

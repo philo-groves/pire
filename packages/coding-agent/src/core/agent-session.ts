@@ -1896,6 +1896,10 @@ export class AgentSession {
 			name: "send_input",
 			label: "send_input",
 			description: "Send follow-up input to a running or idle subagent.",
+			promptSnippet: "Send a follow-up instruction to an existing subagent",
+			promptGuidelines: [
+				"Use send_input when a spawned subagent needs clarification, more context, or a follow-up task.",
+			],
 			parameters: sendInputSchema,
 			execute: async (_toolCallId, input: SendInputToolInput) => {
 				const info = await this.sendSubagentInput(input.agentId, input.message);
@@ -1912,6 +1916,10 @@ export class AgentSession {
 			name: "wait_agent",
 			label: "wait_agent",
 			description: "Wait for a subagent to finish its current run and return its latest report.",
+			promptSnippet: "Wait for a subagent to finish and return its latest report",
+			promptGuidelines: [
+				"After spawning a subagent, use wait_agent when you need its report before continuing the main task.",
+			],
 			parameters: waitAgentSchema,
 			execute: async (_toolCallId, input: WaitAgentToolInput) => {
 				const info = await this.waitForSubagent(input.agentId, input.timeoutMs);
@@ -1937,6 +1945,10 @@ export class AgentSession {
 			name: "close_agent",
 			label: "close_agent",
 			description: "Close a subagent and release its resources.",
+			promptSnippet: "Close a subagent and release its resources",
+			promptGuidelines: [
+				"Use close_agent after a subagent is no longer needed so it does not linger unnecessarily.",
+			],
 			parameters: closeAgentSchema,
 			execute: async (_toolCallId, input: CloseAgentToolInput) => {
 				const info = await this.closeSubagent(input.agentId);
@@ -1980,6 +1992,10 @@ export class AgentSession {
 			name: "wait_background_task",
 			label: "wait_background_task",
 			description: "Wait for a tracked background task to finish and return its latest output.",
+			promptSnippet: "Wait for a background task and inspect its latest output",
+			promptGuidelines: [
+				"After starting a background task, use wait_background_task when you need its output or completion status.",
+			],
 			parameters: waitBackgroundTaskSchema,
 			execute: async (_toolCallId, input: WaitBackgroundTaskToolInput) => {
 				const info = await this.waitForBackgroundTask(input.taskId, input.timeoutMs);
@@ -2009,6 +2025,10 @@ export class AgentSession {
 			name: "cancel_background_task",
 			label: "cancel_background_task",
 			description: "Cancel a tracked background task.",
+			promptSnippet: "Cancel a tracked background task",
+			promptGuidelines: [
+				"Use cancel_background_task if a background task is no longer useful, is taking too long, or is producing the wrong work.",
+			],
 			parameters: cancelBackgroundTaskSchema,
 			execute: async (_toolCallId, input: CancelBackgroundTaskToolInput) => {
 				const info = await this.cancelBackgroundTask(input.taskId);
