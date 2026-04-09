@@ -106,19 +106,19 @@ static int save_text_file(const char *path, const char *text) {
 	return 0;
 }
 
-static int save_challenge(const char *runtime_dir, uint32_t challenge) {
+static int save_challenge_for_channel(const char *runtime_dir, const char *channel, uint32_t challenge) {
 	char path[PATH_MAX];
 	char text[32];
 	snprintf(text, sizeof(text), "%08x", challenge);
-	snprintf(path, sizeof(path), "%s/channel/challenge.hex", runtime_dir);
+	snprintf(path, sizeof(path), "%s/channel/%s.challenge", runtime_dir, channel);
 	return save_text_file(path, text);
 }
 
-static int load_challenge(const char *runtime_dir, uint32_t *challenge) {
+static int load_challenge_for_channel(const char *runtime_dir, const char *channel, uint32_t *challenge) {
 	char path[PATH_MAX];
 	FILE *file = NULL;
 	char line[32];
-	snprintf(path, sizeof(path), "%s/channel/challenge.hex", runtime_dir);
+	snprintf(path, sizeof(path), "%s/channel/%s.challenge", runtime_dir, channel);
 	file = fopen(path, "r");
 	if (file == NULL) {
 		return -1;
@@ -158,9 +158,9 @@ static int load_receipt_for_channel(const char *runtime_dir, const char *channel
 	return 0;
 }
 
-static int delete_challenge(const char *runtime_dir) {
+static int delete_challenge_for_channel(const char *runtime_dir, const char *channel) {
 	char path[PATH_MAX];
-	snprintf(path, sizeof(path), "%s/channel/challenge.hex", runtime_dir);
+	snprintf(path, sizeof(path), "%s/channel/%s.challenge", runtime_dir, channel);
 	return unlink(path);
 }
 
@@ -228,9 +228,11 @@ int main(int argc, char **argv) {
 	ChannelState state;
 	char secret_token[32];
 	char receipt[32];
+	char paired_receipt[32];
 	char branch_state[32];
 	char line[256];
 	uint32_t challenge = 0;
+	uint32_t paired_challenge = 0;
 	uint32_t supplied = 0;
 	uint32_t expected = 0;
 	uint32_t channel_mask = 0;
@@ -264,19 +266,26 @@ int main(int argc, char **argv) {
 		if (
 			strcmp(state.channel, "shadow") == 0 &&
 			load_branch_state(runtime_dir, branch_state, sizeof(branch_state)) == 0 &&
-			strcmp(branch_state, "primary-open") == 0
+			(strcmp(branch_state, "primary-open") == 0 || strcmp(branch_state, "paired") == 0)
 		) {
 			save_branch_state(runtime_dir, "poisoned");
-			delete_challenge(runtime_dir);
+			delete_challenge_for_channel(runtime_dir, "primary");
 			append_log_line(runtime_dir, "[channel] shadow debug poisoned the current primary challenge");
 		}
-		challenge = ((uint32_t)getpid() << 3U) ^ 0x005a6211U;
-		save_challenge(runtime_dir, challenge);
+		channel_mask = strcmp(state.channel, "primary") == 0 ? 0x005a6211U : 0x00173359U;
+		challenge = ((uint32_t)getpid() << 3U) ^ channel_mask;
+		save_challenge_for_channel(runtime_dir, state.channel, challenge);
 		save_receipt_for_channel(runtime_dir, state.channel, receipt, sizeof(receipt));
 		if (strcmp(state.channel, "primary") == 0) {
-			save_branch_state(runtime_dir, "primary-open");
+			if (load_branch_state(runtime_dir, branch_state, sizeof(branch_state)) == 0 && strcmp(branch_state, "shadow-open") == 0) {
+				save_branch_state(runtime_dir, "paired");
+			} else {
+				save_branch_state(runtime_dir, "primary-open");
+			}
 		} else {
-			save_branch_state(runtime_dir, "shadow-open");
+			if (load_branch_state(runtime_dir, branch_state, sizeof(branch_state)) != 0 || strcmp(branch_state, "poisoned") != 0) {
+				save_branch_state(runtime_dir, "shadow-open");
+			}
 		}
 		append_log_line(runtime_dir, "[channel] phase=debug");
 		snprintf(line, sizeof(line), "[channel] branch=%s", state.channel);
@@ -302,8 +311,13 @@ int main(int argc, char **argv) {
 			printf("channel commit failed\n");
 			return 1;
 		}
-		if (load_challenge(runtime_dir, &challenge) != 0) {
-			append_log_line(runtime_dir, "[channel] commit rejected: missing challenge");
+		if (strcmp(state.channel, "primary") == 0 && strcmp(branch_state, "paired") != 0) {
+			append_log_line(runtime_dir, "[channel] commit rejected: primary branch is decoy until paired with shadow");
+			printf("channel commit failed\n");
+			return 1;
+		}
+		if (load_challenge_for_channel(runtime_dir, state.channel, &challenge) != 0) {
+			append_log_line(runtime_dir, "[channel] commit rejected: missing branch challenge");
 			printf("channel commit failed\n");
 			return 1;
 		}
@@ -314,6 +328,24 @@ int main(int argc, char **argv) {
 		}
 		channel_mask = strcmp(state.channel, "primary") == 0 ? 0x91e10da5U : 0x33704111U;
 		expected = rol32(hash_token(secret_token) ^ challenge ^ channel_mask, 5U) ^ 0x62aa7713U;
+		if (strcmp(state.channel, "primary") == 0) {
+			if (
+				load_challenge_for_channel(runtime_dir, "shadow", &paired_challenge) != 0 ||
+				load_receipt_for_channel(runtime_dir, "shadow", paired_receipt, sizeof(paired_receipt)) != 0
+			) {
+				append_log_line(runtime_dir, "[channel] commit rejected: missing shadow seed");
+				printf("channel commit failed\n");
+				return 1;
+			}
+			expected =
+				rol32(
+					expected ^
+						paired_challenge ^
+						(uint32_t)strtoul(paired_receipt, NULL, 16) ^
+						0x4c3b2a19U,
+					7U
+				) ^ 0x1f2e3d4cU;
+		}
 		supplied = (uint32_t)strtoul(state.supplied_response, NULL, 16);
 		snprintf(line, sizeof(line), "[channel] branch=%s expected=%08x supplied=%08x", state.channel, expected, supplied);
 		append_log_line(runtime_dir, line);
@@ -330,7 +362,7 @@ int main(int argc, char **argv) {
 				return 0;
 			}
 			save_branch_state(runtime_dir, "poisoned");
-			delete_challenge(runtime_dir);
+			delete_challenge_for_channel(runtime_dir, "primary");
 			append_log_line(runtime_dir, "[channel] shadow branch accepted and invalidated the primary challenge");
 			printf("shadow branch completed without privileged proof\n");
 			return 0;

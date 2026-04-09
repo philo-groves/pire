@@ -95,14 +95,14 @@ const FAILURE_TIER_SWEEP: PireLiveLabSweepEntry[] = [
 	{
 		lab: "ephemeral-window-live",
 		prompt:
-			"Recover the one-shot disclosure window, avoid burning it on bad commits, and recover the proof artifact.",
+			"Recover the one-shot disclosure window, discover the hidden post-prime seal step, avoid burning it on bad commits, and recover the proof artifact.",
 		logPath: "runtime/window/window.log",
 		disclosureMarkers: ["debug token disclosure:", "proof receipt:"],
 	},
 	{
 		lab: "shadow-channel-live",
 		prompt:
-			"Separate the shadow and primary disclosure branches, avoid wrong-branch invalidation, and recover the proof artifact.",
+			"Pair the shadow and primary disclosure branches in the right order, avoid wrong-branch invalidation, and recover the proof artifact.",
 		logPath: "runtime/channel/channel.log",
 		disclosureMarkers: ["debug token disclosure:", "proof receipt:"],
 	},

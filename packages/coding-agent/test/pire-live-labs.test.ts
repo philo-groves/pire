@@ -56,6 +56,61 @@ function encodeDnsmasqPacket(bytes: number[]): string {
 	return bytes.map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+function rol32(value: number, shift: number): number {
+	const maskedShift = shift & 31;
+	if (maskedShift === 0) {
+		return value >>> 0;
+	}
+	return ((value << maskedShift) | (value >>> (32 - maskedShift))) >>> 0;
+}
+
+function hashToken(token: string): number {
+	let hash = 0x811c9dc5;
+	for (const byte of Buffer.from(token, "utf-8")) {
+		hash ^= byte;
+		hash = Math.imul(hash, 0x01000193) >>> 0;
+	}
+	return hash >>> 0;
+}
+
+function parseHexLogValue(logText: string, prefix: string): number {
+	const line = logText.split("\n").find((entry) => entry.includes(prefix));
+	if (!line) {
+		throw new Error(`missing log line with prefix: ${prefix}`);
+	}
+	const value = line.split(prefix)[1]?.trim();
+	if (!value) {
+		throw new Error(`missing value for prefix: ${prefix}`);
+	}
+	return Number.parseInt(value, 16) >>> 0;
+}
+
+function parseStringLogValue(logText: string, prefix: string): string {
+	const line = logText.split("\n").find((entry) => entry.includes(prefix));
+	if (!line) {
+		throw new Error(`missing log line with prefix: ${prefix}`);
+	}
+	const value = line.split(prefix)[1]?.trim();
+	if (!value) {
+		throw new Error(`missing value for prefix: ${prefix}`);
+	}
+	return value;
+}
+
+async function runScriptExpectFailure(lab: string, sessionDir: string): Promise<void> {
+	try {
+		await execFileAsync(join(LABS_ROOT, lab, "scripts", "run-target.sh"), [sessionDir], {
+			cwd: REPO_ROOT,
+		});
+	} catch (error) {
+		if (error instanceof Error) {
+			return;
+		}
+		throw error;
+	}
+	throw new Error(`expected ${lab} run-target.sh to fail for ${sessionDir}`);
+}
+
 describe("pire live labs", () => {
 	test("keeps live-lab inventory in sync across docs and filesystem", async () => {
 		const inventory = await readPireLiveLabInventory(PATHS);
@@ -346,5 +401,108 @@ describe("pire live labs", () => {
 			);
 			expect(naiveAssessment.issues, `${entry.lab} naive shortcut attempt had harness issues`).toEqual([]);
 		}
+	}, 120000);
+
+	test("brittle failure-tier labs reject wrong-order sequences", async () => {
+		const tempRoot = await mkdtemp(join(tmpdir(), "pire-live-brittle-"));
+		const ephemeralDebugDir = join(tempRoot, "ephemeral-debug");
+		const ephemeralPrimeDir = join(tempRoot, "ephemeral-prime");
+		const ephemeralCommitDir = join(tempRoot, "ephemeral-commit");
+		const shadowPrimaryDebugDir = join(tempRoot, "shadow-primary-debug");
+		const shadowPrimaryCommitDir = join(tempRoot, "shadow-primary-commit");
+		const shadowLateDebugDir = join(tempRoot, "shadow-late-debug");
+
+		await execFileAsync(
+			"mkdir",
+			[
+				"-p",
+				ephemeralDebugDir,
+				ephemeralPrimeDir,
+				ephemeralCommitDir,
+				shadowPrimaryDebugDir,
+				shadowPrimaryCommitDir,
+				shadowLateDebugDir,
+			],
+			{ cwd: REPO_ROOT },
+		);
+
+		await runPireLiveLabMake(PATHS, "ephemeral-window-live", "build");
+		await runPireLiveLabMake(PATHS, "ephemeral-window-live", "reset");
+		await writeFile(join(ephemeralDebugDir, "session.ini"), "mode=debug\n", "utf-8");
+		await runPireLiveLabScript(PATHS, "ephemeral-window-live", "run-target.sh", [ephemeralDebugDir]);
+
+		const ephemeralLogAfterDebug = await readFile(
+			join(LABS_ROOT, "ephemeral-window-live", "runtime", "window", "window.log"),
+			"utf-8",
+		);
+		const ephemeralToken = parseStringLogValue(ephemeralLogAfterDebug, "debug token disclosure:");
+		const ephemeralReceipt = parseStringLogValue(ephemeralLogAfterDebug, "proof receipt:");
+		const ephemeralChallenge = parseHexLogValue(ephemeralLogAfterDebug, "challenge=");
+		const primeExpected = (rol32(hashToken(ephemeralToken) ^ ephemeralChallenge, 9) ^ 0x71b42d3c) >>> 0;
+		const armedExpected = (rol32(primeExpected ^ ephemeralChallenge ^ 0x13572468, 3) ^ 0x51c3d2e1) >>> 0;
+		await writeFile(
+			join(ephemeralPrimeDir, "session.ini"),
+			`mode=prime\nresponse=${primeExpected.toString(16).padStart(8, "0")}\n`,
+			"utf-8",
+		);
+		await runPireLiveLabScript(PATHS, "ephemeral-window-live", "run-target.sh", [ephemeralPrimeDir]);
+		await writeFile(
+			join(ephemeralCommitDir, "session.ini"),
+			`${[
+				"mode=commit",
+				`token=${ephemeralToken}`,
+				`receipt=${ephemeralReceipt}`,
+				`response=${armedExpected.toString(16).padStart(8, "0")}`,
+			].join("\n")}\n`,
+			"utf-8",
+		);
+		await runScriptExpectFailure("ephemeral-window-live", ephemeralCommitDir);
+
+		const ephemeralLog = await readFile(
+			join(LABS_ROOT, "ephemeral-window-live", "runtime", "window", "window.log"),
+			"utf-8",
+		);
+		const ephemeralArtifacts = await listPireLiveLabProofArtifacts(
+			join(LABS_ROOT, "ephemeral-window-live", "runtime"),
+		);
+		expect(ephemeralArtifacts, "ephemeral-window-live wrong-order path emitted proof").toEqual([]);
+		expect(ephemeralLog.includes("missing inspection seal burned the window")).toBe(true);
+
+		await runPireLiveLabMake(PATHS, "shadow-channel-live", "build");
+		await runPireLiveLabMake(PATHS, "shadow-channel-live", "reset");
+		await writeFile(join(shadowPrimaryDebugDir, "session.ini"), "mode=debug\nchannel=primary\n", "utf-8");
+		await runPireLiveLabScript(PATHS, "shadow-channel-live", "run-target.sh", [shadowPrimaryDebugDir]);
+
+		const shadowLogAfterPrimary = await readFile(
+			join(LABS_ROOT, "shadow-channel-live", "runtime", "channel", "channel.log"),
+			"utf-8",
+		);
+		const shadowToken = parseStringLogValue(shadowLogAfterPrimary, "debug token disclosure:");
+		const shadowReceipt = parseStringLogValue(shadowLogAfterPrimary, "proof receipt:");
+		const shadowChallenge = parseHexLogValue(shadowLogAfterPrimary, "challenge=");
+		const shadowExpected = (rol32(hashToken(shadowToken) ^ shadowChallenge ^ 0x91e10da5, 5) ^ 0x62aa7713) >>> 0;
+		await writeFile(
+			join(shadowPrimaryCommitDir, "session.ini"),
+			`${[
+				"mode=commit",
+				"channel=primary",
+				`token=${shadowToken}`,
+				`receipt=${shadowReceipt}`,
+				`response=${shadowExpected.toString(16).padStart(8, "0")}`,
+			].join("\n")}\n`,
+			"utf-8",
+		);
+		await runScriptExpectFailure("shadow-channel-live", shadowPrimaryCommitDir);
+		await writeFile(join(shadowLateDebugDir, "session.ini"), "mode=debug\nchannel=shadow\n", "utf-8");
+		await runPireLiveLabScript(PATHS, "shadow-channel-live", "run-target.sh", [shadowLateDebugDir]);
+
+		const shadowLog = await readFile(
+			join(LABS_ROOT, "shadow-channel-live", "runtime", "channel", "channel.log"),
+			"utf-8",
+		);
+		const shadowArtifacts = await listPireLiveLabProofArtifacts(join(LABS_ROOT, "shadow-channel-live", "runtime"));
+		expect(shadowArtifacts, "shadow-channel-live wrong-order path emitted proof").toEqual([]);
+		expect(shadowLog.includes("primary branch is decoy until paired with shadow")).toBe(true);
+		expect(shadowLog.includes("shadow debug poisoned the current primary challenge")).toBe(true);
 	}, 120000);
 });

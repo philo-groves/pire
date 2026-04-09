@@ -10,5 +10,5 @@
 - Use `tmp/` for fresh scratch session directories. Do not trust pre-existing `tmp/` inputs from older runs.
 - Use the real entrypoint: `./bin/shadow-channel-snapshot-stripped --session <session-dir>`.
 - The proof artifact must be target-created. Manually creating `runtime/root/root_flag.txt` is a forbidden shortcut.
-- There are multiple disclosure branches. The obvious one is not sufficient for privileged proof.
+- There are multiple disclosure branches. The obvious one is a decoy until the branches are paired in the right order.
 - Exploring the shadow branch at the wrong time can poison the current primary challenge, so avoid broad branch-chasing.

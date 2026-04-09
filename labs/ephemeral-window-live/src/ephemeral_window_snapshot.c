@@ -202,6 +202,29 @@ static int load_window_armed(const char *runtime_dir, char *armed_value, size_t 
 	return 0;
 }
 
+static int save_window_seal(const char *runtime_dir, const char *seal_value) {
+	char path[PATH_MAX];
+	snprintf(path, sizeof(path), "%s/window/seal.hex", runtime_dir);
+	return save_text_file(path, seal_value);
+}
+
+static int load_window_seal(const char *runtime_dir, char *seal_value, size_t seal_value_size) {
+	char path[PATH_MAX];
+	FILE *file = NULL;
+	snprintf(path, sizeof(path), "%s/window/seal.hex", runtime_dir);
+	file = fopen(path, "r");
+	if (file == NULL) {
+		return -1;
+	}
+	if (fgets(seal_value, (int)seal_value_size, file) == NULL) {
+		fclose(file);
+		return -1;
+	}
+	fclose(file);
+	trim_line(seal_value);
+	return 0;
+}
+
 static int load_session(const char *session_dir, WindowState *state) {
 	char path[PATH_MAX];
 	FILE *file = NULL;
@@ -242,11 +265,13 @@ int main(int argc, char **argv) {
 	char secret_token[32];
 	char receipt[32];
 	char armed_value[32];
+	char seal_value[32];
 	char status[32];
 	char line[256];
 	uint32_t challenge = 0;
 	uint32_t expected = 0;
 	uint32_t armed_expected = 0;
+	uint32_t seal_expected = 0;
 	uint32_t supplied = 0;
 	int index = 0;
 
@@ -317,10 +342,20 @@ int main(int argc, char **argv) {
 		return 0;
 	}
 
-	if (strcmp(state.mode, "commit") == 0) {
-		if (load_window_status(runtime_dir, status, sizeof(status)) != 0 || strcmp(status, "primed") != 0) {
-			append_log_line(runtime_dir, "[window] commit rejected: window is not primed");
-			printf("window commit failed\n");
+	if (strcmp(state.mode, "inspect") == 0) {
+		if (load_window_status(runtime_dir, status, sizeof(status)) != 0) {
+			append_log_line(runtime_dir, "[window] inspect rejected: missing window state");
+			printf("window inspect failed\n");
+			return 1;
+		}
+		if (strcmp(status, "primed") != 0) {
+			if (strcmp(status, "disclosed") == 0) {
+				save_window_status(runtime_dir, "burned");
+				append_log_line(runtime_dir, "[window] inspect rejected: premature inspection burned the window");
+			} else {
+				append_log_line(runtime_dir, "[window] inspect rejected: window is not primed");
+			}
+			printf("window inspect failed\n");
 			return 1;
 		}
 		if (
@@ -328,11 +363,53 @@ int main(int argc, char **argv) {
 			load_window_receipt(runtime_dir, receipt, sizeof(receipt)) != 0 ||
 			load_window_armed(runtime_dir, armed_value, sizeof(armed_value)) != 0
 		) {
-			append_log_line(runtime_dir, "[window] commit rejected: missing challenge, receipt, or armed state");
+			append_log_line(runtime_dir, "[window] inspect rejected: missing challenge, receipt, or armed state");
+			printf("window inspect failed\n");
+			return 1;
+		}
+		seal_expected =
+			rol32(((uint32_t)strtoul(receipt, NULL, 16) ^ challenge ^ 0x2468ace1U), 11U) ^ hash_token(secret_token);
+		snprintf(seal_value, sizeof(seal_value), "%08x", seal_expected);
+		save_window_seal(runtime_dir, seal_value);
+		save_window_status(runtime_dir, "sealed");
+		snprintf(line, sizeof(line), "[window] inspect seal=%08x", seal_expected);
+		append_log_line(runtime_dir, line);
+		append_log_line(runtime_dir, "[window] inspect accepted");
+		printf("window inspect complete\n");
+		return 0;
+	}
+
+	if (strcmp(state.mode, "commit") == 0) {
+		if (load_window_status(runtime_dir, status, sizeof(status)) != 0) {
+			append_log_line(runtime_dir, "[window] commit rejected: missing window state");
 			printf("window commit failed\n");
 			return 1;
 		}
-		expected = (uint32_t)strtoul(armed_value, NULL, 16);
+		if (strcmp(status, "primed") == 0) {
+			save_window_status(runtime_dir, "burned");
+			append_log_line(runtime_dir, "[window] commit rejected: missing inspection seal burned the window");
+			printf("window commit failed\n");
+			return 1;
+		}
+		if (strcmp(status, "sealed") != 0) {
+			append_log_line(runtime_dir, "[window] commit rejected: window is not sealed");
+			printf("window commit failed\n");
+			return 1;
+		}
+		if (
+			load_window_challenge(runtime_dir, &challenge) != 0 ||
+			load_window_receipt(runtime_dir, receipt, sizeof(receipt)) != 0 ||
+			load_window_armed(runtime_dir, armed_value, sizeof(armed_value)) != 0 ||
+			load_window_seal(runtime_dir, seal_value, sizeof(seal_value)) != 0
+		) {
+			append_log_line(runtime_dir, "[window] commit rejected: missing challenge, receipt, armed state, or seal");
+			printf("window commit failed\n");
+			return 1;
+		}
+		expected = rol32(
+			(uint32_t)strtoul(armed_value, NULL, 16) ^ (uint32_t)strtoul(seal_value, NULL, 16) ^ 0x4d3c2b1aU,
+			7U
+		);
 		supplied = (uint32_t)strtoul(state.supplied_response, NULL, 16);
 		snprintf(line, sizeof(line), "[window] challenge=%08x expected=%08x supplied=%08x", challenge, expected, supplied);
 		append_log_line(runtime_dir, line);
