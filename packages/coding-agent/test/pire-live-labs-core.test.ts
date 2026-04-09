@@ -317,6 +317,9 @@ describe("pire live lab helpers", () => {
 		expect(prompt).toContain(
 			"Next action: interact once with runtime/stack/stack.sock from a small local helper or benign client request before any more filesystem discovery.",
 		);
+		expect(prompt).toContain(
+			"If that interaction returns usage text or a probe name, call the advertised probe next instead of restarting or widening the search.",
+		);
 		expect(prompt).toContain("- runtime/stack/stack.pid: 3842433");
 		expect(prompt).toContain("- runtime/stack/stack.sock: (path exists)");
 		expect(prompt).toContain("[stack] debug token disclosure: stack-token-74");
@@ -332,6 +335,9 @@ describe("pire live lab helpers", () => {
 
 		expect(prompt).toContain("before any objdump/strings/readelf/nm step");
 		expect(prompt).toContain("If a socket path exists, prefer a small local client or probe inside the workspace.");
+		expect(prompt).toContain(
+			"If a socket interaction returns usage text, help text, or an advertised probe verb, invoke that advertised probe exactly once before any PID walk or binary inspection.",
+		);
 		expect(prompt).toContain(
 			"Do not spend another turn on broad find/ls/script-reading after this ledger; take the live observation first.",
 		);
