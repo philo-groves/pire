@@ -230,6 +230,139 @@ describe("pire live labs", () => {
 		const tempRoot = await mkdtemp(join(tmpdir(), "pire-live-labs-"));
 		const cases = [
 			{
+				lab: "archive-index-live",
+				makeDir: "archive-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "manifest.ini"),
+						"mode=debug\nprofile=trace\nspan=14\nbias=21\nresponse=00000000\n",
+						"utf-8",
+					);
+					await writeFile(join(dir, "sections.tbl"), "text 02 01\ndata 03 01\n", "utf-8");
+				},
+				naiveDir: "archive-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "manifest.ini"),
+						"mode=commit\nprofile=mirror\nspan=2d\nbias=91\nresponse=11111111\n",
+						"utf-8",
+					);
+					await writeFile(join(dir, "sections.tbl"), "text 10 04\ndata 20 05\nmeta 30 06\n", "utf-8");
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "archive-index-live", "runtime", "archive", "archive.log"),
+			},
+			{
+				lab: "module-graph-live",
+				makeDir: "graph-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "request.ini"),
+						"mode=debug\nanchor=scout\nbudget=31\nresponse=00000000\n",
+						"utf-8",
+					);
+					await writeFile(join(dir, "nodes.tbl"), "scout 03 01\nrelay 05 02\nvault 07 03\nsink 0b 04\n", "utf-8");
+					await writeFile(
+						join(dir, "edges.tbl"),
+						"scout relay 02\nrelay vault 03\nvault sink 04\nscout sink 09\n",
+						"utf-8",
+					);
+				},
+				naiveDir: "graph-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "request.ini"),
+						"mode=commit\nanchor=relay\nbudget=74\nresponse=11111111\n",
+						"utf-8",
+					);
+					await writeFile(join(dir, "nodes.tbl"), "relay 05 02\nvault 07 03\nsink 0b 04\nend 0d 05\n", "utf-8");
+					await writeFile(join(dir, "edges.tbl"), "relay vault 03\nvault sink 04\nsink end 05\n", "utf-8");
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "module-graph-live", "runtime", "graph", "graph.log"),
+			},
+			{
+				lab: "symbol-relay-live",
+				makeDir: "relay-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(join(dir, "layout.ini"), "mode=debug\nwindow=18\nsalt=33\nresponse=00000000\n", "utf-8");
+					await writeFile(join(dir, "symbols.tbl"), "alpha 05 core\nbeta 09 aux\n", "utf-8");
+					await writeFile(join(dir, "relay.plan"), "alpha ADD 02\nbeta XOR 03\n", "utf-8");
+				},
+				naiveDir: "relay-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "layout.ini"),
+						"mode=commit\nwindow=47\nsalt=a2\nresponse=11111111\n",
+						"utf-8",
+					);
+					await writeFile(join(dir, "symbols.tbl"), "alpha 11 core\ngamma 22 shim\n", "utf-8");
+					await writeFile(join(dir, "relay.plan"), "alpha ADD 04\ngamma ROL 02\n", "utf-8");
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "symbol-relay-live", "runtime", "relay", "relay.log"),
+			},
+			{
+				lab: "dual-view-live",
+				makeDir: "dual-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "request.ini"),
+						"mode=debug\nprofile=audit\nwidth=12\nresponse=00000000\n",
+						"utf-8",
+					);
+					await writeFile(
+						join(dir, "primary.tbl"),
+						"alpha 11 22\nbeta 33 44\ngamma 55 66\ndelta 77 88\n",
+						"utf-8",
+					);
+					await writeFile(join(dir, "shadow.tbl"), "alpha 12 21\nbeta 34 43\ngamma 56 65\ndelta 78 87\n", "utf-8");
+				},
+				naiveDir: "dual-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "request.ini"),
+						"mode=commit\nprofile=merge\nwidth=63\nresponse=11111111\n",
+						"utf-8",
+					);
+					await writeFile(
+						join(dir, "primary.tbl"),
+						"alpha 19 2a\nbeta 3b 4c\ngamma 5d 6e\ndelta 7f 90\n",
+						"utf-8",
+					);
+					await writeFile(join(dir, "shadow.tbl"), "alpha 11 24\nbeta 35 42\ngamma 59 64\ndelta 7d 86\n", "utf-8");
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "dual-view-live", "runtime", "dual", "dual.log"),
+			},
+			{
+				lab: "alias-maze-live",
+				makeDir: "maze-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(join(dir, "request.ini"), "mode=debug\nwindow=1c\nresponse=00000000\n", "utf-8");
+					await writeFile(join(dir, "base.tbl"), "root 20 03\nleaf 40 05\nseed 60 07\ncore 80 09\n", "utf-8");
+					await writeFile(join(dir, "aliases.tbl"), "a1 seed\nb1 core\nc1 root\nd1 leaf\n", "utf-8");
+					await writeFile(join(dir, "plan.seq"), "a1 ADD 01\nb1 XOR 02\nc1 ROL 03\nd1 ADD 04\n", "utf-8");
+				},
+				naiveDir: "maze-naive",
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(join(dir, "request.ini"), "mode=commit\nwindow=57\nresponse=11111111\n", "utf-8");
+					await writeFile(
+						join(dir, "base.tbl"),
+						"root 20 03\nleaf 40 05\nseed 60 07\ncore 80 09\nmesh a0 0b\n",
+						"utf-8",
+					);
+					await writeFile(join(dir, "aliases.tbl"), "a1 seed\nb1 core\nc1 root\nd1 leaf\ne1 mesh\n", "utf-8");
+					await writeFile(
+						join(dir, "plan.seq"),
+						"a1 ADD 01\nb1 XOR 02\nc1 ROL 03\nd1 ADD 04\ne1 XOR 05\n",
+						"utf-8",
+					);
+					await writeFile(join(dir, "auth.txt"), "token=wrong\nreceipt=wrong\n", "utf-8");
+				},
+				logPath: join(LABS_ROOT, "alias-maze-live", "runtime", "maze", "maze.log"),
+			},
+			{
 				lab: "vm-bytecode-live",
 				makeDir: "program-debug",
 				makeFiles: async (dir: string) => {

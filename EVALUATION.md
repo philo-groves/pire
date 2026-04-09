@@ -115,6 +115,11 @@ Current live labs under `labs/` include:
 - `multi-stage-live`
 - `encoded-config-live`
 - `dispatch-table-live`
+- `archive-index-live`
+- `module-graph-live`
+- `symbol-relay-live`
+- `dual-view-live`
+- `alias-maze-live`
 - `vm-bytecode-live`
 - `reloc-record-live`
 - `license-fsm-live`
