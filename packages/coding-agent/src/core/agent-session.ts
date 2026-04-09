@@ -127,6 +127,36 @@ export type AgentSessionEvent =
 			steering: readonly string[];
 			followUp: readonly string[];
 	  }
+	| {
+			type: "subagent_start";
+			subagent: SubagentInfo;
+	  }
+	| {
+			type: "subagent_update";
+			subagent: SubagentInfo;
+			eventType:
+				| "agent_start"
+				| "agent_end"
+				| "turn_start"
+				| "turn_end"
+				| "message_start"
+				| "message_update"
+				| "message_end"
+				| "tool_execution_start"
+				| "tool_execution_update"
+				| "tool_execution_end";
+			assistantEventType?: string;
+			messageRole?: AgentMessage["role"];
+			text?: string;
+			delta?: string;
+			toolName?: string;
+			toolCallId?: string;
+			isError?: boolean;
+	  }
+	| {
+			type: "subagent_end";
+			subagent: SubagentInfo;
+	  }
 	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow" }
 	| {
 			type: "compaction_end";
@@ -243,6 +273,11 @@ export interface SubagentInfo {
 	createdAt: number;
 	updatedAt: number;
 }
+
+export type SubagentSessionEvent = Extract<
+	AgentSessionEvent,
+	{ type: "subagent_start" | "subagent_update" | "subagent_end" }
+>;
 
 const SUBAGENT_MAX_DEPTH = 2;
 const SUBAGENT_DEFAULT_MAX_TURNS = 6;
@@ -527,6 +562,31 @@ export class AgentSession {
 		});
 	}
 
+	private _emitSubagentStart(record: ManagedSubagent): void {
+		this._emit({
+			type: "subagent_start",
+			subagent: { ...record.info },
+		});
+	}
+
+	private _emitSubagentUpdate(
+		record: ManagedSubagent,
+		update: Omit<Extract<AgentSessionEvent, { type: "subagent_update" }>, "type" | "subagent">,
+	): void {
+		this._emit({
+			type: "subagent_update",
+			subagent: { ...record.info },
+			...update,
+		});
+	}
+
+	private _emitSubagentEnd(record: ManagedSubagent): void {
+		this._emit({
+			type: "subagent_end",
+			subagent: { ...record.info },
+		});
+	}
+
 	// Track last assistant message for auto-compaction check
 	private _lastAssistantMessage: AssistantMessage | undefined = undefined;
 
@@ -696,6 +756,30 @@ export class AgentSession {
 			.map((content) => content.text)
 			.join("\n")
 			.trim();
+	}
+
+	private _getMessageText(message: AgentMessage): string | undefined {
+		if (message.role === "assistant") {
+			const text = this._getAssistantText(message);
+			return text.length > 0 ? text : undefined;
+		}
+		if (message.role === "user") {
+			const text = this._getUserMessageText(message).trim();
+			return text.length > 0 ? text : undefined;
+		}
+		if (message.role === "toolResult") {
+			const text = extractTextContent(message.content).trim();
+			return text.length > 0 ? text : undefined;
+		}
+		if (message.role === "custom") {
+			if (typeof message.content === "string") {
+				const text = message.content.trim();
+				return text.length > 0 ? text : undefined;
+			}
+			const text = extractTextContent(message.content).trim();
+			return text.length > 0 ? text : undefined;
+		}
+		return undefined;
 	}
 
 	private _shouldImplicitlyContinue(message: AssistantMessage): boolean {
@@ -1267,12 +1351,70 @@ export class AgentSession {
 				return;
 			}
 
+			if (event.type === "agent_start") {
+				this._emitSubagentStart(record);
+				return;
+			}
+
+			if (event.type === "agent_end") {
+				this._emitSubagentUpdate(record, { eventType: "agent_end" });
+				return;
+			}
+
 			if (event.type === "turn_end") {
 				const nextTurns = record.info.turns + 1;
 				this._setSubagentStatus(record, "running", { turns: nextTurns });
+				this._emitSubagentUpdate(record, {
+					eventType: "turn_end",
+					text:
+						event.message.role === "assistant"
+							? this._getAssistantText(event.message).trim() || undefined
+							: undefined,
+				});
 				if (nextTurns >= maxTurns && record.session.isStreaming) {
 					void record.session.abort().catch(() => {});
 				}
+				return;
+			}
+
+			if (event.type === "turn_start") {
+				this._emitSubagentUpdate(record, { eventType: "turn_start" });
+				return;
+			}
+
+			if (event.type === "message_start") {
+				this._emitSubagentUpdate(record, {
+					eventType: "message_start",
+					messageRole: event.message.role,
+					text: this._getMessageText(event.message),
+				});
+				return;
+			}
+
+			if (event.type === "message_update") {
+				const update: Omit<Extract<AgentSessionEvent, { type: "subagent_update" }>, "type" | "subagent"> = {
+					eventType: "message_update",
+					messageRole: event.message.role,
+					assistantEventType: event.assistantMessageEvent.type,
+				};
+				if (
+					event.assistantMessageEvent.type === "text_delta" ||
+					event.assistantMessageEvent.type === "thinking_delta" ||
+					event.assistantMessageEvent.type === "toolcall_delta"
+				) {
+					update.delta = event.assistantMessageEvent.delta;
+				}
+				if (
+					event.assistantMessageEvent.type === "text_end" ||
+					event.assistantMessageEvent.type === "thinking_end"
+				) {
+					update.text = event.assistantMessageEvent.content;
+				}
+				if (event.assistantMessageEvent.type === "toolcall_end") {
+					update.toolName = event.assistantMessageEvent.toolCall.name;
+					update.toolCallId = event.assistantMessageEvent.toolCall.id;
+				}
+				this._emitSubagentUpdate(record, update);
 				return;
 			}
 
@@ -1281,6 +1423,49 @@ export class AgentSession {
 				this._setSubagentStatus(record, "running", {
 					lastAssistantText: this._getAssistantText(event.message).trim() || record.info.lastAssistantText,
 					errorMessage: event.message.stopReason === "error" ? event.message.errorMessage : undefined,
+				});
+				this._emitSubagentUpdate(record, {
+					eventType: "message_end",
+					messageRole: event.message.role,
+					text: this._getAssistantText(event.message).trim() || undefined,
+					isError: event.message.stopReason === "error",
+				});
+				return;
+			}
+
+			if (event.type === "message_end") {
+				this._emitSubagentUpdate(record, {
+					eventType: "message_end",
+					messageRole: event.message.role,
+					text: this._getMessageText(event.message),
+				});
+				return;
+			}
+
+			if (event.type === "tool_execution_start") {
+				this._emitSubagentUpdate(record, {
+					eventType: "tool_execution_start",
+					toolName: event.toolName,
+					toolCallId: event.toolCallId,
+				});
+				return;
+			}
+
+			if (event.type === "tool_execution_update") {
+				this._emitSubagentUpdate(record, {
+					eventType: "tool_execution_update",
+					toolName: event.toolName,
+					toolCallId: event.toolCallId,
+				});
+				return;
+			}
+
+			if (event.type === "tool_execution_end") {
+				this._emitSubagentUpdate(record, {
+					eventType: "tool_execution_end",
+					toolName: event.toolName,
+					toolCallId: event.toolCallId,
+					isError: event.isError,
 				});
 			}
 		});
@@ -1306,11 +1491,13 @@ export class AgentSession {
 			.then(() => {
 				const nextStatus = record.info.errorMessage ? "failed" : "idle";
 				this._setSubagentStatus(record, nextStatus);
+				this._emitSubagentEnd(record);
 			})
 			.catch((error) => {
 				this._setSubagentStatus(record, "failed", {
 					errorMessage: error instanceof Error ? error.message : String(error),
 				});
+				this._emitSubagentEnd(record);
 			})
 			.finally(() => {
 				record.resolveRun?.();

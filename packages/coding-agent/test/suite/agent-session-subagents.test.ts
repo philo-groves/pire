@@ -111,6 +111,45 @@ describe("AgentSession subagents", () => {
 		);
 	});
 
+	it("emits compact subagent progress events for parent monitoring", async () => {
+		const harness = await createHarness();
+		cleanups.push(harness.cleanup);
+
+		harness.setResponses([fauxAssistantMessage("Child progress stream.")]);
+
+		const spawned = await harness.session.spawnSubagent({ task: "Stream progress" });
+		await harness.session.waitForSubagent(spawned.id);
+
+		const starts = harness.eventsOfType("subagent_start");
+		const updates = harness.eventsOfType("subagent_update");
+		const ends = harness.eventsOfType("subagent_end");
+
+		expect(starts).toHaveLength(1);
+		expect(starts[0].subagent.id).toBe(spawned.id);
+		expect(ends).toHaveLength(1);
+		expect(ends[0].subagent.lastAssistantText).toBe("Child progress stream.");
+
+		expect(
+			updates.some(
+				(event) =>
+					event.subagent.id === spawned.id &&
+					event.eventType === "message_update" &&
+					event.assistantEventType === "text_delta" &&
+					typeof event.delta === "string" &&
+					event.delta.length > 0,
+			),
+		).toBe(true);
+		expect(
+			updates.some(
+				(event) =>
+					event.subagent.id === spawned.id &&
+					event.eventType === "message_end" &&
+					event.messageRole === "assistant" &&
+					event.text === "Child progress stream.",
+			),
+		).toBe(true);
+	});
+
 	it("enforces max subagent depth of two across nested child runs", async () => {
 		const harness = await createHarness({ subagentDepth: 2 });
 		cleanups.push(harness.cleanup);

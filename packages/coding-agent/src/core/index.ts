@@ -11,6 +11,7 @@ export {
 	type PromptOptions,
 	type SessionStats,
 	type SubagentInfo,
+	type SubagentSessionEvent,
 	type SubagentStatus,
 } from "./agent-session.js";
 export {

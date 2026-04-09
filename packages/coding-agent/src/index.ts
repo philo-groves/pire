@@ -13,6 +13,7 @@ export {
 	parseSkillBlock,
 	type SessionStats,
 	type SubagentInfo,
+	type SubagentSessionEvent,
 	type SubagentStatus,
 } from "./core/agent-session.js";
 // Auth and model registry
