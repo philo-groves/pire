@@ -5,6 +5,7 @@
 ### Added
 
 - Added built-in `spawn_agent`, `send_input`, `wait_agent`, and `close_agent` tools plus matching SDK/RPC subagent lifecycle APIs, allowing bounded background delegation with isolated child contexts and a maximum nesting depth of 2.
+- Added interactive subagent activity rendering so delegated child progress appears as distinct live rows instead of being buried in the parent event stream, with keyboard selection for cycling between active child rows.
 - Added repo-local `.pire/` profile discovery for coding-agent forks, including `.pire/APPEND_SYSTEM.md`, `.pire/TARGET.md`, `.pire/NOTES.md`, `.pire/prompts/`, and `.pire/skills/` so research-oriented projects can layer reverse-engineering context and workflows on top of the standard pi runtime.
 - Added `.pire/extensions/` discovery plus a starter `pire` extension that provides persistent `recon`, `dynamic`, `proofing`, and `report` modes and an `environment_inventory` tool for analysis environment introspection.
 - Added durable `.pire/artifacts.json` manifest tracking for observed research artifacts, with automatic updates from core tool results and a `/artifacts` command for session-visible inventory summaries.

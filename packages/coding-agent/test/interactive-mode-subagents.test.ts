@@ -1,0 +1,178 @@
+import { Container } from "@mariozechner/pi-tui";
+import { beforeAll, describe, expect, test, vi } from "vitest";
+import { SubagentActivityComponent } from "../src/modes/interactive/components/subagent-activity.js";
+import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
+import { initTheme } from "../src/modes/interactive/theme/theme.js";
+
+type InteractiveModePrototypeWithEnsureSubagentActivity = {
+	ensureSubagentActivity(this: Record<string, unknown>, subagent: Record<string, unknown>): unknown;
+	updateSelectedSubagentActivity(this: Record<string, unknown>): void;
+};
+
+function stripAnsi(text: string): string {
+	return text.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+describe("SubagentActivityComponent", () => {
+	beforeAll(() => {
+		initTheme("dark");
+	});
+
+	test("renders task, status, and final report", () => {
+		const info = {
+			id: "12345678-abcd",
+			status: "running" as const,
+			depth: 1,
+			parentDepth: 0,
+			task: "Inspect config",
+			turns: 0,
+			maxTurns: 6,
+			createdAt: 1,
+			updatedAt: 1,
+		};
+		const component = new SubagentActivityComponent(info, true);
+		component.applyUpdate({
+			type: "subagent_update",
+			subagent: { ...info, turns: 1, updatedAt: 2 },
+			eventType: "message_end",
+			messageRole: "assistant",
+			text: "Config looks healthy.",
+			isError: false,
+		});
+		component.applyEnd({
+			...info,
+			status: "idle",
+			turns: 1,
+			updatedAt: 3,
+			lastAssistantText: "Config looks healthy.",
+		});
+
+		const output = component.render(120).join("\n");
+		expect(output).toContain("Subagent");
+		expect(output).toContain("Inspect config");
+		expect(output).toContain("Idle");
+		expect(output).toContain("Config looks healthy.");
+	});
+});
+
+describe("InteractiveMode subagent events", () => {
+	beforeAll(() => {
+		initTheme("dark");
+	});
+
+	test("creates and updates a distinct subagent activity row", async () => {
+		const fakeThis: any = {
+			isInitialized: true,
+			footer: { invalidate: vi.fn() },
+			ui: { requestRender: vi.fn() },
+			chatContainer: new Container(),
+			toolOutputExpanded: true,
+			subagentComponents: new Map(),
+			selectedSubagentId: undefined,
+		};
+		const interactiveModePrototype =
+			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureSubagentActivity;
+		fakeThis.ensureSubagentActivity = interactiveModePrototype.ensureSubagentActivity.bind(fakeThis);
+		fakeThis.updateSelectedSubagentActivity = interactiveModePrototype.updateSelectedSubagentActivity.bind(fakeThis);
+
+		const handleEvent = Reflect.get(InteractiveMode.prototype, "handleEvent") as (
+			this: typeof fakeThis,
+			event: any,
+		) => Promise<void>;
+
+		const base = {
+			id: "subagent-12345678",
+			status: "running" as const,
+			depth: 1,
+			parentDepth: 0,
+			task: "Review files",
+			turns: 0,
+			maxTurns: 6,
+			createdAt: 1,
+			updatedAt: 1,
+		};
+
+		await handleEvent.call(fakeThis, { type: "subagent_start", subagent: base });
+		await handleEvent.call(fakeThis, {
+			type: "subagent_update",
+			subagent: { ...base, turns: 1, updatedAt: 2 },
+			eventType: "message_end",
+			messageRole: "assistant",
+			text: "Review complete.",
+			isError: false,
+		});
+		await handleEvent.call(fakeThis, {
+			type: "subagent_end",
+			subagent: {
+				...base,
+				status: "idle" as const,
+				turns: 1,
+				updatedAt: 3,
+				lastAssistantText: "Review complete.",
+			},
+		});
+
+		expect(fakeThis.subagentComponents.size).toBe(1);
+		const rendered = fakeThis.chatContainer.children
+			.flatMap((child: { render: (width: number) => string[] }) => child.render(120))
+			.join("\n");
+		expect(rendered).toContain("Review files");
+		expect(rendered).toContain("Review complete.");
+		expect(rendered).toContain("Idle");
+	});
+
+	test("cycles the selected subagent row", async () => {
+		const fakeThis: any = {
+			isInitialized: true,
+			footer: { invalidate: vi.fn() },
+			ui: { requestRender: vi.fn() },
+			chatContainer: new Container(),
+			toolOutputExpanded: false,
+			subagentComponents: new Map(),
+			selectedSubagentId: undefined,
+			showStatus: vi.fn(),
+		};
+		const interactiveModePrototype =
+			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureSubagentActivity & {
+				selectSubagentActivity(this: Record<string, unknown>, delta: -1 | 1): void;
+			};
+		fakeThis.ensureSubagentActivity = interactiveModePrototype.ensureSubagentActivity.bind(fakeThis);
+		fakeThis.updateSelectedSubagentActivity = interactiveModePrototype.updateSelectedSubagentActivity.bind(fakeThis);
+		const selectSubagentActivity = interactiveModePrototype.selectSubagentActivity.bind(fakeThis);
+
+		fakeThis.ensureSubagentActivity({
+			id: "subagent-a",
+			status: "running",
+			depth: 1,
+			parentDepth: 0,
+			task: "First",
+			turns: 0,
+			maxTurns: 6,
+			createdAt: 1,
+			updatedAt: 1,
+		});
+		fakeThis.ensureSubagentActivity({
+			id: "subagent-b",
+			status: "running",
+			depth: 1,
+			parentDepth: 0,
+			task: "Second",
+			turns: 0,
+			maxTurns: 6,
+			createdAt: 1,
+			updatedAt: 1,
+		});
+
+		expect(fakeThis.selectedSubagentId).toBe("subagent-a");
+
+		selectSubagentActivity(1);
+		expect(fakeThis.selectedSubagentId).toBe("subagent-b");
+
+		const rendered = fakeThis.chatContainer.children
+			.flatMap((child: { render: (width: number) => string[] }) => child.render(120))
+			.join("\n");
+		const plainRendered = stripAnsi(rendered);
+		expect(plainRendered).toContain("› [Subagent]");
+		expect(plainRendered).toContain("Second");
+	});
+});

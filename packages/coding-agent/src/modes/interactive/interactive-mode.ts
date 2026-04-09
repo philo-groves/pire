@@ -47,7 +47,12 @@ import {
 	PACKAGE_NAME,
 	VERSION,
 } from "../../config.js";
-import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.js";
+import {
+	type AgentSession,
+	type AgentSessionEvent,
+	parseSkillBlock,
+	type SubagentInfo,
+} from "../../core/agent-session.js";
 import type { AgentSessionRuntime } from "../../core/agent-session-runtime.js";
 import type {
 	ExtensionContext,
@@ -95,6 +100,7 @@ import { ScopedModelsSelectorComponent } from "./components/scoped-models-select
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
+import { SubagentActivityComponent } from "./components/subagent-activity.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
 import { UserMessageComponent } from "./components/user-message.js";
@@ -186,9 +192,11 @@ export class InteractiveMode {
 
 	// Tool execution tracking: toolCallId -> component
 	private pendingTools = new Map<string, ToolExecutionComponent>();
+	private subagentComponents = new Map<string, SubagentActivityComponent>();
 
 	// Tool output expansion state
 	private toolOutputExpanded = false;
+	private selectedSubagentId: string | undefined = undefined;
 
 	// Thinking block visibility state
 	private hideThinkingBlock = false;
@@ -470,6 +478,8 @@ export class InteractiveMode {
 				rawKeyHint("!", "to run bash"),
 				rawKeyHint("!!", "to run bash (no context)"),
 				hint("app.message.followUp", "to queue follow-up"),
+				hint("app.subagent.previous", "prev subagent"),
+				hint("app.subagent.next", "next subagent"),
 				hint("app.autopilot.toggle", "to toggle autopilot"),
 				hint("app.message.dequeue", "to edit all queued messages"),
 				hint("app.clipboard.pasteImage", "to paste image"),
@@ -1306,6 +1316,8 @@ export class InteractiveMode {
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
 		this.pendingTools.clear();
+		this.subagentComponents.clear();
+		this.selectedSubagentId = undefined;
 		this.renderInitialMessages();
 	}
 
@@ -2066,6 +2078,8 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
+		this.defaultEditor.onAction("app.subagent.previous", () => this.selectSubagentActivity(-1));
+		this.defaultEditor.onAction("app.subagent.next", () => this.selectSubagentActivity(1));
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -2322,6 +2336,21 @@ export class InteractiveMode {
 
 			case "queue_update":
 				this.updatePendingMessagesDisplay();
+				this.ui.requestRender();
+				break;
+
+			case "subagent_start":
+				this.ensureSubagentActivity(event.subagent).applyStart(event.subagent);
+				this.ui.requestRender();
+				break;
+
+			case "subagent_update":
+				this.ensureSubagentActivity(event.subagent).applyUpdate(event);
+				this.ui.requestRender();
+				break;
+
+			case "subagent_end":
+				this.ensureSubagentActivity(event.subagent).applyEnd(event.subagent);
 				this.ui.requestRender();
 				break;
 
@@ -2621,6 +2650,46 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private ensureSubagentActivity(subagent: SubagentInfo): SubagentActivityComponent {
+		let component = this.subagentComponents.get(subagent.id);
+		if (!component) {
+			component = new SubagentActivityComponent(subagent, this.toolOutputExpanded);
+			this.chatContainer.addChild(component);
+			this.subagentComponents.set(subagent.id, component);
+			if (!this.selectedSubagentId) {
+				this.selectedSubagentId = subagent.id;
+			}
+			this.updateSelectedSubagentActivity();
+		}
+		return component;
+	}
+
+	private updateSelectedSubagentActivity(): void {
+		for (const [id, component] of this.subagentComponents.entries()) {
+			component.setSelected(id === this.selectedSubagentId);
+		}
+	}
+
+	private selectSubagentActivity(delta: -1 | 1): void {
+		const ids = [...this.subagentComponents.keys()];
+		if (ids.length === 0) {
+			this.showStatus("No subagent activity rows");
+			return;
+		}
+
+		if (!this.selectedSubagentId) {
+			this.selectedSubagentId = delta > 0 ? ids[0] : ids[ids.length - 1];
+		} else {
+			const currentIndex = ids.indexOf(this.selectedSubagentId);
+			const baseIndex = currentIndex === -1 ? 0 : currentIndex;
+			const nextIndex = (baseIndex + delta + ids.length) % ids.length;
+			this.selectedSubagentId = ids[nextIndex];
+		}
+
+		this.updateSelectedSubagentActivity();
+		this.ui.requestRender();
+	}
+
 	private addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void {
 		if (message.role === "user" && isImplicitContinuationUserMessage(message)) {
 			return;
@@ -2813,6 +2882,8 @@ export class InteractiveMode {
 
 	private rebuildChatFromMessages(): void {
 		this.chatContainer.clear();
+		this.subagentComponents.clear();
+		this.selectedSubagentId = undefined;
 		const context = this.sessionManager.buildSessionContext();
 		this.renderSessionContext(context);
 	}
@@ -4432,6 +4503,8 @@ export class InteractiveMode {
 		const followUp = this.getAppKeyDisplay("app.message.followUp");
 		const autopilotToggle = this.getAppKeyDisplay("app.autopilot.toggle");
 		const dequeue = this.getAppKeyDisplay("app.message.dequeue");
+		const previousSubagent = this.getAppKeyDisplay("app.subagent.previous");
+		const nextSubagent = this.getAppKeyDisplay("app.subagent.next");
 		const pasteImage = this.getAppKeyDisplay("app.clipboard.pasteImage");
 
 		let hotkeys = `
@@ -4476,6 +4549,7 @@ export class InteractiveMode {
 | \`${followUp}\` | Queue follow-up message |
 | \`${autopilotToggle}\` | Toggle autopilot |
 | \`${dequeue}\` | Restore queued messages |
+| \`${previousSubagent}\` / \`${nextSubagent}\` | Select previous / next subagent row |
 | \`${pasteImage}\` | Paste image from clipboard |
 | \`/\` | Slash commands |
 | \`!\` | Run bash command |
