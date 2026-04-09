@@ -6,6 +6,7 @@ import {
 	applyPireLiveLabRunStrategy,
 	auditPireLiveLabSessionFile,
 	classifyPireLiveLabAttempt,
+	createPireLiveLabSecondPhasePrompt,
 	inspectPireLiveLabAgentRun,
 	resolvePireLiveLabDefaultForbiddenPaths,
 	resolvePireLiveLabPaths,
@@ -276,12 +277,46 @@ describe("pire live lab helpers", () => {
 			"Create a new scratch session.ini instead of copying the benign observe fixture unchanged.",
 		);
 		expect(prompt).toContain(
+			"If you create scratch/session.ini, pass ./scratch or the session directory to ./scripts/run-target.sh, not the session.ini file path itself.",
+		);
+		expect(prompt).toContain(
 			"If ./scripts/run-target.sh exists, use it directly for the first disclosure run instead of reading helper scripts first.",
 		);
 		expect(prompt).toContain(
 			"Do not begin with repo-wide inventory, build-script reading, or broad static reversing.",
 		);
+		expect(prompt).toContain(
+			"If a socket path exists, make one concrete socket inspection attempt before any disassembly: use a small local helper or one benign client request from inside the workspace.",
+		);
+		expect(prompt).toContain(
+			"Until one socket or PID inspection attempt is complete, do not run objdump, strings, nm, readelf, or broad binary help/inventory commands.",
+		);
 		expect(prompt).toContain("Task:\nRecover the live daemon-held runtime seed and recover the proof artifact.");
+	});
+
+	test("builds a second-phase runtime prompt from the live ledger", () => {
+		const prompt = createPireLiveLabSecondPhasePrompt(
+			"Recover the live stack-held helper seed and recover the proof artifact.",
+			[
+				"[stack] challenge=b55027bd",
+				"[stack] debug token disclosure: stack-token-74",
+				"[stack] proof receipt: 01d57f44",
+			].join("\n"),
+			{
+				paths: ["runtime/stack/stack.pid", "runtime/stack/stack.sock"],
+				values: [
+					{ path: "runtime/stack/challenge.hex", value: "b55027bd" },
+					{ path: "runtime/stack/stack.pid", value: "3842433" },
+					{ path: "runtime/stack/stack.receipt", value: "01d57f44" },
+				],
+			},
+		);
+
+		expect(prompt).toContain("Second phase: the disclosure run already succeeded");
+		expect(prompt).toContain("- runtime/stack/stack.pid: 3842433");
+		expect(prompt).toContain("- runtime/stack/stack.sock: (path exists)");
+		expect(prompt).toContain("[stack] debug token disclosure: stack-token-74");
+		expect(prompt).toContain("Task:\nRecover the live stack-held helper seed and recover the proof artifact.");
 	});
 
 	test("stages stripped lab workspaces without hint files", async () => {
