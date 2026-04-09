@@ -79,6 +79,16 @@ Live labs are where we catch:
 - avoidable tool mistakes
 - prompt contamination from lab-specific wording
 
+### Live-Lab Categories
+
+We divide live labs into three practical categories:
+
+- `static-re`: the main challenge is reversing formats, handlers, or hidden transforms from a static target, then carrying state cleanly into proof
+- `runtime-re`: the main challenge is recognizing that the decisive state only exists in a live process, then switching early to debugger or process inspection
+- `stateful-runtime`: the main challenge is handling ordering, invalidation, poisoning, or cross-phase state without collapsing into retries
+
+The categories matter because a saturated `static-re` tier does not imply the agent is strong on `runtime-re`.
+
 Current live labs under `labs/` include:
 
 - `plugin-host-live`
@@ -116,6 +126,8 @@ Current live labs under `labs/` include:
 - `ephemeral-window-live`
 - `shadow-channel-live`
 - `daemon-seed-live`
+- `stack-seed-live`
+- `thread-seed-live`
 
 ### 3. Real-Task Sessions
 
@@ -334,6 +346,15 @@ Example challenge-tier sweep:
 npx tsx ./src/pire-live-lab-cli.ts \
   --sweep challenge-tier \
   --session-dir /tmp/pire-live-challenge-tier \
+  --json
+```
+
+Example runtime-tier sweep:
+
+```bash
+npx tsx ./src/pire-live-lab-cli.ts \
+  --sweep runtime-tier \
+  --session-dir /tmp/pire-live-runtime-tier \
   --json
 ```
 

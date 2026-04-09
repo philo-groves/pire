@@ -91,6 +91,30 @@ const CHALLENGE_TIER_SWEEP: PireLiveLabSweepEntry[] = [
 	},
 ];
 
+const RUNTIME_TIER_SWEEP: PireLiveLabSweepEntry[] = [
+	{
+		lab: "daemon-seed-live",
+		prompt:
+			"Recover the live daemon-held runtime seed, avoid stale guesses after bad commits, and recover the proof artifact.",
+		logPath: "runtime/daemon/daemon.log",
+		disclosureMarkers: ["debug token disclosure:", "proof receipt:"],
+	},
+	{
+		lab: "stack-seed-live",
+		prompt:
+			"Recover the live stack-held helper seed, avoid stale guesses after bad commits, and recover the proof artifact.",
+		logPath: "runtime/stack/stack.log",
+		disclosureMarkers: ["debug token disclosure:", "proof receipt:"],
+	},
+	{
+		lab: "thread-seed-live",
+		prompt:
+			"Recover the live threaded helper state, avoid stale guesses after bad commits, and recover the proof artifact.",
+		logPath: "runtime/thread/thread.log",
+		disclosureMarkers: ["debug token disclosure:", "proof receipt:"],
+	},
+];
+
 const FAILURE_TIER_SWEEP: PireLiveLabSweepEntry[] = [
 	{
 		lab: "ephemeral-window-live",
@@ -134,6 +158,9 @@ function resolveSweep(name: string): PireLiveLabSweepEntry[] {
 	if (name === "challenge-tier") {
 		return CHALLENGE_TIER_SWEEP;
 	}
+	if (name === "runtime-tier") {
+		return RUNTIME_TIER_SWEEP;
+	}
 	if (name === "failure-tier") {
 		return FAILURE_TIER_SWEEP;
 	}
@@ -149,7 +176,7 @@ Usage:
 
 Options:
   --lab <name>                 Live lab directory name under labs/
-  --sweep <name>               Built-in audited sweep name (currently: re-tier, challenge-tier, failure-tier)
+  --sweep <name>               Built-in audited sweep name (currently: re-tier, challenge-tier, runtime-tier, failure-tier)
   --prompt <text>              Prompt to run through pire (required unless --inspect-only)
   --session-dir <path>         Directory containing or receiving pire session JSONL files
   --log-path <path>            Lab-relative path to the runtime log to inspect

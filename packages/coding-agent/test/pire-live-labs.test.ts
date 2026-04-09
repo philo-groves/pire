@@ -372,6 +372,40 @@ describe("pire live labs", () => {
 				},
 				logPath: join(LABS_ROOT, "daemon-seed-live", "runtime", "daemon", "daemon.log"),
 			},
+			{
+				lab: "stack-seed-live",
+				makeDir: "stack-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(join(dir, "session.ini"), "mode=debug\n", "utf-8");
+				},
+				naiveDir: "stack-naive",
+				naiveShouldFail: true,
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "session.ini"),
+						"mode=commit\ntoken=wrong\nreceipt=wrong\nresponse=00000000\n",
+						"utf-8",
+					);
+				},
+				logPath: join(LABS_ROOT, "stack-seed-live", "runtime", "stack", "stack.log"),
+			},
+			{
+				lab: "thread-seed-live",
+				makeDir: "thread-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(join(dir, "session.ini"), "mode=debug\n", "utf-8");
+				},
+				naiveDir: "thread-naive",
+				naiveShouldFail: true,
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "session.ini"),
+						"mode=commit\ntoken=wrong\nreceipt=wrong\nresponse=00000000\n",
+						"utf-8",
+					);
+				},
+				logPath: join(LABS_ROOT, "thread-seed-live", "runtime", "thread", "thread.log"),
+			},
 		] as const;
 
 		for (const entry of cases) {
@@ -527,31 +561,50 @@ describe("pire live labs", () => {
 		expect(shadowLog.includes("shadow debug poisoned the current primary challenge")).toBe(true);
 	}, 120000);
 
-	test("daemon-seed-live rotates runtime state after a bad proof attempt", async () => {
+	test("runtime-first labs rotate live state after a bad proof attempt", async () => {
 		const tempRoot = await mkdtemp(join(tmpdir(), "pire-live-daemon-seed-"));
-		const debugDir = join(tempRoot, "daemon-debug");
-		const commitDir = join(tempRoot, "daemon-commit");
+		const cases = [
+			{
+				lab: "daemon-seed-live",
+				logPath: join(LABS_ROOT, "daemon-seed-live", "runtime", "daemon", "daemon.log"),
+				rotationMarker: "invalid proof rotated runtime seed",
+			},
+			{
+				lab: "stack-seed-live",
+				logPath: join(LABS_ROOT, "stack-seed-live", "runtime", "stack", "stack.log"),
+				rotationMarker: "invalid proof rotated stack seed",
+			},
+			{
+				lab: "thread-seed-live",
+				logPath: join(LABS_ROOT, "thread-seed-live", "runtime", "thread", "thread.log"),
+				rotationMarker: "invalid proof rotated threaded seeds",
+			},
+		] as const;
 
-		await execFileAsync("mkdir", ["-p", debugDir, commitDir], { cwd: REPO_ROOT });
-		await runPireLiveLabMake(PATHS, "daemon-seed-live", "build");
-		await runPireLiveLabMake(PATHS, "daemon-seed-live", "reset");
-		await writeFile(join(debugDir, "session.ini"), "mode=debug\n", "utf-8");
-		await runPireLiveLabScript(PATHS, "daemon-seed-live", "run-target.sh", [debugDir]);
+		for (const entry of cases) {
+			const debugDir = join(tempRoot, `${entry.lab}-debug`);
+			const commitDir = join(tempRoot, `${entry.lab}-commit`);
+			await execFileAsync("mkdir", ["-p", debugDir, commitDir], { cwd: REPO_ROOT });
+			await runPireLiveLabMake(PATHS, entry.lab, "build");
+			await runPireLiveLabMake(PATHS, entry.lab, "reset");
+			await writeFile(join(debugDir, "session.ini"), "mode=debug\n", "utf-8");
+			await runPireLiveLabScript(PATHS, entry.lab, "run-target.sh", [debugDir]);
 
-		const debugLog = await readFile(join(LABS_ROOT, "daemon-seed-live", "runtime", "daemon", "daemon.log"), "utf-8");
-		const token = parseStringLogValue(debugLog, "debug token disclosure:");
-		const receipt = parseStringLogValue(debugLog, "proof receipt:");
+			const debugLog = await readFile(entry.logPath, "utf-8");
+			const token = parseStringLogValue(debugLog, "debug token disclosure:");
+			const receipt = parseStringLogValue(debugLog, "proof receipt:");
 
-		await writeFile(
-			join(commitDir, "session.ini"),
-			`mode=commit\ntoken=${token}\nreceipt=${receipt}\nresponse=00000000\n`,
-			"utf-8",
-		);
-		await runScriptExpectFailure("daemon-seed-live", commitDir);
+			await writeFile(
+				join(commitDir, "session.ini"),
+				`mode=commit\ntoken=${token}\nreceipt=${receipt}\nresponse=00000000\n`,
+				"utf-8",
+			);
+			await runScriptExpectFailure(entry.lab, commitDir);
 
-		const daemonLog = await readFile(join(LABS_ROOT, "daemon-seed-live", "runtime", "daemon", "daemon.log"), "utf-8");
-		const artifacts = await listPireLiveLabProofArtifacts(join(LABS_ROOT, "daemon-seed-live", "runtime"));
-		expect(artifacts, "daemon-seed-live bad proof attempt emitted proof").toEqual([]);
-		expect(daemonLog.includes("invalid proof rotated runtime seed")).toBe(true);
+			const logText = await readFile(entry.logPath, "utf-8");
+			const artifacts = await listPireLiveLabProofArtifacts(join(LABS_ROOT, entry.lab, "runtime"));
+			expect(artifacts, `${entry.lab} bad proof attempt emitted proof`).toEqual([]);
+			expect(logText.includes(entry.rotationMarker), `${entry.lab} did not rotate live state`).toBe(true);
+		}
 	}, 120000);
 });

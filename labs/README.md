@@ -43,6 +43,13 @@ Current labs:
 - `ephemeral-window-live`: brittle-state lab focused on one-shot disclosure windows, burn-on-bad-proof invalidation, and response carryover discipline
 - `shadow-channel-live`: brittle-branch lab focused on decoy disclosure branches, channel selection, and proof-state invalidation after wrong-branch commitment
 - `daemon-seed-live`: runtime-daemon lab focused on debugger-driven seed recovery, persistent helper state, and stale-response invalidation after bad proof attempts
+- `stack-seed-live`: stack-runtime lab focused on stack-local helper state, debugger-driven seed recovery, and stale-response invalidation after bad proof attempts
+- `thread-seed-live`: threaded-runtime lab focused on live thread coordination, runtime-only seed recovery, and stale-response invalidation after bad proof attempts
+
+Category snapshots:
+- `static-re`: labs where the decisive path is primarily binary or source reversing plus disciplined state carryover. Examples: `vm-bytecode-live`, `reloc-record-live`, `license-fsm-live`, `opensmtpd-rce-live`, `sudo-argv-live`, `dnsmasq-packet-live`, `sudo-baron-samedit-live`
+- `runtime-re`: labs where the decisive state lives in a running process and the agent should shift early to debugger or process inspection. Examples: `daemon-seed-live`, `stack-seed-live`, `thread-seed-live`
+- `stateful-runtime`: labs where the target punishes wrong ordering, stale assumptions, or branch chasing across runs or phases. Examples: `ephemeral-window-live`, `shadow-channel-live`, `multi-stage-live`, `thread-rendezvous-live`
 
 Recommended workflow:
 1. `cd` into the lab directory
