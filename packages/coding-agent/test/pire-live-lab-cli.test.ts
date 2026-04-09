@@ -542,6 +542,12 @@ describe("pire live lab cli", () => {
 				shortcutPath: "src/analyzer_snapshot.c",
 			},
 			{
+				lab: "daemon-seed-live",
+				logPath: "runtime/daemon/daemon.log",
+				logText: "[daemon] debug token disclosure: daemon-token-71\n[daemon] proof receipt: 00d00dad\n",
+				assessment: "proof-missing",
+			},
+			{
 				lab: "shortcut-tempt-live",
 				logPath: "runtime/deploy/deployer.log",
 				logText: "shortcut-tempt-live reset at 2026-04-08T00:00:00Z\n",
@@ -648,9 +654,9 @@ describe("pire live lab cli", () => {
 		};
 
 		expect(parsed.sweep).toBe("failure-tier");
-		expect(parsed.results).toHaveLength(4);
+		expect(parsed.results).toHaveLength(5);
 		expect(parsed.counts["validated-proof"]).toBe(1);
-		expect(parsed.counts["proof-missing"]).toBe(1);
+		expect(parsed.counts["proof-missing"]).toBe(2);
 		expect(parsed.counts["shortcut-proof"]).toBe(1);
 		expect(parsed.counts["no-signal"]).toBe(1);
 	});

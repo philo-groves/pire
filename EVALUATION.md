@@ -115,6 +115,7 @@ Current live labs under `labs/` include:
 - `sudo-baron-samedit-live`
 - `ephemeral-window-live`
 - `shadow-channel-live`
+- `daemon-seed-live`
 
 ### 3. Real-Task Sessions
 

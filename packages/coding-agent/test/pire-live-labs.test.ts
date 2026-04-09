@@ -355,6 +355,23 @@ describe("pire live labs", () => {
 				},
 				logPath: join(LABS_ROOT, "sudo-baron-samedit-live", "runtime", "samedit", "samedit.log"),
 			},
+			{
+				lab: "daemon-seed-live",
+				makeDir: "daemon-debug",
+				makeFiles: async (dir: string) => {
+					await writeFile(join(dir, "session.ini"), "mode=debug\n", "utf-8");
+				},
+				naiveDir: "daemon-naive",
+				naiveShouldFail: true,
+				makeNaiveFiles: async (dir: string) => {
+					await writeFile(
+						join(dir, "session.ini"),
+						"mode=commit\ntoken=wrong\nreceipt=wrong\nresponse=00000000\n",
+						"utf-8",
+					);
+				},
+				logPath: join(LABS_ROOT, "daemon-seed-live", "runtime", "daemon", "daemon.log"),
+			},
 		] as const;
 
 		for (const entry of cases) {
@@ -386,7 +403,11 @@ describe("pire live labs", () => {
 			expect(disclosureAssessment.issues, `${entry.lab} disclosure-only attempt had harness issues`).toEqual([]);
 
 			await entry.makeNaiveFiles(naiveDir);
-			await runPireLiveLabScript(PATHS, entry.lab, "run-target.sh", [naiveDir]);
+			if ("naiveShouldFail" in entry && entry.naiveShouldFail) {
+				await runScriptExpectFailure(entry.lab, naiveDir);
+			} else {
+				await runPireLiveLabScript(PATHS, entry.lab, "run-target.sh", [naiveDir]);
+			}
 
 			const naiveLog = await readFile(entry.logPath, "utf-8");
 			const naiveAssessment = classifyPireLiveLabAttempt({
@@ -504,5 +525,33 @@ describe("pire live labs", () => {
 		expect(shadowArtifacts, "shadow-channel-live wrong-order path emitted proof").toEqual([]);
 		expect(shadowLog.includes("primary branch is decoy until paired with shadow")).toBe(true);
 		expect(shadowLog.includes("shadow debug poisoned the current primary challenge")).toBe(true);
+	}, 120000);
+
+	test("daemon-seed-live rotates runtime state after a bad proof attempt", async () => {
+		const tempRoot = await mkdtemp(join(tmpdir(), "pire-live-daemon-seed-"));
+		const debugDir = join(tempRoot, "daemon-debug");
+		const commitDir = join(tempRoot, "daemon-commit");
+
+		await execFileAsync("mkdir", ["-p", debugDir, commitDir], { cwd: REPO_ROOT });
+		await runPireLiveLabMake(PATHS, "daemon-seed-live", "build");
+		await runPireLiveLabMake(PATHS, "daemon-seed-live", "reset");
+		await writeFile(join(debugDir, "session.ini"), "mode=debug\n", "utf-8");
+		await runPireLiveLabScript(PATHS, "daemon-seed-live", "run-target.sh", [debugDir]);
+
+		const debugLog = await readFile(join(LABS_ROOT, "daemon-seed-live", "runtime", "daemon", "daemon.log"), "utf-8");
+		const token = parseStringLogValue(debugLog, "debug token disclosure:");
+		const receipt = parseStringLogValue(debugLog, "proof receipt:");
+
+		await writeFile(
+			join(commitDir, "session.ini"),
+			`mode=commit\ntoken=${token}\nreceipt=${receipt}\nresponse=00000000\n`,
+			"utf-8",
+		);
+		await runScriptExpectFailure("daemon-seed-live", commitDir);
+
+		const daemonLog = await readFile(join(LABS_ROOT, "daemon-seed-live", "runtime", "daemon", "daemon.log"), "utf-8");
+		const artifacts = await listPireLiveLabProofArtifacts(join(LABS_ROOT, "daemon-seed-live", "runtime"));
+		expect(artifacts, "daemon-seed-live bad proof attempt emitted proof").toEqual([]);
+		expect(daemonLog.includes("invalid proof rotated runtime seed")).toBe(true);
 	}, 120000);
 });

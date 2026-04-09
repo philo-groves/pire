@@ -42,6 +42,7 @@ Current labs:
 - `sudo-baron-samedit-live`: historical sudo v1.9.5p1 RE lab focused on pre-fix flag-state recovery, vulnerable argument unescaping, and disclosure-to-proof staging
 - `ephemeral-window-live`: brittle-state lab focused on one-shot disclosure windows, burn-on-bad-proof invalidation, and response carryover discipline
 - `shadow-channel-live`: brittle-branch lab focused on decoy disclosure branches, channel selection, and proof-state invalidation after wrong-branch commitment
+- `daemon-seed-live`: runtime-daemon lab focused on debugger-driven seed recovery, persistent helper state, and stale-response invalidation after bad proof attempts
 
 Recommended workflow:
 1. `cd` into the lab directory
