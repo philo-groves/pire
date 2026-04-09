@@ -228,6 +228,22 @@ interface ToolDefinitionEntry {
 	sourceInfo: SourceInfo;
 }
 
+export type SubagentStatus = "running" | "idle" | "failed" | "closed";
+
+export interface SubagentInfo {
+	id: string;
+	status: SubagentStatus;
+	depth: number;
+	parentDepth: number;
+	task: string;
+	turns: number;
+	maxTurns: number;
+	lastAssistantText?: string;
+	errorMessage?: string;
+	createdAt: number;
+	updatedAt: number;
+}
+
 const SUBAGENT_MAX_DEPTH = 2;
 const SUBAGENT_DEFAULT_MAX_TURNS = 6;
 const SUBAGENT_MAX_TURNS = 12;
@@ -246,12 +262,43 @@ type SpawnAgentToolInput = Static<typeof spawnAgentSchema>;
 
 interface SpawnAgentToolDetails {
 	subagentId: string;
+	status: SubagentStatus;
 	depth: number;
 	parentDepth: number;
 	maxTurns: number;
 	turns: number;
-	stopReason: AssistantMessage["stopReason"] | "no_response";
+	stopReason?: AssistantMessage["stopReason"] | "no_response";
 	model?: { provider: string; id: string };
+}
+
+const sendInputSchema = Type.Object({
+	agentId: Type.String({ description: "The subagent id returned by spawn_agent" }),
+	message: Type.String({ description: "The follow-up instruction for the subagent" }),
+});
+
+type SendInputToolInput = Static<typeof sendInputSchema>;
+
+const waitAgentSchema = Type.Object({
+	agentId: Type.String({ description: "The subagent id returned by spawn_agent" }),
+	timeoutMs: Type.Optional(Type.Number({ description: "Optional wait timeout in milliseconds" })),
+});
+
+type WaitAgentToolInput = Static<typeof waitAgentSchema>;
+
+const closeAgentSchema = Type.Object({
+	agentId: Type.String({ description: "The subagent id returned by spawn_agent" }),
+});
+
+type CloseAgentToolInput = Static<typeof closeAgentSchema>;
+
+interface ManagedSubagent {
+	info: SubagentInfo;
+	session: AgentSession;
+	initialTask: string;
+	lastStopReason?: AssistantMessage["stopReason"] | "no_response";
+	unsubscribe: () => void;
+	activeRun?: Promise<void>;
+	resolveRun?: () => void;
 }
 
 // ============================================================================
@@ -343,6 +390,7 @@ export class AgentSession {
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
 	private _subagentDepth: number;
+	private _subagents: Map<string, ManagedSubagent> = new Map();
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -844,6 +892,11 @@ export class AgentSession {
 	 * Call this when completely done with the session.
 	 */
 	dispose(): void {
+		for (const record of this._subagents.values()) {
+			record.unsubscribe();
+			record.session.dispose();
+		}
+		this._subagents.clear();
 		this._disconnectFromAgent();
 		this._eventListeners = [];
 	}
@@ -987,6 +1040,10 @@ export class AgentSession {
 		return this._subagentDepth;
 	}
 
+	listSubagents(): SubagentInfo[] {
+		return Array.from(this._subagents.values()).map((record) => ({ ...record.info }));
+	}
+
 	private _normalizePromptSnippet(text: string | undefined): string | undefined {
 		if (!text) return undefined;
 		const oneLine = text
@@ -1120,6 +1177,30 @@ export class AgentSession {
 		return sections.join("\n");
 	}
 
+	private _getSubagentRecord(agentId: string): ManagedSubagent {
+		const record = this._subagents.get(agentId);
+		if (!record) {
+			throw new Error(`Unknown subagent: ${agentId}`);
+		}
+		if (record.info.status === "closed") {
+			throw new Error(`Subagent ${agentId} is closed`);
+		}
+		return record;
+	}
+
+	private _setSubagentStatus(
+		record: ManagedSubagent,
+		status: SubagentStatus,
+		updates: Partial<Pick<SubagentInfo, "lastAssistantText" | "errorMessage" | "turns">> = {},
+	): void {
+		record.info = {
+			...record.info,
+			...updates,
+			status,
+			updatedAt: Date.now(),
+		};
+	}
+
 	private async _createSubagentSession(): Promise<AgentSession> {
 		const extensionRunnerRef: { current?: ExtensionRunner } = {};
 		const childAgent = new Agent({
@@ -1180,6 +1261,154 @@ export class AgentSession {
 		return childSession;
 	}
 
+	private _attachSubagent(record: ManagedSubagent, maxTurns: number): void {
+		record.unsubscribe = record.session.subscribe((event) => {
+			if (record.info.status === "closed") {
+				return;
+			}
+
+			if (event.type === "turn_end") {
+				const nextTurns = record.info.turns + 1;
+				this._setSubagentStatus(record, "running", { turns: nextTurns });
+				if (nextTurns >= maxTurns && record.session.isStreaming) {
+					void record.session.abort().catch(() => {});
+				}
+				return;
+			}
+
+			if (event.type === "message_end" && event.message.role === "assistant") {
+				record.lastStopReason = event.message.stopReason;
+				this._setSubagentStatus(record, "running", {
+					lastAssistantText: this._getAssistantText(event.message).trim() || record.info.lastAssistantText,
+					errorMessage: event.message.stopReason === "error" ? event.message.errorMessage : undefined,
+				});
+			}
+		});
+	}
+
+	private _startSubagentRun(record: ManagedSubagent, start: () => Promise<void>): Promise<void> {
+		if (record.info.status === "closed") {
+			throw new Error(`Subagent ${record.info.id} is closed`);
+		}
+		if (record.activeRun) {
+			return record.activeRun;
+		}
+
+		record.info.turns = 0;
+		record.info.errorMessage = undefined;
+		record.lastStopReason = undefined;
+		this._setSubagentStatus(record, "running");
+		record.activeRun = new Promise<void>((resolve) => {
+			record.resolveRun = resolve;
+		});
+
+		void start()
+			.then(() => {
+				const nextStatus = record.info.errorMessage ? "failed" : "idle";
+				this._setSubagentStatus(record, nextStatus);
+			})
+			.catch((error) => {
+				this._setSubagentStatus(record, "failed", {
+					errorMessage: error instanceof Error ? error.message : String(error),
+				});
+			})
+			.finally(() => {
+				record.resolveRun?.();
+				record.resolveRun = undefined;
+				record.activeRun = undefined;
+			});
+
+		return record.activeRun;
+	}
+
+	async spawnSubagent(input: SpawnAgentToolInput): Promise<SubagentInfo> {
+		if (this._subagentDepth >= SUBAGENT_MAX_DEPTH) {
+			throw new Error(`Maximum subagent depth of ${SUBAGENT_MAX_DEPTH} reached`);
+		}
+		if (!this.model) {
+			throw new Error("No model selected for subagent");
+		}
+
+		const maxTurns = Math.max(
+			1,
+			Math.min(Math.floor(input.maxTurns ?? SUBAGENT_DEFAULT_MAX_TURNS), SUBAGENT_MAX_TURNS),
+		);
+		const childSession = await this._createSubagentSession();
+		const now = Date.now();
+		const record: ManagedSubagent = {
+			info: {
+				id: childSession.sessionId,
+				status: "idle",
+				depth: childSession.subagentDepth,
+				parentDepth: this._subagentDepth,
+				task: input.task.trim(),
+				turns: 0,
+				maxTurns,
+				createdAt: now,
+				updatedAt: now,
+			},
+			session: childSession,
+			initialTask: this._buildSubagentPrompt(input),
+			unsubscribe: () => {},
+		};
+		this._attachSubagent(record, maxTurns);
+		this._subagents.set(record.info.id, record);
+		this._startSubagentRun(record, () =>
+			record.session.prompt(record.initialTask, {
+				expandPromptTemplates: false,
+				source: "extension",
+			}),
+		);
+		return { ...record.info };
+	}
+
+	async sendSubagentInput(agentId: string, message: string): Promise<SubagentInfo> {
+		const record = this._getSubagentRecord(agentId);
+		const trimmed = message.trim();
+		if (!trimmed) {
+			throw new Error("Subagent input cannot be empty");
+		}
+
+		if (record.info.status === "running") {
+			await record.session.sendUserMessage(trimmed, { deliverAs: "followUp" });
+			this._setSubagentStatus(record, "running");
+			return { ...record.info };
+		}
+
+		this._startSubagentRun(record, () => record.session.sendUserMessage(trimmed));
+		return { ...record.info };
+	}
+
+	async waitForSubagent(agentId: string, timeoutMs?: number): Promise<SubagentInfo> {
+		const record = this._getSubagentRecord(agentId);
+		if (!record.activeRun) {
+			return { ...record.info };
+		}
+		if (timeoutMs === undefined || timeoutMs < 0) {
+			await record.activeRun;
+			return { ...record.info };
+		}
+
+		await Promise.race([
+			record.activeRun,
+			new Promise<void>((resolve) => {
+				setTimeout(resolve, timeoutMs);
+			}),
+		]);
+		return { ...record.info };
+	}
+
+	async closeSubagent(agentId: string): Promise<SubagentInfo> {
+		const record = this._getSubagentRecord(agentId);
+		if (record.activeRun) {
+			await record.session.abort().catch(() => {});
+		}
+		record.unsubscribe();
+		record.session.dispose();
+		this._setSubagentStatus(record, "closed");
+		return { ...record.info };
+	}
+
 	private _createSpawnAgentToolDefinition(): ToolDefinition<typeof spawnAgentSchema, SpawnAgentToolDetails> {
 		return {
 			name: "spawn_agent",
@@ -1193,99 +1422,79 @@ export class AgentSession {
 			],
 			parameters: spawnAgentSchema,
 			execute: async (_toolCallId, input, _signal, onUpdate) => {
-				if (this._subagentDepth >= SUBAGENT_MAX_DEPTH) {
-					throw new Error(`Maximum subagent depth of ${SUBAGENT_MAX_DEPTH} reached`);
-				}
-				if (!this.model) {
-					throw new Error("No model selected for subagent");
-				}
-
-				const maxTurns = Math.max(
-					1,
-					Math.min(Math.floor(input.maxTurns ?? SUBAGENT_DEFAULT_MAX_TURNS), SUBAGENT_MAX_TURNS),
-				);
-				const childSession = await this._createSubagentSession();
-				const progressLines = [
-					`Started subagent ${childSession.sessionId} at depth ${childSession.subagentDepth}.`,
-				];
-				let turns = 0;
-				let lastAssistant: AssistantMessage | undefined;
-				let abortedForTurnLimit = false;
-
-				const pushProgress = () => {
-					onUpdate?.({
-						content: [{ type: "text", text: progressLines.join("\n") }],
-						details: {
-							subagentId: childSession.sessionId,
-							depth: childSession.subagentDepth,
-							parentDepth: this._subagentDepth,
-							maxTurns,
-							turns,
-							stopReason: lastAssistant?.stopReason ?? "no_response",
-							model: this.model ? { provider: this.model.provider, id: this.model.id } : undefined,
-						} satisfies SpawnAgentToolDetails,
-					});
+				const info = await this.spawnSubagent(input);
+				const text = `Spawned subagent ${info.id} for task: ${info.task}`;
+				const details: SpawnAgentToolDetails = {
+					subagentId: info.id,
+					status: info.status,
+					depth: info.depth,
+					parentDepth: info.parentDepth,
+					maxTurns: info.maxTurns,
+					turns: info.turns,
+					model: this.model ? { provider: this.model.provider, id: this.model.id } : undefined,
 				};
+				onUpdate?.({ content: [{ type: "text", text }], details });
+				return { content: [{ type: "text", text }], details };
+			},
+		};
+	}
 
-				const unsubscribe = childSession.subscribe((event) => {
-					if (event.type === "turn_end") {
-						turns++;
-						progressLines.push(`Completed subagent turn ${turns}.`);
-						if (turns >= maxTurns && childSession.isStreaming) {
-							abortedForTurnLimit = true;
-							progressLines.push(`Reached turn limit (${maxTurns}); aborting subagent.`);
-							void childSession.abort().catch(() => {});
-						}
-						pushProgress();
-						return;
-					}
-					if (event.type === "tool_execution_start") {
-						progressLines.push(`Running ${event.toolName} in subagent.`);
-						pushProgress();
-						return;
-					}
-					if (event.type === "message_end" && event.message.role === "assistant") {
-						lastAssistant = event.message;
-						const text = this._getAssistantText(event.message).trim();
-						if (text) {
-							progressLines.push(`Latest subagent report: ${text.slice(0, 240)}`);
-							pushProgress();
-						}
-					}
-				});
+	private _createSendInputToolDefinition(): ToolDefinition<
+		typeof sendInputSchema,
+		{ agentId: string; status: SubagentStatus }
+	> {
+		return {
+			name: "send_input",
+			label: "send_input",
+			description: "Send follow-up input to a running or idle subagent.",
+			parameters: sendInputSchema,
+			execute: async (_toolCallId, input: SendInputToolInput) => {
+				const info = await this.sendSubagentInput(input.agentId, input.message);
+				return {
+					content: [{ type: "text", text: `Sent input to subagent ${info.id}. Status: ${info.status}.` }],
+					details: { agentId: info.id, status: info.status },
+				};
+			},
+		};
+	}
 
-				try {
-					await childSession.prompt(this._buildSubagentPrompt(input), {
-						expandPromptTemplates: false,
-						source: "extension",
-					});
-					const finalAssistant =
-						lastAssistant ??
-						[...childSession.messages]
-							.reverse()
-							.find((message): message is AssistantMessage => message.role === "assistant");
-					const finalText = finalAssistant ? this._getAssistantText(finalAssistant).trim() : "";
-					const finalReport =
-						finalText ||
-						(abortedForTurnLimit
-							? `Subagent aborted after reaching the turn limit of ${maxTurns}.`
-							: "Subagent completed without a textual report.");
-					return {
-						content: [{ type: "text", text: finalReport }],
-						details: {
-							subagentId: childSession.sessionId,
-							depth: childSession.subagentDepth,
-							parentDepth: this._subagentDepth,
-							maxTurns,
-							turns,
-							stopReason: finalAssistant?.stopReason ?? "no_response",
-							model: this.model ? { provider: this.model.provider, id: this.model.id } : undefined,
-						} satisfies SpawnAgentToolDetails,
-					};
-				} finally {
-					unsubscribe();
-					childSession.dispose();
-				}
+	private _createWaitAgentToolDefinition(): ToolDefinition<typeof waitAgentSchema, SubagentInfo> {
+		return {
+			name: "wait_agent",
+			label: "wait_agent",
+			description: "Wait for a subagent to finish its current run and return its latest report.",
+			parameters: waitAgentSchema,
+			execute: async (_toolCallId, input: WaitAgentToolInput) => {
+				const info = await this.waitForSubagent(input.agentId, input.timeoutMs);
+				return {
+					content: [
+						{
+							type: "text",
+							text:
+								info.lastAssistantText ??
+								(info.status === "running"
+									? `Subagent ${info.id} is still running.`
+									: (info.errorMessage ?? `Subagent ${info.id} has no report yet.`)),
+						},
+					],
+					details: info,
+				};
+			},
+		};
+	}
+
+	private _createCloseAgentToolDefinition(): ToolDefinition<typeof closeAgentSchema, SubagentInfo> {
+		return {
+			name: "close_agent",
+			label: "close_agent",
+			description: "Close a subagent and release its resources.",
+			parameters: closeAgentSchema,
+			execute: async (_toolCallId, input: CloseAgentToolInput) => {
+				const info = await this.closeSubagent(input.agentId);
+				return {
+					content: [{ type: "text", text: `Closed subagent ${info.id}.` }],
+					details: info,
+				};
 			},
 		};
 	}
@@ -2684,6 +2893,9 @@ export class AgentSession {
 					bash: { commandPrefix: shellCommandPrefix },
 				});
 		baseToolDefinitions.spawn_agent = this._createSpawnAgentToolDefinition();
+		baseToolDefinitions.send_input = this._createSendInputToolDefinition();
+		baseToolDefinitions.wait_agent = this._createWaitAgentToolDefinition();
+		baseToolDefinitions.close_agent = this._createCloseAgentToolDefinition();
 
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
@@ -2718,7 +2930,7 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: ["read", "webfetch", "bash", "edit", "write", "spawn_agent"];
+			: ["read", "webfetch", "bash", "edit", "write", "spawn_agent", "send_input", "wait_agent", "close_agent"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,

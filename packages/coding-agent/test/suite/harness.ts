@@ -64,6 +64,7 @@ export interface HarnessOptions {
 	resourceLoader?: ResourceLoader;
 	extensionFactories?: Array<ExtensionFactory | CreateTestExtensionsResultInput>;
 	withConfiguredAuth?: boolean;
+	subagentDepth?: number;
 }
 
 export interface Harness {
@@ -160,6 +161,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		sessionManager,
 		settingsManager,
 		cwd: tempDir,
+		subagentDepth: options.subagentDepth,
 		modelRegistry,
 		resourceLoader,
 		baseToolsOverride: toolMap,

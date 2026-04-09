@@ -1,7 +1,22 @@
-import type { ToolResultMessage } from "@mariozechner/pi-ai";
+import type { Context, ToolResultMessage } from "@mariozechner/pi-ai";
 import { fauxAssistantMessage, fauxToolCall } from "@mariozechner/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHarness, getAssistantTexts, getMessageText } from "./harness.js";
+
+function getToolResults(context: Context, toolName: string): ToolResultMessage[] {
+	return context.messages.filter(
+		(message): message is ToolResultMessage => message.role === "toolResult" && message.toolName === toolName,
+	);
+}
+
+function getLastToolResult(context: Context, toolName: string): ToolResultMessage | undefined {
+	return getToolResults(context, toolName).at(-1);
+}
+
+function getSubagentId(result: ToolResultMessage | undefined): string | undefined {
+	const details = result?.details as { subagentId?: string } | undefined;
+	return details?.subagentId;
+}
 
 function getLastToolResultText(messages: readonly unknown[], toolName: string): string | undefined {
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -29,15 +44,45 @@ describe("AgentSession subagents", () => {
 		}
 	});
 
-	it("enables spawn_agent by default", async () => {
+	it("enables persistent subagent tools by default", async () => {
 		const harness = await createHarness();
 		cleanups.push(harness.cleanup);
 
-		expect(harness.session.getActiveToolNames()).toContain("spawn_agent");
-		expect(harness.session.getAllTools().some((tool) => tool.name === "spawn_agent")).toBe(true);
+		expect(harness.session.getActiveToolNames()).toEqual(
+			expect.arrayContaining(["spawn_agent", "send_input", "wait_agent", "close_agent"]),
+		);
 	});
 
-	it("delegates a bounded task to a child session and returns its report", async () => {
+	it("manages subagents through spawn, wait, send, list, and close APIs", async () => {
+		const harness = await createHarness();
+		cleanups.push(harness.cleanup);
+
+		harness.setResponses([
+			fauxAssistantMessage("Child initial report."),
+			fauxAssistantMessage("Child handled: Follow-up input"),
+		]);
+
+		const spawned = await harness.session.spawnSubagent({ task: "Inspect the target config" });
+		expect(spawned.status).toBe("running");
+
+		const waited = await harness.session.waitForSubagent(spawned.id);
+		expect(waited.status).toBe("idle");
+		expect(waited.lastAssistantText).toBe("Child initial report.");
+
+		const sent = await harness.session.sendSubagentInput(spawned.id, "Follow-up input");
+		expect(sent.status).toBe("running");
+
+		const waitedAgain = await harness.session.waitForSubagent(spawned.id);
+		expect(waitedAgain.lastAssistantText).toBe("Child handled: Follow-up input");
+
+		const listed = harness.session.listSubagents();
+		expect(listed.map((agent) => agent.id)).toContain(spawned.id);
+
+		const closed = await harness.session.closeSubagent(spawned.id);
+		expect(closed.status).toBe("closed");
+	});
+
+	it("supports parent tool flows with wait_agent", async () => {
 		const harness = await createHarness();
 		cleanups.push(harness.cleanup);
 
@@ -46,42 +91,32 @@ describe("AgentSession subagents", () => {
 				stopReason: "toolUse",
 			}),
 			fauxAssistantMessage("Child report: config looks healthy."),
-			fauxAssistantMessage("Parent integrated the child report."),
+			(context) => {
+				const spawnResult = getLastToolResult(context, "spawn_agent");
+				return fauxAssistantMessage([fauxToolCall("wait_agent", { agentId: getSubagentId(spawnResult) })], {
+					stopReason: "toolUse",
+				});
+			},
+			(context) => {
+				const waitResult = getLastToolResult(context, "wait_agent");
+				return fauxAssistantMessage(`Parent integrated: ${getMessageText(waitResult)}`);
+			},
 		]);
 
-		await harness.session.prompt("Check the config");
+		await harness.session.prompt("Run delegated check");
 
-		const toolResultText = getLastToolResultText(harness.session.messages, "spawn_agent");
-		expect(toolResultText).toContain("Child report: config looks healthy.");
-		expect(getAssistantTexts(harness)).toContain("Parent integrated the child report.");
-
-		const toolEndEvent = harness.eventsOfType("tool_execution_end").find((event) => event.toolName === "spawn_agent");
-		expect(toolEndEvent?.isError).toBe(false);
+		expect(getAssistantTexts(harness)).toContain("Parent integrated: Child report: config looks healthy.");
+		expect(getLastToolResultText(harness.session.messages, "wait_agent")).toContain(
+			"Child report: config looks healthy.",
+		);
 	});
 
-	it("stops nested delegation at depth two", async () => {
-		const harness = await createHarness();
+	it("enforces max subagent depth of two across nested child runs", async () => {
+		const harness = await createHarness({ subagentDepth: 2 });
 		cleanups.push(harness.cleanup);
 
-		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("spawn_agent", { task: "Level one" })], { stopReason: "toolUse" }),
-			fauxAssistantMessage([fauxToolCall("spawn_agent", { task: "Level two" })], { stopReason: "toolUse" }),
-			fauxAssistantMessage([fauxToolCall("spawn_agent", { task: "Level three" })], { stopReason: "toolUse" }),
-			(context) =>
-				fauxAssistantMessage(
-					`Grandchild saw: ${getLastToolResultText(context.messages as ToolResultMessage[], "spawn_agent") ?? "missing"}`,
-				),
-			(context) =>
-				fauxAssistantMessage(
-					`Child saw: ${getLastToolResultText(context.messages as ToolResultMessage[], "spawn_agent") ?? "missing"}`,
-				),
-			fauxAssistantMessage("Parent finished."),
-		]);
-
-		await harness.session.prompt("Try nested delegation");
-
-		const toolResultText = getLastToolResultText(harness.session.messages, "spawn_agent");
-		expect(toolResultText).toContain("Maximum subagent depth of 2 reached");
-		expect(getAssistantTexts(harness)).toContain("Parent finished.");
+		await expect(harness.session.spawnSubagent({ task: "Level three" })).rejects.toThrow(
+			"Maximum subagent depth of 2 reached",
+		);
 	});
 });

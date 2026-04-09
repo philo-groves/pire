@@ -12,6 +12,8 @@ export {
 	type PromptOptions,
 	parseSkillBlock,
 	type SessionStats,
+	type SubagentInfo,
+	type SubagentStatus,
 } from "./core/agent-session.js";
 // Auth and model registry
 export {

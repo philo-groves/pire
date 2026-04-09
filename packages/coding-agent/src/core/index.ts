@@ -10,6 +10,8 @@ export {
 	type ModelCycleResult,
 	type PromptOptions,
 	type SessionStats,
+	type SubagentInfo,
+	type SubagentStatus,
 } from "./agent-session.js";
 export {
 	AgentSessionRuntime,

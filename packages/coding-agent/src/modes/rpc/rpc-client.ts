@@ -7,7 +7,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import type { AgentEvent, AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { ImageContent } from "@mariozechner/pi-ai";
-import type { SessionStats } from "../../core/agent-session.js";
+import type { SessionStats, SubagentInfo } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
@@ -363,6 +363,36 @@ export class RpcClient {
 	 */
 	async setSessionName(name: string): Promise<void> {
 		await this.send({ type: "set_session_name", name });
+	}
+
+	async spawnSubagent(task: string, options?: { context?: string; maxTurns?: number }): Promise<SubagentInfo> {
+		const response = await this.send({
+			type: "spawn_subagent",
+			task,
+			context: options?.context,
+			maxTurns: options?.maxTurns,
+		});
+		return this.getData(response);
+	}
+
+	async sendSubagentInput(agentId: string, message: string): Promise<SubagentInfo> {
+		const response = await this.send({ type: "send_subagent_input", agentId, message });
+		return this.getData(response);
+	}
+
+	async waitSubagent(agentId: string, timeoutMs?: number): Promise<SubagentInfo> {
+		const response = await this.send({ type: "wait_subagent", agentId, timeoutMs });
+		return this.getData(response);
+	}
+
+	async closeSubagent(agentId: string): Promise<SubagentInfo> {
+		const response = await this.send({ type: "close_subagent", agentId });
+		return this.getData(response);
+	}
+
+	async listSubagents(): Promise<SubagentInfo[]> {
+		const response = await this.send({ type: "list_subagents" });
+		return this.getData<{ agents: SubagentInfo[] }>(response).agents;
 	}
 
 	/**

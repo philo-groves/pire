@@ -7,7 +7,7 @@
 
 import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { ImageContent, Model } from "@mariozechner/pi-ai";
-import type { SessionStats } from "../../core/agent-session.js";
+import type { SessionStats, SubagentInfo } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
 import type { SourceInfo } from "../../core/source-info.js";
@@ -60,6 +60,11 @@ export type RpcCommand =
 	| { id?: string; type: "get_fork_messages" }
 	| { id?: string; type: "get_last_assistant_text" }
 	| { id?: string; type: "set_session_name"; name: string }
+	| { id?: string; type: "spawn_subagent"; task: string; context?: string; maxTurns?: number }
+	| { id?: string; type: "send_subagent_input"; agentId: string; message: string }
+	| { id?: string; type: "wait_subagent"; agentId: string; timeoutMs?: number }
+	| { id?: string; type: "close_subagent"; agentId: string }
+	| { id?: string; type: "list_subagents" }
 
 	// Messages
 	| { id?: string; type: "get_messages" }
@@ -187,6 +192,11 @@ export type RpcResponse =
 			data: { text: string | null };
 	  }
 	| { id?: string; type: "response"; command: "set_session_name"; success: true }
+	| { id?: string; type: "response"; command: "spawn_subagent"; success: true; data: SubagentInfo }
+	| { id?: string; type: "response"; command: "send_subagent_input"; success: true; data: SubagentInfo }
+	| { id?: string; type: "response"; command: "wait_subagent"; success: true; data: SubagentInfo }
+	| { id?: string; type: "response"; command: "close_subagent"; success: true; data: SubagentInfo }
+	| { id?: string; type: "response"; command: "list_subagents"; success: true; data: { agents: SubagentInfo[] } }
 
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }

@@ -556,6 +556,34 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 				return success(id, "set_session_name");
 			}
 
+			case "spawn_subagent": {
+				const info = await session.spawnSubagent({
+					task: command.task,
+					context: command.context,
+					maxTurns: command.maxTurns,
+				});
+				return success(id, "spawn_subagent", info);
+			}
+
+			case "send_subagent_input": {
+				const info = await session.sendSubagentInput(command.agentId, command.message);
+				return success(id, "send_subagent_input", info);
+			}
+
+			case "wait_subagent": {
+				const info = await session.waitForSubagent(command.agentId, command.timeoutMs);
+				return success(id, "wait_subagent", info);
+			}
+
+			case "close_subagent": {
+				const info = await session.closeSubagent(command.agentId);
+				return success(id, "close_subagent", info);
+			}
+
+			case "list_subagents": {
+				return success(id, "list_subagents", { agents: session.listSubagents() });
+			}
+
 			// =================================================================
 			// Messages
 			// =================================================================
