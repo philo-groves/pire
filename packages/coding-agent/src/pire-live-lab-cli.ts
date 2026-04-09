@@ -3,11 +3,13 @@
 import { join } from "node:path";
 import process from "node:process";
 import {
+	applyPireLiveLabRunStrategy,
 	evaluatePireLiveLabAgentRun,
 	inspectPireLiveLabAgentRun,
 	type PireLiveLabAgentRunResult,
 	type PireLiveLabAttemptLabel,
 	resolvePireLiveLabPaths,
+	resolvePireLiveLabRunStrategy,
 } from "./core/pire/live-labs.js";
 
 interface PireLiveLabCliArgs {
@@ -341,7 +343,7 @@ async function runSweep(
 				})
 			: await evaluatePireLiveLabAgentRun(paths, {
 					lab: entry.lab,
-					prompt: entry.prompt,
+					prompt: applyPireLiveLabRunStrategy(entry.prompt, resolvePireLiveLabRunStrategy(entry.lab)),
 					sessionDir,
 					logPath: entry.logPath,
 					disclosureMarkers: entry.disclosureMarkers,
@@ -384,7 +386,7 @@ async function main(argv: string[]): Promise<void> {
 			})
 		: await evaluatePireLiveLabAgentRun(paths, {
 				lab: args.lab!,
-				prompt: args.prompt!,
+				prompt: applyPireLiveLabRunStrategy(args.prompt!, resolvePireLiveLabRunStrategy(args.lab!)),
 				sessionDir: args.sessionDir,
 				logPath: args.logPath!,
 				disclosureMarkers: args.disclosureMarkers,

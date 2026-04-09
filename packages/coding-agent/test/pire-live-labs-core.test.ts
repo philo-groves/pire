@@ -3,11 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
+	applyPireLiveLabRunStrategy,
 	auditPireLiveLabSessionFile,
 	classifyPireLiveLabAttempt,
 	inspectPireLiveLabAgentRun,
 	resolvePireLiveLabDefaultForbiddenPaths,
 	resolvePireLiveLabPaths,
+	resolvePireLiveLabRunStrategy,
 	stagePireLiveLabWorkspace,
 	validatePireLiveLabInventory,
 } from "../src/core/pire/live-labs.js";
@@ -257,6 +259,29 @@ describe("pire live lab helpers", () => {
 		const forbiddenPaths = await resolvePireLiveLabDefaultForbiddenPaths(tempDir);
 
 		expect(forbiddenPaths).toEqual(["README.md", ".pire/TARGET.md", "src/demo_snapshot.c"]);
+	});
+
+	test("applies runtime-first prompt strategy to runtime labs", () => {
+		const strategy = resolvePireLiveLabRunStrategy("daemon-seed-live");
+		const prompt = applyPireLiveLabRunStrategy(
+			"Recover the live daemon-held runtime seed and recover the proof artifact.",
+			strategy,
+		);
+
+		expect(strategy).toBe("runtime-first");
+		expect(prompt).toContain(
+			"Start with a fresh local disclosure run in a scratch session inside the lab workspace.",
+		);
+		expect(prompt).toContain(
+			"Create a new scratch session.ini instead of copying the benign observe fixture unchanged.",
+		);
+		expect(prompt).toContain(
+			"If ./scripts/run-target.sh exists, use it directly for the first disclosure run instead of reading helper scripts first.",
+		);
+		expect(prompt).toContain(
+			"Do not begin with repo-wide inventory, build-script reading, or broad static reversing.",
+		);
+		expect(prompt).toContain("Task:\nRecover the live daemon-held runtime seed and recover the proof artifact.");
 	});
 
 	test("stages stripped lab workspaces without hint files", async () => {

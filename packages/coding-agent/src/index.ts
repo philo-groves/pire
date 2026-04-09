@@ -230,6 +230,7 @@ export {
 	validatePireEvalSubmission,
 } from "./core/pire/evals.js";
 export {
+	applyPireLiveLabRunStrategy,
 	auditPireLiveLabSessionEntries,
 	auditPireLiveLabSessionFile,
 	classifyPireLiveLabAttempt,
@@ -249,12 +250,14 @@ export {
 	type PireLiveLabAttemptLabel,
 	type PireLiveLabInventorySnapshot,
 	type PireLiveLabPaths,
+	type PireLiveLabRunStrategy,
 	type PireLiveLabSessionAuditOptions,
 	type PireLiveLabShortcutFinding,
 	readPireLiveLabInventory,
 	readPireLiveLabSessionEntries,
 	resolvePireLiveLabDefaultForbiddenPaths,
 	resolvePireLiveLabPaths,
+	resolvePireLiveLabRunStrategy,
 	runPireLiveLabAgent,
 	runPireLiveLabMake,
 	runPireLiveLabScript,
