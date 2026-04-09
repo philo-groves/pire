@@ -480,6 +480,9 @@ export class InteractiveMode {
 				hint("app.message.followUp", "to queue follow-up"),
 				hint("app.subagent.previous", "prev subagent"),
 				hint("app.subagent.next", "next subagent"),
+				hint("app.subagent.wait", "wait subagent"),
+				hint("app.subagent.close", "close subagent"),
+				hint("app.subagent.copy", "copy subagent"),
 				hint("app.autopilot.toggle", "to toggle autopilot"),
 				hint("app.message.dequeue", "to edit all queued messages"),
 				hint("app.clipboard.pasteImage", "to paste image"),
@@ -2080,6 +2083,15 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
 		this.defaultEditor.onAction("app.subagent.previous", () => this.selectSubagentActivity(-1));
 		this.defaultEditor.onAction("app.subagent.next", () => this.selectSubagentActivity(1));
+		this.defaultEditor.onAction("app.subagent.wait", () => {
+			void this.handleSelectedSubagentWait();
+		});
+		this.defaultEditor.onAction("app.subagent.close", () => {
+			void this.handleSelectedSubagentClose();
+		});
+		this.defaultEditor.onAction("app.subagent.copy", () => {
+			void this.handleSelectedSubagentCopy();
+		});
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -2688,6 +2700,83 @@ export class InteractiveMode {
 
 		this.updateSelectedSubagentActivity();
 		this.ui.requestRender();
+	}
+
+	private getSelectedSubagentInfo(): SubagentInfo | undefined {
+		if (!this.selectedSubagentId) {
+			return undefined;
+		}
+		return this.session.listSubagents().find((subagent) => subagent.id === this.selectedSubagentId);
+	}
+
+	private async handleSelectedSubagentWait(): Promise<void> {
+		const selected = this.getSelectedSubagentInfo();
+		if (!selected) {
+			this.showStatus("No subagent selected");
+			return;
+		}
+		if (selected.status === "closed") {
+			this.showWarning("Selected subagent is closed");
+			return;
+		}
+		if (selected.status !== "running") {
+			this.showStatus("Selected subagent is already idle");
+			return;
+		}
+
+		try {
+			const info = await this.session.waitForSubagent(selected.id);
+			if (info.lastAssistantText) {
+				this.showStatus(`Subagent settled: ${info.lastAssistantText}`);
+			} else {
+				this.showStatus(`Subagent ${info.id.slice(0, 8)} settled`);
+			}
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async handleSelectedSubagentClose(): Promise<void> {
+		const selected = this.getSelectedSubagentInfo();
+		if (!selected) {
+			this.showStatus("No subagent selected");
+			return;
+		}
+		if (selected.status === "closed") {
+			this.showWarning("Selected subagent is already closed");
+			return;
+		}
+
+		try {
+			const info = await this.session.closeSubagent(selected.id);
+			this.showStatus(`Closed subagent ${info.id.slice(0, 8)}`);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async handleSelectedSubagentCopy(): Promise<void> {
+		const selected = this.getSelectedSubagentInfo();
+		if (!selected) {
+			this.showStatus("No subagent selected");
+			return;
+		}
+		const text = selected.lastAssistantText?.trim();
+		if (!text) {
+			this.showWarning("Selected subagent has no report yet");
+			return;
+		}
+
+		try {
+			await this.copyTextToClipboard(text);
+			this.showStatus(`Copied subagent ${selected.id.slice(0, 8)} report to clipboard`);
+		} catch (error) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
+	}
+
+	private async copyTextToClipboard(text: string): Promise<void> {
+		await copyToClipboard(text);
 	}
 
 	private addMessageToChat(message: AgentMessage, options?: { populateHistory?: boolean }): void {
@@ -4505,6 +4594,9 @@ export class InteractiveMode {
 		const dequeue = this.getAppKeyDisplay("app.message.dequeue");
 		const previousSubagent = this.getAppKeyDisplay("app.subagent.previous");
 		const nextSubagent = this.getAppKeyDisplay("app.subagent.next");
+		const waitSubagent = this.getAppKeyDisplay("app.subagent.wait");
+		const closeSubagent = this.getAppKeyDisplay("app.subagent.close");
+		const copySubagent = this.getAppKeyDisplay("app.subagent.copy");
 		const pasteImage = this.getAppKeyDisplay("app.clipboard.pasteImage");
 
 		let hotkeys = `
@@ -4550,6 +4642,7 @@ export class InteractiveMode {
 | \`${autopilotToggle}\` | Toggle autopilot |
 | \`${dequeue}\` | Restore queued messages |
 | \`${previousSubagent}\` / \`${nextSubagent}\` | Select previous / next subagent row |
+| \`${waitSubagent}\` / \`${closeSubagent}\` / \`${copySubagent}\` | Wait / close / copy selected subagent |
 | \`${pasteImage}\` | Paste image from clipboard |
 | \`/\` | Slash commands |
 | \`!\` | Run bash command |

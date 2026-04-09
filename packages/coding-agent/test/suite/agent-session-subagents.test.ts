@@ -78,8 +78,11 @@ describe("AgentSession subagents", () => {
 		const listed = harness.session.listSubagents();
 		expect(listed.map((agent) => agent.id)).toContain(spawned.id);
 
+		const endsBeforeClose = harness.eventsOfType("subagent_end").length;
 		const closed = await harness.session.closeSubagent(spawned.id);
 		expect(closed.status).toBe("closed");
+		expect(harness.eventsOfType("subagent_end")).toHaveLength(endsBeforeClose + 1);
+		expect(harness.eventsOfType("subagent_end").at(-1)?.subagent.status).toBe("closed");
 	});
 
 	it("supports parent tool flows with wait_agent", async () => {

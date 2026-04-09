@@ -1590,9 +1590,10 @@ export class AgentSession {
 		if (record.activeRun) {
 			await record.session.abort().catch(() => {});
 		}
+		this._setSubagentStatus(record, "closed");
+		this._emitSubagentEnd(record);
 		record.unsubscribe();
 		record.session.dispose();
-		this._setSubagentStatus(record, "closed");
 		return { ...record.info };
 	}
 

@@ -7,6 +7,7 @@ import { initTheme } from "../src/modes/interactive/theme/theme.js";
 type InteractiveModePrototypeWithEnsureSubagentActivity = {
 	ensureSubagentActivity(this: Record<string, unknown>, subagent: Record<string, unknown>): unknown;
 	updateSelectedSubagentActivity(this: Record<string, unknown>): void;
+	getSelectedSubagentInfo(this: Record<string, unknown>): unknown;
 };
 
 function stripAnsi(text: string): string {
@@ -174,5 +175,73 @@ describe("InteractiveMode subagent events", () => {
 		const plainRendered = stripAnsi(rendered);
 		expect(plainRendered).toContain("› [Subagent]");
 		expect(plainRendered).toContain("Second");
+	});
+
+	test("performs actions on the selected subagent row", async () => {
+		const session = {
+			listSubagents: vi.fn(() => [
+				{
+					id: "subagent-b",
+					status: "running",
+					depth: 1,
+					parentDepth: 0,
+					task: "Second",
+					turns: 0,
+					maxTurns: 6,
+					createdAt: 1,
+					updatedAt: 1,
+					lastAssistantText: "Final child report",
+				},
+			]),
+			waitForSubagent: vi.fn(async () => ({
+				id: "subagent-b",
+				status: "idle",
+				depth: 1,
+				parentDepth: 0,
+				task: "Second",
+				turns: 1,
+				maxTurns: 6,
+				createdAt: 1,
+				updatedAt: 2,
+				lastAssistantText: "Final child report",
+			})),
+			closeSubagent: vi.fn(async () => ({
+				id: "subagent-b",
+				status: "closed",
+				depth: 1,
+				parentDepth: 0,
+				task: "Second",
+				turns: 1,
+				maxTurns: 6,
+				createdAt: 1,
+				updatedAt: 3,
+				lastAssistantText: "Final child report",
+			})),
+		};
+		const fakeThis: any = {
+			session,
+			selectedSubagentId: "subagent-b",
+			showStatus: vi.fn(),
+			showWarning: vi.fn(),
+			showError: vi.fn(),
+			copyTextToClipboard: vi.fn(async () => {}),
+		};
+		const interactiveModePrototype =
+			InteractiveMode.prototype as unknown as InteractiveModePrototypeWithEnsureSubagentActivity & {
+				handleSelectedSubagentWait(this: Record<string, unknown>): Promise<void>;
+				handleSelectedSubagentClose(this: Record<string, unknown>): Promise<void>;
+				handleSelectedSubagentCopy(this: Record<string, unknown>): Promise<void>;
+			};
+		fakeThis.getSelectedSubagentInfo = interactiveModePrototype.getSelectedSubagentInfo.bind(fakeThis);
+
+		await interactiveModePrototype.handleSelectedSubagentWait.call(fakeThis);
+		await interactiveModePrototype.handleSelectedSubagentCopy.call(fakeThis);
+		await interactiveModePrototype.handleSelectedSubagentClose.call(fakeThis);
+
+		expect(session.waitForSubagent).toHaveBeenCalledWith("subagent-b");
+		expect(fakeThis.copyTextToClipboard).toHaveBeenCalledWith("Final child report");
+		expect(session.closeSubagent).toHaveBeenCalledWith("subagent-b");
+		expect(fakeThis.showStatus).toHaveBeenCalledWith("Subagent settled: Final child report");
+		expect(fakeThis.showStatus).toHaveBeenCalledWith("Closed subagent subagent");
 	});
 });

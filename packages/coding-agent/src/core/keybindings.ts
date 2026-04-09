@@ -33,6 +33,9 @@ export interface AppKeybindings {
 	"app.session.resume": true;
 	"app.subagent.previous": true;
 	"app.subagent.next": true;
+	"app.subagent.wait": true;
+	"app.subagent.close": true;
+	"app.subagent.copy": true;
 	"app.tree.foldOrUp": true;
 	"app.tree.unfoldOrDown": true;
 	"app.tree.editLabel": true;
@@ -109,6 +112,18 @@ export const KEYBINDINGS = {
 	"app.subagent.next": {
 		defaultKeys: "alt+j",
 		description: "Select next subagent row",
+	},
+	"app.subagent.wait": {
+		defaultKeys: "alt+w",
+		description: "Wait for selected subagent",
+	},
+	"app.subagent.close": {
+		defaultKeys: "alt+x",
+		description: "Close selected subagent",
+	},
+	"app.subagent.copy": {
+		defaultKeys: "alt+c",
+		description: "Copy selected subagent report",
 	},
 	"app.tree.foldOrUp": {
 		defaultKeys: ["ctrl+left", "alt+left"],
@@ -201,6 +216,9 @@ const KEYBINDING_NAME_MIGRATIONS = {
 	resume: "app.session.resume",
 	selectPreviousSubagent: "app.subagent.previous",
 	selectNextSubagent: "app.subagent.next",
+	waitForSubagent: "app.subagent.wait",
+	closeSubagent: "app.subagent.close",
+	copySubagentReport: "app.subagent.copy",
 	treeFoldOrUp: "app.tree.foldOrUp",
 	treeUnfoldOrDown: "app.tree.unfoldOrDown",
 	treeEditLabel: "app.tree.editLabel",
