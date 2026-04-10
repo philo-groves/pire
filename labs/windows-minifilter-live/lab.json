@@ -1,0 +1,12 @@
+{
+  "name": "windows-minifilter-live",
+  "target_os": "windows",
+  "target_family": "windows-kernel",
+  "research_track": "kernel-security",
+  "runtime_log": "runtime/windows/minifilter.log",
+  "proof_artifacts": [
+    "runtime/proof/root_flag.txt"
+  ],
+  "status": "live",
+  "notes": "Filter altitude integer truncation bypass. Registration accepts int, stores uint8_t. Values >255 wrap, landing before the security filter."
+}

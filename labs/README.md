@@ -53,11 +53,19 @@ Current labs:
 - `stack-seed-live`: stack-runtime lab focused on stack-local helper state, debugger-driven seed recovery, and stale-response invalidation after bad proof attempts
 - `thread-seed-live`: threaded-runtime lab focused on live thread coordination, runtime-only seed recovery, and stale-response invalidation after bad proof attempts
 - `browser-relay-live`: browser-runtime lab focused on DevTools target inventory, worker-owned nonce recovery, and stale commit invalidation after bad proof attempts
+- `windows-token-steal-live`: Windows token handle table confusion via signed index arithmetic and environment-controlled base offset (models potato-style impersonation)
+- `windows-pool-overflow-live`: Windows kernel pool chunk extend overflow corrupting adjacent object type_tag metadata (models CVE-2021-31956 / cng.sys patterns)
+- `windows-ioctl-dispatch-live`: Windows driver IOCTL dispatch table index confusion via shift-and-mask on control code (models third-party driver attack surface)
+- `windows-minifilter-live`: Windows filter manager altitude bypass via uint8_t truncation — registration accepts int, stores uint8_t, values >255 wrap before the security filter
+- `windows-registry-acl-live`: Windows registry path-normalization ACL bypass — ACL checks raw path, lookup resolves `..` after, classic TOCTOU pattern
+- `windows-pipe-impersonate-live`: multi-phase named pipe impersonation chain — 4 ordered invocations with runtime state accumulation, models potato-family / PrintSpoofer attacks
+- `windows-heap-spray-live`: heap spray + UAF — FIFO free list reasoning, spray-limit partitioning, 5 ordered invocations to free/spray/reclaim/dispatch a privileged slot
 
 Category snapshots:
 - `static-re`: labs where the decisive path is primarily binary or source reversing plus disciplined state carryover. Examples: `archive-index-live`, `module-graph-live`, `symbol-relay-live`, `dual-view-live`, `alias-maze-live`, `parity-weave-live`, `ledger-lock-live`, `vm-bytecode-live`, `reloc-record-live`, `license-fsm-live`, `opensmtpd-rce-live`, `sudo-argv-live`, `dnsmasq-packet-live`, `sudo-baron-samedit-live`
 - `runtime-re`: labs where the decisive state lives in a running process and the agent should shift early to debugger or process inspection. Examples: `daemon-seed-live`, `stack-seed-live`, `thread-seed-live`, `browser-relay-live`
 - `stateful-runtime`: labs where the target punishes wrong ordering, stale assumptions, or branch chasing across runs or phases. Examples: `ephemeral-window-live`, `shadow-channel-live`, `multi-stage-live`, `thread-rendezvous-live`
+- `windows-kernel`: labs modeling Windows kernel and driver attack surfaces — token manipulation, pool corruption, IOCTL dispatch confusion, integer truncation, path normalization, multi-phase pipe impersonation, heap spray. Examples: `windows-token-steal-live`, `windows-pool-overflow-live`, `windows-ioctl-dispatch-live`, `windows-minifilter-live`, `windows-registry-acl-live`, `windows-pipe-impersonate-live`, `windows-heap-spray-live`
 
 Recommended workflow:
 1. `cd` into the lab directory

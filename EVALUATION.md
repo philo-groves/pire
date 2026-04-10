@@ -136,6 +136,13 @@ Current live labs under `labs/` include:
 - `stack-seed-live`
 - `thread-seed-live`
 - `browser-relay-live`
+- `windows-token-steal-live`
+- `windows-pool-overflow-live`
+- `windows-ioctl-dispatch-live`
+- `windows-minifilter-live`
+- `windows-registry-acl-live`
+- `windows-pipe-impersonate-live`
+- `windows-heap-spray-live`
 
 ### 3. Real-Task Sessions
 
