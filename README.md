@@ -1,6 +1,6 @@
 # PiRE Monorepo
 
-PiRE is a research-oriented fork of the pire stack. The main direction of this repo is no longer a generic coding-agent monorepo; it is a runtime and evaluation harness for reverse engineering, vulnerability research, exploit-development workflows, and measurable agent improvement.
+PiRE is a research-oriented fork of the pi stack. The main direction of this repo is no longer a generic coding-agent monorepo; it is a runtime and evaluation harness for reverse engineering, vulnerability research, exploit-development workflows, and measurable agent improvement.
 
 > **Looking for the CLI?** Start with **[packages/coding-agent](packages/coding-agent)**.
 
