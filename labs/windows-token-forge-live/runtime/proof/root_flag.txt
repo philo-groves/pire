@@ -1,1 +1,0 @@
-FLAG{windows-token-forge-live}

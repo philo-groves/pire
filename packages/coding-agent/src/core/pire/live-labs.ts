@@ -532,10 +532,14 @@ async function executePireLiveLabAgentRun(
 				child.kill(signal);
 			}
 		};
+		const tsxCli =
+			process.env.PIRE_TSX_CLI ??
+			"C:\\Users\\phill_47hf4hs\\AppData\\Local\\npm-cache\\_npx\\fd45a72a545557e9\\node_modules\\tsx\\dist\\cli.mjs";
+		const nodeBin = process.env.PIRE_NODE_BIN ?? process.execPath;
 		const child = spawn(
-			"npx",
+			nodeBin,
 			[
-				"tsx",
+				tsxCli,
 				join(paths.packageRoot, "src", "cli.ts"),
 				"-p",
 				"--session-dir",
@@ -555,7 +559,7 @@ async function executePireLiveLabAgentRun(
 							}
 						: {}),
 				},
-				detached: true,
+				detached: process.platform !== "win32",
 				stdio: ["ignore", "pipe", "pipe"],
 			},
 		);

@@ -1,1 +1,0 @@
-FLAG{windows-event-signal-live}
