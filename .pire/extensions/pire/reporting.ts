@@ -54,7 +54,7 @@ export interface FindingReportSection {
 	evidence: FindingsTracker["evidence"];
 	artifacts: ArtifactRecord[];
 	commands: string[];
-	status: "confirmed" | "reported" | "candidate";
+	status: FindingRecord["status"];
 }
 
 export interface NotebookExportResult {
@@ -220,7 +220,7 @@ function renderInventorySummary(inventory?: EnvironmentInventory): string[] {
 }
 
 function renderFindingsDraft(tracker: FindingsTracker): string[] {
-	const findings = tracker.findings.filter((record) => record.status === "confirmed" || record.status === "reported");
+	const findings = tracker.findings.filter((record) => record.status === "confirmed" || record.status === "reported" || record.status === "report-candidate");
 	if (findings.length === 0) {
 		return ["No confirmed findings yet. Keep this section as a report scaffold until evidence matures."];
 	}
@@ -250,7 +250,7 @@ function collectFindingReportSections(tracker: FindingsTracker, manifest: Artifa
 }
 
 function buildRemediationDraft(tracker: FindingsTracker): string[] {
-	const confirmed = tracker.findings.filter((finding) => finding.status === "confirmed" || finding.status === "reported");
+	const confirmed = tracker.findings.filter((finding) => finding.status === "confirmed" || finding.status === "reported" || finding.status === "report-candidate");
 	if (confirmed.length === 0) {
 		return ["No confirmed findings yet. Use this section to capture mitigations once findings are confirmed."];
 	}
@@ -621,8 +621,8 @@ export function assessReproBundle(options: Pick<GenerateReproBundleOptions, "tra
 	const issues: string[] = [];
 	const validationNotes: string[] = [];
 
-	if (options.finding.status !== "confirmed" && options.finding.status !== "reported") {
-		issues.push(`finding ${options.finding.id} is ${options.finding.status}; repro bundles require confirmed or reported findings`);
+	if (options.finding.status !== "confirmed" && options.finding.status !== "reported" && options.finding.status !== "report-candidate") {
+		issues.push(`finding ${options.finding.id} is ${options.finding.status}; repro bundles require confirmed, report-candidate, or reported findings`);
 	}
 	if (evidence.length === 0) {
 		issues.push(`finding ${options.finding.id} has no linked evidence records`);
@@ -649,7 +649,7 @@ export function assessReproBundle(options: Pick<GenerateReproBundleOptions, "tra
 	const readiness: ReproBundleReadiness =
 		issues.length === 0
 			? "ready"
-			: options.finding.status !== "confirmed" && options.finding.status !== "reported"
+			: options.finding.status !== "confirmed" && options.finding.status !== "reported" && options.finding.status !== "report-candidate"
 				? "insufficient"
 				: evidence.length === 0 || (artifacts.length === 0 && commands.length === 0)
 					? "insufficient"

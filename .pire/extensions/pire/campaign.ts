@@ -262,9 +262,15 @@ export function createEmptyCampaignLedger(): CampaignLedger {
 export function mapFindingStatusToCampaignStatus(finding: FindingRecord): CampaignFindingStatus {
 	switch (finding.status) {
 		case "confirmed":
+		case "report-candidate":
 			return "confirmed";
 		case "reported":
 			return "submitted";
+		case "de-escalated":
+		case "closed":
+			return "de-escalated";
+		case "lead":
+		case "active":
 		default:
 			return "lead";
 	}

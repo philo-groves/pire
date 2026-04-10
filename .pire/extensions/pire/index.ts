@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import {
 	runBinaryFile,
@@ -312,8 +313,9 @@ function formatModePrompt(mode: PireMode): string {
 		lines.push("Dynamic mode allows runtime observation and tracing while still avoiding mutation and active external probing by default.");
 		lines.push("Do not edit or write files unless the user explicitly switches to proofing or report mode, but do not stall on safe local runtime checks.");
 	} else if (mode === "proofing") {
-		lines.push("Proofing mode is explicitly authorized for mutation, reproduction harnesses, and tightly scoped proof-of-concept work.");
-		lines.push("Keep modifications narrow and evidence-driven.");
+		lines.push("Proofing mode is authorized for mutation and tightly scoped proof-of-concept work.");
+		lines.push("Keep modifications narrow and evidence-driven. Only build code to test a hypothesis you have already articulated — not to explore.");
+		lines.push("Prefer the smallest possible probe over a comprehensive harness. A 30-line PoC that tests one theory is better than a 300-line harness.");
 	} else {
 		lines.push("Report mode focuses on synthesizing evidence into durable notes, advisories, and reproducible write-ups.");
 		lines.push("Preserve technical specificity and label uncertainty clearly.");
@@ -508,6 +510,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	let currentRole: PireRole | undefined;
 	let currentSessionType: PireSessionType | undefined;
 	let currentCwd = process.cwd();
+	let findingsMdPath: string | undefined;
 	let artifactManifest: ArtifactManifest = { version: 1, updatedAt: new Date().toISOString(), artifacts: [] };
 	let findingsTracker: FindingsTracker = {
 		version: 1,
@@ -566,7 +569,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	};
 
 	const persistTracker = async (): Promise<void> => {
-		const paths = await saveFindingsTracker(currentCwd, findingsTracker);
+		const paths = await saveFindingsTracker(currentCwd, findingsTracker, { findingsMdPath });
 		const summary = buildFindingsTrackerSummary(findingsTracker);
 		pi.appendEntry(TRACKER_ENTRY_TYPE, {
 			updatedAt: findingsTracker.updatedAt,
@@ -1280,6 +1283,14 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			refutes: Type.Optional(Type.Array(Type.String())),
 			artifactsChecked: Type.Optional(Type.Array(Type.String())),
 			doNotRepeatUntil: Type.Optional(Type.String()),
+			surface: Type.Optional(Type.String()),
+			sourceRefs: Type.Optional(Type.Array(Type.String())),
+			addSourceRefs: Type.Optional(Type.Array(Type.String())),
+			reachability: Type.Optional(Type.String()),
+			validationStatus: Type.Optional(Type.String()),
+			nextStep: Type.Optional(Type.String()),
+			keyArtifacts: Type.Optional(Type.Array(Type.String())),
+			addKeyArtifacts: Type.Optional(Type.Array(Type.String())),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			let resultText = "";
@@ -1348,19 +1359,21 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						resultText = "research_tracker add_finding requires title and statement.";
 						break;
 					}
-					const status =
-						params.status === "candidate" || params.status === "confirmed" || params.status === "reported"
-							? (params.status as FindingStatus)
-							: undefined;
 					const record = addFinding(findingsTracker, {
 						title: params.title,
 						statement: params.statement,
 						severity: params.severity,
-						status,
+						status: params.status as FindingStatus | undefined,
 						basis: params.basis,
 						relatedEvidenceIds: params.relatedEvidenceIds,
 						relatedArtifactIds: params.relatedArtifactIds,
 						reproStatus: params.reproStatus,
+						surface: params.surface,
+						sourceRefs: params.sourceRefs,
+						reachability: params.reachability,
+						validationStatus: params.validationStatus,
+						nextStep: params.nextStep,
+						keyArtifacts: params.keyArtifacts,
 					});
 					await persistTracker();
 					await syncCampaignFinding(ctx, record.id, `Synced ${record.id} into the campaign ledger from research_tracker add_finding.`);
@@ -1374,20 +1387,24 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						resultText = "research_tracker update_finding requires id.";
 						break;
 					}
-					const status =
-						params.status === "candidate" || params.status === "confirmed" || params.status === "reported"
-							? (params.status as FindingStatus)
-							: undefined;
 					const record = updateFinding(findingsTracker, {
 						id: params.id,
 						title: params.title,
 						statement: params.statement,
 						severity: params.severity,
-						status,
+						status: params.status as FindingStatus | undefined,
 						reproStatus: params.reproStatus as ReproStatus | undefined,
 						addBasis: params.addBasis,
 						addEvidenceIds: params.addEvidenceIds,
 						addArtifactIds: params.addArtifactIds,
+						surface: params.surface,
+						sourceRefs: params.sourceRefs,
+						addSourceRefs: params.addSourceRefs,
+						reachability: params.reachability,
+						validationStatus: params.validationStatus,
+						nextStep: params.nextStep,
+						keyArtifacts: params.keyArtifacts,
+						addKeyArtifacts: params.addKeyArtifacts,
 					});
 					if (!record) {
 						resultText = `Unknown finding: ${params.id}`;
@@ -2993,7 +3010,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			const finding = addFinding(findingsTracker, {
 				title,
 				statement,
-				status: "candidate",
+				status: "lead",
 				severity: "medium",
 				reproStatus: "not-reproduced",
 				basis: hypothesis.relatedEvidenceIds,
@@ -3230,7 +3247,8 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			typeof sessionTypeFlagValue === "string" && isPireSessionType(sessionTypeFlagValue) ? sessionTypeFlagValue : undefined;
 		artifactManifest = await loadArtifactManifest(ctx.cwd);
 			campaignLedger = latestCampaignEntry?.data?.ledger ?? (await loadCampaignLedger(ctx.cwd));
-			findingsTracker = latestTrackerEntry?.data?.tracker ?? (await loadFindingsTracker(ctx.cwd));
+			findingsMdPath = join(ctx.cwd, "FINDINGS.md");
+			findingsTracker = latestTrackerEntry?.data?.tracker ?? (await loadFindingsTracker(ctx.cwd, { findingsMdPath }));
 			lastActivity = latestActivityEntry?.data;
 			currentInventory = latestInventoryEntry?.data?.inventory;
 			currentFocus = latestFocusEntry?.data ?? createEmptyFocusState();

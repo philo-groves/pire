@@ -246,13 +246,15 @@ export function buildLeadWorkflowPrompt(mode: PireMode, tracker: FindingsTracker
 	const queue = getCandidateFindingQueue(tracker).slice(0, 3);
 	const lines = [
 		"[PIRE LEAD WORKFLOW]",
-		"Work the loop in order: sweep for candidates, verify or kill the best lead, then report only what survives evidence review.",
+		"Work the loop in order: sweep for candidates, reason about exploitability from source, verify or kill the best lead, then report only what survives evidence review.",
 		"Use diverse entrypoints during sweep so the search does not collapse onto one comfortable explanation.",
+		"Before building any harness or probe, answer: (1) what specific hypothesis does it test, (2) why can source reasoning alone not resolve this, (3) what concrete outcome would the code produce. If you cannot answer all three, keep reading and reasoning.",
 		"During verification, look for disconfirming evidence and alternate explanations before you strengthen the claim.",
 		"Treat missing findings as costly, but do not convert uncertainty into a confirmed claim without concrete evidence.",
+		"Reasoning, chaining analysis, and logic-bug identification are higher-value work than building harnesses. Only move to code when you have a strong hypothesis worth testing.",
 	];
 	if (mode === "recon" || mode === "dynamic") {
-		lines.push("Do not stop at a plausible candidate if the next low-risk verification step is obvious.");
+		lines.push("Do not stop at a plausible candidate if the next low-risk verification step is obvious — but prefer source reasoning over writing code when both can answer the question.");
 	}
 	if (mode === "proofing") {
 		lines.push("Use proofing to close narrow proof gaps, not to expand scope or mutate unrelated surfaces.");
@@ -261,7 +263,7 @@ export function buildLeadWorkflowPrompt(mode: PireMode, tracker: FindingsTracker
 		lines.push("In report mode, downgrade or defer anything that has not survived verification.");
 	}
 	lines.push(
-		`Current backlog: ${summary.candidateFindings} candidate, ${summary.confirmedFindings} confirmed/reported, ${summary.totalEvidence} evidence records.`,
+		`Current backlog: ${summary.leadFindings} lead, ${summary.activeFindings} active, ${summary.confirmedFindings} confirmed/reported, ${summary.deEscalatedFindings} de-escalated, ${summary.totalEvidence} evidence records.`,
 	);
 	if (queue.length > 0) {
 		lines.push("Top leads to follow now:");
@@ -293,7 +295,7 @@ export function buildResearchCompactionSummary(input: ResearchCompactionInput): 
 		"",
 		"## Tracker Summary",
 		`- hypotheses: ${trackerSummary.totalHypotheses} (${trackerSummary.openHypotheses} open, ${trackerSummary.supportedHypotheses} supported, ${trackerSummary.refutedHypotheses} refuted)`,
-		`- findings: ${trackerSummary.totalFindings} (${trackerSummary.candidateFindings} candidate, ${trackerSummary.confirmedFindings} confirmed/reported)`,
+		`- findings: ${trackerSummary.totalFindings} (${trackerSummary.leadFindings} lead, ${trackerSummary.activeFindings} active, ${trackerSummary.deEscalatedFindings} de-escalated, ${trackerSummary.reportCandidateFindings} report-candidate, ${trackerSummary.confirmedFindings} confirmed/reported, ${trackerSummary.closedFindings} closed)`,
 		`- questions: ${trackerSummary.totalQuestions} (${trackerSummary.blockedQuestions} blocked)`,
 		`- evidence: ${trackerSummary.totalEvidence}`,
 		`- dead ends: ${trackerSummary.totalDeadEnds}`,

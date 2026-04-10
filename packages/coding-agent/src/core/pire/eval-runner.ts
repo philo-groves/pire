@@ -11,12 +11,12 @@ import {
 	stringifyPireEvalRunBundle,
 	summarizePireEvalRunScore,
 } from "./eval-bundles.js";
-import type { PireEvalEvidenceRef, PireEvalJudgement, PireExploitability } from "./evals.js";
+import type { PireEvalEvidenceRef, PireEvalJudgement, PireExploitability, PireFindingOutcome } from "./evals.js";
 
 interface PireSessionFindingRecord {
 	id: string;
 	title: string;
-	status: "candidate" | "confirmed" | "reported";
+	status: string;
 	statement: string;
 	reproStatus: "not-reproduced" | "partial" | "reproduced";
 	relatedEvidenceIds: string[];
@@ -148,7 +148,7 @@ function createHeuristicJudgement(finding: PireSessionFindingRecord, evidenceCou
 	return {
 		dimensions: {
 			discovery: "hit",
-			classification: finding.status === "candidate" ? "partial" : "hit",
+			classification: finding.status === "candidate" || finding.status === "lead" ? "partial" : "hit",
 			rootCause: finding.statement.trim().length > 0 ? "partial" : "miss",
 			proof: finding.reproStatus === "reproduced" ? "hit" : finding.reproStatus === "partial" ? "partial" : "miss",
 			reporting: evidenceCount > 0 ? "partial" : "miss",
@@ -299,7 +299,7 @@ export async function createPireEvalRunBundleFromSession(
 			{
 				taskId: task.id,
 				evidence,
-				findingOutcome: finding.status,
+				findingOutcome: finding.status as PireFindingOutcome,
 				exploitability: binding.exploitability ?? "unknown",
 				completedObjectives: binding.completedObjectives,
 				capturedFlags: binding.capturedFlags,

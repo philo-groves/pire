@@ -21,6 +21,8 @@ Keep notes on:
 - Suspicious strings, symbols, and offsets
 - Candidate entry points for deeper static or dynamic analysis
 
+After triage, the normal next step is [`exploitability-reasoning`](../exploitability-reasoning/SKILL.md) to assess findings from source before building any probes or harnesses.
+
 Stop and ask for direction if:
 - Analysis requires executing an untrusted sample outside an agreed sandbox
 - The sample appears packed, encrypted, or requires a specific emulation target you do not have

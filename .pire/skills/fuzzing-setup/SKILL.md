@@ -4,6 +4,8 @@ description: Use when planning or building a fuzzing harness, selecting an engin
 ---
 # Fuzzing Setup
 
+**Before using this skill**, confirm that [`exploitability-reasoning`](../exploitability-reasoning/SKILL.md) has been completed and concluded that fuzzing is the right approach. Fuzzing is expensive — prefer source-driven reasoning, targeted probes, and logic-bug analysis over broad fuzzing whenever possible. Only fuzz when you have a specific attack surface, a clear bug class hypothesis, and evidence that the bug cannot be found by reading source alone.
+
 Focus on harness feasibility and evidence-backed scope before implementation.
 
 Collect first:

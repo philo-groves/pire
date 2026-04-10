@@ -84,7 +84,12 @@ describe("pire reporting helpers", () => {
 				refutedHypotheses: 0,
 				totalFindings: 1,
 				candidateFindings: 0,
+				leadFindings: 0,
+				activeFindings: 0,
+				deEscalatedFindings: 0,
+				reportCandidateFindings: 0,
 				confirmedFindings: 1,
+				closedFindings: 0,
 				totalQuestions: 0,
 				openQuestions: 0,
 				blockedQuestions: 0,
@@ -194,7 +199,7 @@ describe("pire reporting helpers", () => {
 		const finding = addFinding(tracker, {
 			title: "Suspicious parser state",
 			statement: "Static review suggests unsafe parser behavior.",
-			status: "candidate",
+			status: "lead",
 			severity: "medium",
 			reproStatus: "not-reproduced",
 		});
@@ -210,7 +215,7 @@ describe("pire reporting helpers", () => {
 			finding,
 		});
 		expect(assessment.readiness).toBe("insufficient");
-		expect(assessment.issues.some((issue) => issue.includes("require confirmed or reported findings"))).toBe(true);
+		expect(assessment.issues.some((issue) => issue.includes("require confirmed"))).toBe(true);
 
 		await expect(
 			generateReproBundle({

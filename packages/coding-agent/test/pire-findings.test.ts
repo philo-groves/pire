@@ -75,7 +75,7 @@ describe("pire findings tracker helpers", () => {
 
 		const widgetLines = buildFindingsWidgetLines(tracker);
 		expect(widgetLines[0]).toBe("Pire Tracker");
-		expect(widgetLines.some((line) => line.includes("confirmed findings: 1"))).toBe(true);
+		expect(widgetLines.some((line) => line.includes("confirmed: 1"))).toBe(true);
 
 		const promptSummary = buildFindingsPromptSummary(tracker, {
 			activeHypothesisIds: [hypothesis.id],

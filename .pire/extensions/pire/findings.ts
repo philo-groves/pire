@@ -1,9 +1,19 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 export type HypothesisStatus = "open" | "supported" | "refuted" | "needs-more-evidence";
-export type FindingStatus = "candidate" | "confirmed" | "reported";
+export type FindingStatus = "lead" | "active" | "de-escalated" | "report-candidate" | "confirmed" | "reported" | "closed";
+
+const VALID_FINDING_STATUSES = new Set<FindingStatus>(["lead", "active", "de-escalated", "report-candidate", "confirmed", "reported", "closed"]);
+
+function normalizeFindingStatus(value: unknown): FindingStatus {
+	if (typeof value === "string") {
+		if (value === "candidate") return "lead";
+		if (VALID_FINDING_STATUSES.has(value as FindingStatus)) return value as FindingStatus;
+	}
+	return "lead";
+}
 export type QuestionStatus = "open" | "answered" | "blocked";
 export type Confidence = "low" | "medium" | "high";
 export type Severity = "low" | "medium" | "high" | "critical";
@@ -36,6 +46,12 @@ export interface FindingRecord {
 	reproStatus: ReproStatus;
 	createdAt: string;
 	updatedAt: string;
+	surface?: string;
+	sourceRefs?: string[];
+	reachability?: string;
+	validationStatus?: string;
+	nextStep?: string;
+	keyArtifacts?: string[];
 }
 
 export interface QuestionRecord {
@@ -92,8 +108,14 @@ export interface FindingsTrackerSummary {
 	supportedHypotheses: number;
 	refutedHypotheses: number;
 	totalFindings: number;
+	/** @deprecated Use leadFindings instead */
 	candidateFindings: number;
+	leadFindings: number;
+	activeFindings: number;
+	deEscalatedFindings: number;
+	reportCandidateFindings: number;
 	confirmedFindings: number;
+	closedFindings: number;
 	totalQuestions: number;
 	openQuestions: number;
 	blockedQuestions: number;
@@ -138,6 +160,12 @@ export interface AddFindingInput {
 	relatedArtifactIds?: string[];
 	reproStatus?: ReproStatus;
 	timestamp?: string;
+	surface?: string;
+	sourceRefs?: string[];
+	reachability?: string;
+	validationStatus?: string;
+	nextStep?: string;
+	keyArtifacts?: string[];
 }
 
 export interface UpdateFindingInput {
@@ -151,6 +179,14 @@ export interface UpdateFindingInput {
 	addEvidenceIds?: string[];
 	addArtifactIds?: string[];
 	timestamp?: string;
+	surface?: string;
+	sourceRefs?: string[];
+	addSourceRefs?: string[];
+	reachability?: string;
+	validationStatus?: string;
+	nextStep?: string;
+	keyArtifacts?: string[];
+	addKeyArtifacts?: string[];
 }
 
 export interface AddQuestionInput {
@@ -286,7 +322,7 @@ function normalizeFinding(value: unknown): FindingRecord | undefined {
 	return {
 		id: value.id,
 		title: value.title,
-		status: value.status === "confirmed" || value.status === "reported" ? value.status : "candidate",
+		status: normalizeFindingStatus(value.status),
 		severity:
 			value.severity === "low" || value.severity === "medium" || value.severity === "critical" ? value.severity : "high",
 		statement: value.statement,
@@ -297,6 +333,12 @@ function normalizeFinding(value: unknown): FindingRecord | undefined {
 			value.reproStatus === "partial" || value.reproStatus === "reproduced" ? value.reproStatus : "not-reproduced",
 		createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date().toISOString(),
 		updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
+		surface: typeof value.surface === "string" ? value.surface : undefined,
+		sourceRefs: Array.isArray(value.sourceRefs) ? dedupe(toStringArray(value.sourceRefs)) : undefined,
+		reachability: typeof value.reachability === "string" ? value.reachability : undefined,
+		validationStatus: typeof value.validationStatus === "string" ? value.validationStatus : undefined,
+		nextStep: typeof value.nextStep === "string" ? value.nextStep : undefined,
+		keyArtifacts: Array.isArray(value.keyArtifacts) ? dedupe(toStringArray(value.keyArtifacts)) : undefined,
 	};
 }
 
@@ -406,23 +448,48 @@ function touchTracker(tracker: FindingsTracker, timestamp: string): FindingsTrac
 	return tracker;
 }
 
-export async function loadFindingsTracker(cwd: string): Promise<FindingsTracker> {
+export interface FindingsTrackerLoadOptions {
+	findingsMdPath?: string;
+}
+
+export interface FindingsTrackerSaveOptions {
+	findingsMdPath?: string;
+	findingsMdName?: string;
+}
+
+export async function loadFindingsTracker(cwd: string, options?: FindingsTrackerLoadOptions): Promise<FindingsTracker> {
 	const trackerPath = join(cwd, TRACKER_DIR, TRACKER_JSON_FILE);
+	let tracker: FindingsTracker;
 	if (!existsSync(trackerPath)) {
-		return createEmptyFindingsTracker();
+		tracker = createEmptyFindingsTracker();
+	} else {
+		try {
+			const raw = await readFile(trackerPath, "utf-8");
+			tracker = normalizeTracker(JSON.parse(raw));
+		} catch {
+			tracker = createEmptyFindingsTracker();
+		}
 	}
 
-	try {
-		const raw = await readFile(trackerPath, "utf-8");
-		return normalizeTracker(JSON.parse(raw));
-	} catch {
-		return createEmptyFindingsTracker();
+	const mdPath = options?.findingsMdPath;
+	if (mdPath && existsSync(mdPath)) {
+		try {
+			const { parseFindingsMd, mergeFindingsFromMd } = await import("./findings-md.js");
+			const mdContent = await readFile(mdPath, "utf-8");
+			const mdFindings = parseFindingsMd(mdContent);
+			mergeFindingsFromMd(tracker, mdFindings);
+		} catch {
+			// FINDINGS.md parse failure is non-fatal; session JSON is still available
+		}
 	}
+
+	return tracker;
 }
 
 export async function saveFindingsTracker(
 	cwd: string,
 	tracker: FindingsTracker,
+	options?: FindingsTrackerSaveOptions,
 ): Promise<{ jsonPath: string; markdownPath: string }> {
 	const trackerDir = join(cwd, TRACKER_DIR);
 	const jsonPath = join(trackerDir, TRACKER_JSON_FILE);
@@ -430,6 +497,17 @@ export async function saveFindingsTracker(
 	await mkdir(trackerDir, { recursive: true });
 	await writeFile(jsonPath, `${JSON.stringify(tracker, null, 2)}\n`, "utf-8");
 	await writeFile(markdownPath, renderFindingsMarkdown(tracker), "utf-8");
+
+	if (options?.findingsMdPath && tracker.findings.length > 0) {
+		try {
+			const { renderFindingsMd } = await import("./findings-md.js");
+			const subsystemName = options.findingsMdName ?? basename(cwd);
+			await writeFile(options.findingsMdPath, renderFindingsMd(subsystemName, tracker.findings), "utf-8");
+		} catch {
+			// FINDINGS.md write failure is non-fatal; session JSON is the primary store
+		}
+	}
+
 	return { jsonPath, markdownPath };
 }
 
@@ -482,7 +560,7 @@ export function addFinding(tracker: FindingsTracker, input: AddFindingInput): Fi
 	const record: FindingRecord = {
 		id: createId("find", tracker.nextIds.finding++),
 		title: input.title.trim(),
-		status: input.status ?? "candidate",
+		status: input.status ?? "lead",
 		severity: input.severity ?? "medium",
 		statement: input.statement.trim(),
 		basis: dedupe(input.basis ?? []),
@@ -491,6 +569,12 @@ export function addFinding(tracker: FindingsTracker, input: AddFindingInput): Fi
 		reproStatus: input.reproStatus ?? "not-reproduced",
 		createdAt: timestamp,
 		updatedAt: timestamp,
+		surface: input.surface?.trim() || undefined,
+		sourceRefs: input.sourceRefs ? dedupe(input.sourceRefs) : undefined,
+		reachability: input.reachability?.trim() || undefined,
+		validationStatus: input.validationStatus?.trim() || undefined,
+		nextStep: input.nextStep?.trim() || undefined,
+		keyArtifacts: input.keyArtifacts ? dedupe(input.keyArtifacts) : undefined,
 	};
 	tracker.findings.push(record);
 	touchTracker(tracker, timestamp);
@@ -512,6 +596,14 @@ export function updateFinding(tracker: FindingsTracker, input: UpdateFindingInpu
 	finding.basis = dedupe([...finding.basis, ...(input.addBasis ?? [])]);
 	finding.relatedEvidenceIds = dedupe([...finding.relatedEvidenceIds, ...(input.addEvidenceIds ?? [])]);
 	finding.relatedArtifactIds = dedupe([...finding.relatedArtifactIds, ...(input.addArtifactIds ?? [])]);
+	if (input.surface !== undefined) finding.surface = input.surface.trim() || undefined;
+	if (input.reachability !== undefined) finding.reachability = input.reachability.trim() || undefined;
+	if (input.validationStatus !== undefined) finding.validationStatus = input.validationStatus.trim() || undefined;
+	if (input.nextStep !== undefined) finding.nextStep = input.nextStep.trim() || undefined;
+	if (input.sourceRefs !== undefined) finding.sourceRefs = dedupe(input.sourceRefs);
+	if (input.addSourceRefs) finding.sourceRefs = dedupe([...(finding.sourceRefs ?? []), ...input.addSourceRefs]);
+	if (input.keyArtifacts !== undefined) finding.keyArtifacts = dedupe(input.keyArtifacts);
+	if (input.addKeyArtifacts) finding.keyArtifacts = dedupe([...(finding.keyArtifacts ?? []), ...input.addKeyArtifacts]);
 	finding.updatedAt = timestamp;
 	touchTracker(tracker, timestamp);
 	return finding;
@@ -616,12 +708,15 @@ function reproRank(reproStatus: ReproStatus): number {
 }
 
 function inferCandidateNextStep(record: FindingRecord): string {
+	if (record.nextStep) {
+		return record.nextStep;
+	}
 	const supportCount = record.relatedEvidenceIds.length + record.basis.length;
 	if (supportCount === 0) {
-		return "collect the first confirming or disproving evidence";
+		return "reason about reachability and controllability from source before building any probe";
 	}
 	if (record.reproStatus === "not-reproduced") {
-		return "run one targeted verification step to confirm or kill the candidate";
+		return "assess exploitability from source analysis; only build a targeted probe if runtime state is genuinely needed";
 	}
 	if (record.reproStatus === "partial") {
 		return "close the proof gap or record why reproduction stalls";
@@ -631,7 +726,7 @@ function inferCandidateNextStep(record: FindingRecord): string {
 
 export function getCandidateFindingQueue(tracker: FindingsTracker): CandidateFindingQueueEntry[] {
 	return tracker.findings
-		.filter((record) => record.status === "candidate")
+		.filter((record) => record.status === "lead" || record.status === "active")
 		.map((record) => ({
 			id: record.id,
 			title: record.title,
@@ -668,12 +763,12 @@ export function summarizeCandidateFindings(tracker: FindingsTracker, filterText?
 			: [record.id, record.title, record.severity, record.reproStatus, record.nextStep]
 					.some((part) => part.toLowerCase().includes(normalizedFilter)),
 	);
-	const lines = ["Pire Candidate Queue", `- candidates: ${queue.length}`];
+	const lines = ["Pire Lead Queue", `- leads: ${queue.length}`];
 	if (normalizedFilter.length > 0) {
 		lines.push(`- filter: ${normalizedFilter}`);
 	}
 	if (queue.length === 0) {
-		lines.push("- no candidate findings in queue");
+		lines.push("- no lead findings in queue");
 		return lines.join("\n");
 	}
 	for (const record of queue.slice(0, 8)) {
@@ -689,8 +784,12 @@ export function buildFindingsTrackerSummary(tracker: FindingsTracker): FindingsT
 	const openHypotheses = tracker.hypotheses.filter((record) => record.status === "open" || record.status === "needs-more-evidence");
 	const supportedHypotheses = tracker.hypotheses.filter((record) => record.status === "supported");
 	const refutedHypotheses = tracker.hypotheses.filter((record) => record.status === "refuted");
-	const candidateFindings = tracker.findings.filter((record) => record.status === "candidate");
+	const leadFindings = tracker.findings.filter((record) => record.status === "lead").length;
+	const activeFindings = tracker.findings.filter((record) => record.status === "active").length;
+	const deEscalatedFindings = tracker.findings.filter((record) => record.status === "de-escalated").length;
+	const reportCandidateFindings = tracker.findings.filter((record) => record.status === "report-candidate").length;
 	const confirmedFindings = tracker.findings.filter((record) => record.status === "confirmed" || record.status === "reported");
+	const closedFindings = tracker.findings.filter((record) => record.status === "closed").length;
 	const openQuestions = tracker.questions.filter((record) => record.status === "open");
 	const blockedQuestions = tracker.questions.filter((record) => record.status === "blocked");
 
@@ -700,8 +799,13 @@ export function buildFindingsTrackerSummary(tracker: FindingsTracker): FindingsT
 		supportedHypotheses: supportedHypotheses.length,
 		refutedHypotheses: refutedHypotheses.length,
 		totalFindings: tracker.findings.length,
-		candidateFindings: candidateFindings.length,
+		candidateFindings: leadFindings,
+		leadFindings,
+		activeFindings,
+		deEscalatedFindings,
+		reportCandidateFindings,
 		confirmedFindings: confirmedFindings.length,
+		closedFindings,
 		totalQuestions: tracker.questions.length,
 		openQuestions: openQuestions.length,
 		blockedQuestions: blockedQuestions.length,
@@ -736,7 +840,7 @@ export function summarizeFindingsTracker(tracker: FindingsTracker, filterText?: 
 		"Pire Tracker",
 		`- updated: ${tracker.updatedAt}`,
 		`- hypotheses: ${summary.totalHypotheses} (${summary.openHypotheses} open, ${summary.supportedHypotheses} supported, ${summary.refutedHypotheses} refuted)`,
-		`- findings: ${summary.totalFindings} (${summary.candidateFindings} candidate, ${summary.confirmedFindings} confirmed/reported)`,
+		`- findings: ${summary.totalFindings} (${summary.leadFindings} lead, ${summary.activeFindings} active, ${summary.deEscalatedFindings} de-escalated, ${summary.reportCandidateFindings} report-candidate, ${summary.confirmedFindings} confirmed/reported, ${summary.closedFindings} closed)`,
 		`- questions: ${summary.totalQuestions} (${summary.openQuestions} open, ${summary.blockedQuestions} blocked)`,
 		`- evidence: ${summary.totalEvidence}`,
 		`- dead ends: ${summary.totalDeadEnds}`,
@@ -793,7 +897,7 @@ export function buildFindingsWidgetLines(tracker: FindingsTracker): string[] {
 	const lines = [
 		"Pire Tracker",
 		`- open hypotheses: ${summary.openHypotheses}`,
-		`- confirmed findings: ${summary.confirmedFindings}`,
+		`- leads: ${summary.leadFindings}, active: ${summary.activeFindings}, confirmed: ${summary.confirmedFindings}`,
 		`- blocked questions: ${summary.blockedQuestions}`,
 	];
 
@@ -823,7 +927,7 @@ export function buildFindingsPromptSummary(
 	const candidateQueue = getCandidateFindingQueue(tracker).slice(0, 3);
 	const lines = [
 		"[PIRE TRACKER]",
-		`Open hypotheses: ${summary.openHypotheses}; candidate findings: ${summary.candidateFindings}; confirmed findings: ${summary.confirmedFindings}; blocked questions: ${summary.blockedQuestions}; evidence records: ${summary.totalEvidence}.`,
+		`Open hypotheses: ${summary.openHypotheses}; leads: ${summary.leadFindings}; active: ${summary.activeFindings}; confirmed: ${summary.confirmedFindings}; de-escalated: ${summary.deEscalatedFindings}; blocked questions: ${summary.blockedQuestions}; evidence: ${summary.totalEvidence}.`,
 	];
 	const activeHypotheses = tracker.hypotheses.filter((record) => (options.activeHypothesisIds ?? []).includes(record.id));
 	const activeFindings = tracker.findings.filter((record) => (options.activeFindingIds ?? []).includes(record.id));
@@ -866,7 +970,7 @@ export function buildFindingsPromptSummary(
 		}
 	}
 
-	const findings = tracker.findings.filter((record) => record.status === "confirmed" || record.status === "reported").slice(-3).reverse();
+	const findings = tracker.findings.filter((record) => record.status === "confirmed" || record.status === "reported" || record.status === "report-candidate").slice(-3).reverse();
 	if (findings.length > 0) {
 		lines.push("Confirmed findings:");
 		for (const record of findings) {
@@ -931,11 +1035,25 @@ export function renderFindingsMarkdown(tracker: FindingsTracker): string {
 		lines.push("- None", "");
 	} else {
 		for (const record of tracker.findings) {
-			lines.push(`- ${record.id} [${record.status}/${record.severity}] ${record.title}`);
-			lines.push(`  Statement: ${record.statement}`);
-			lines.push(`  Repro: ${record.reproStatus}`);
+			lines.push(`### ${record.id} — ${record.title}`, "");
+			lines.push(`- **State:** \`${record.status}\``);
+			lines.push(`- **Severity:** ${record.severity}`);
+			lines.push(`- **Statement:** ${record.statement}`);
+			if (record.surface) lines.push(`- **Surface:** ${record.surface}`);
+			if (record.sourceRefs && record.sourceRefs.length > 0) {
+				lines.push("- **Source refs:**");
+				for (const ref of record.sourceRefs) lines.push(`  - \`${ref}\``);
+			}
+			if (record.reachability) lines.push(`- **Current reachability:** ${record.reachability}`);
+			if (record.keyArtifacts && record.keyArtifacts.length > 0) {
+				lines.push("- **Key artifacts:**");
+				for (const artifact of record.keyArtifacts) lines.push(`  - \`${artifact}\``);
+			}
+			if (record.validationStatus) lines.push(`- **Validation status:** ${record.validationStatus}`);
+			lines.push(`- **Repro:** ${record.reproStatus}`);
+			if (record.nextStep) lines.push(`- **Next step:** ${record.nextStep}`);
+			lines.push("");
 		}
-		lines.push("");
 	}
 
 	lines.push("## Questions", "");

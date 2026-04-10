@@ -10,6 +10,7 @@ Use this workflow when all intermediate exploit stages are confirmed and the age
 
 Enter this skill when all of the following are true:
 - The required intermediate objectives are already evidenced
+- Exploitability has been reasoned about from source (use [`exploitability-reasoning`](../exploitability-reasoning/SKILL.md) if not yet done)
 - The remaining gap is end-to-end execution or direct flag capture
 - Further reconnaissance is less useful than assembling the full trigger path
 
