@@ -92,6 +92,7 @@ export interface FindingsTrackerSummary {
 	supportedHypotheses: number;
 	refutedHypotheses: number;
 	totalFindings: number;
+	candidateFindings: number;
 	confirmedFindings: number;
 	totalQuestions: number;
 	openQuestions: number;
@@ -185,6 +186,18 @@ export interface FindingsPromptSummaryOptions {
 	activeHypothesisIds?: string[];
 	activeFindingIds?: string[];
 	activeQuestionIds?: string[];
+}
+
+export interface CandidateFindingQueueEntry {
+	id: string;
+	title: string;
+	severity: Severity;
+	reproStatus: ReproStatus;
+	evidenceCount: number;
+	artifactCount: number;
+	basisCount: number;
+	updatedAt: string;
+	nextStep: string;
 }
 
 export interface AddDeadEndInput {
@@ -578,10 +591,105 @@ function matchesFilter(parts: string[], filterText: string): boolean {
 	return parts.some((part) => part.toLowerCase().includes(normalizedFilter));
 }
 
+function severityRank(severity: Severity): number {
+	switch (severity) {
+		case "critical":
+			return 4;
+		case "high":
+			return 3;
+		case "medium":
+			return 2;
+		case "low":
+			return 1;
+	}
+}
+
+function reproRank(reproStatus: ReproStatus): number {
+	switch (reproStatus) {
+		case "reproduced":
+			return 3;
+		case "partial":
+			return 2;
+		case "not-reproduced":
+			return 1;
+	}
+}
+
+function inferCandidateNextStep(record: FindingRecord): string {
+	const supportCount = record.relatedEvidenceIds.length + record.basis.length;
+	if (supportCount === 0) {
+		return "collect the first confirming or disproving evidence";
+	}
+	if (record.reproStatus === "not-reproduced") {
+		return "run one targeted verification step to confirm or kill the candidate";
+	}
+	if (record.reproStatus === "partial") {
+		return "close the proof gap or record why reproduction stalls";
+	}
+	return "promote only after one final adversarial check for alternate explanations";
+}
+
+export function getCandidateFindingQueue(tracker: FindingsTracker): CandidateFindingQueueEntry[] {
+	return tracker.findings
+		.filter((record) => record.status === "candidate")
+		.map((record) => ({
+			id: record.id,
+			title: record.title,
+			severity: record.severity,
+			reproStatus: record.reproStatus,
+			evidenceCount: record.relatedEvidenceIds.length,
+			artifactCount: record.relatedArtifactIds.length,
+			basisCount: record.basis.length,
+			updatedAt: record.updatedAt,
+			nextStep: inferCandidateNextStep(record),
+		}))
+		.sort((left, right) => {
+			const scoreDelta =
+				severityRank(right.severity) * 100 +
+				reproRank(right.reproStatus) * 10 +
+				right.evidenceCount +
+				right.basisCount -
+				(severityRank(left.severity) * 100 +
+					reproRank(left.reproStatus) * 10 +
+					left.evidenceCount +
+					left.basisCount);
+			if (scoreDelta !== 0) {
+				return scoreDelta;
+			}
+			return right.updatedAt.localeCompare(left.updatedAt);
+		});
+}
+
+export function summarizeCandidateFindings(tracker: FindingsTracker, filterText?: string): string {
+	const normalizedFilter = filterText?.trim().toLowerCase() ?? "";
+	const queue = getCandidateFindingQueue(tracker).filter((record) =>
+		normalizedFilter.length === 0
+			? true
+			: [record.id, record.title, record.severity, record.reproStatus, record.nextStep]
+					.some((part) => part.toLowerCase().includes(normalizedFilter)),
+	);
+	const lines = ["Pire Candidate Queue", `- candidates: ${queue.length}`];
+	if (normalizedFilter.length > 0) {
+		lines.push(`- filter: ${normalizedFilter}`);
+	}
+	if (queue.length === 0) {
+		lines.push("- no candidate findings in queue");
+		return lines.join("\n");
+	}
+	for (const record of queue.slice(0, 8)) {
+		lines.push(
+			`- ${record.id} [${record.severity}/${record.reproStatus}] ${record.title} (evidence:${record.evidenceCount}, basis:${record.basisCount}, artifacts:${record.artifactCount})`,
+		);
+		lines.push(`  next: ${record.nextStep}`);
+	}
+	return lines.join("\n");
+}
+
 export function buildFindingsTrackerSummary(tracker: FindingsTracker): FindingsTrackerSummary {
 	const openHypotheses = tracker.hypotheses.filter((record) => record.status === "open" || record.status === "needs-more-evidence");
 	const supportedHypotheses = tracker.hypotheses.filter((record) => record.status === "supported");
 	const refutedHypotheses = tracker.hypotheses.filter((record) => record.status === "refuted");
+	const candidateFindings = tracker.findings.filter((record) => record.status === "candidate");
 	const confirmedFindings = tracker.findings.filter((record) => record.status === "confirmed" || record.status === "reported");
 	const openQuestions = tracker.questions.filter((record) => record.status === "open");
 	const blockedQuestions = tracker.questions.filter((record) => record.status === "blocked");
@@ -592,6 +700,7 @@ export function buildFindingsTrackerSummary(tracker: FindingsTracker): FindingsT
 		supportedHypotheses: supportedHypotheses.length,
 		refutedHypotheses: refutedHypotheses.length,
 		totalFindings: tracker.findings.length,
+		candidateFindings: candidateFindings.length,
 		confirmedFindings: confirmedFindings.length,
 		totalQuestions: tracker.questions.length,
 		openQuestions: openQuestions.length,
@@ -627,7 +736,7 @@ export function summarizeFindingsTracker(tracker: FindingsTracker, filterText?: 
 		"Pire Tracker",
 		`- updated: ${tracker.updatedAt}`,
 		`- hypotheses: ${summary.totalHypotheses} (${summary.openHypotheses} open, ${summary.supportedHypotheses} supported, ${summary.refutedHypotheses} refuted)`,
-		`- findings: ${summary.totalFindings} (${summary.confirmedFindings} confirmed/reported)`,
+		`- findings: ${summary.totalFindings} (${summary.candidateFindings} candidate, ${summary.confirmedFindings} confirmed/reported)`,
 		`- questions: ${summary.totalQuestions} (${summary.openQuestions} open, ${summary.blockedQuestions} blocked)`,
 		`- evidence: ${summary.totalEvidence}`,
 		`- dead ends: ${summary.totalDeadEnds}`,
@@ -711,9 +820,10 @@ export function buildFindingsPromptSummary(
 	options: FindingsPromptSummaryOptions = {},
 ): string {
 	const summary = buildFindingsTrackerSummary(tracker);
+	const candidateQueue = getCandidateFindingQueue(tracker).slice(0, 3);
 	const lines = [
 		"[PIRE TRACKER]",
-		`Open hypotheses: ${summary.openHypotheses}; confirmed findings: ${summary.confirmedFindings}; blocked questions: ${summary.blockedQuestions}; evidence records: ${summary.totalEvidence}.`,
+		`Open hypotheses: ${summary.openHypotheses}; candidate findings: ${summary.candidateFindings}; confirmed findings: ${summary.confirmedFindings}; blocked questions: ${summary.blockedQuestions}; evidence records: ${summary.totalEvidence}.`,
 	];
 	const activeHypotheses = tracker.hypotheses.filter((record) => (options.activeHypothesisIds ?? []).includes(record.id));
 	const activeFindings = tracker.findings.filter((record) => (options.activeFindingIds ?? []).includes(record.id));
@@ -761,6 +871,15 @@ export function buildFindingsPromptSummary(
 		lines.push("Confirmed findings:");
 		for (const record of findings) {
 			lines.push(`- ${record.id}: ${record.title}`);
+		}
+	}
+
+	if (candidateQueue.length > 0) {
+		lines.push("Verification backlog:");
+		for (const record of candidateQueue) {
+			lines.push(
+				`- ${record.id} [${record.severity}/${record.reproStatus}] ${record.title} -> ${record.nextStep}`,
+			);
 		}
 	}
 

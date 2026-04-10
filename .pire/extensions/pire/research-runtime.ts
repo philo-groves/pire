@@ -2,6 +2,7 @@ import { buildArtifactManifestSummary, type ArtifactManifest } from "./artifacts
 import { buildCampaignLedgerSummary, type CampaignLedger } from "./campaign.js";
 import {
 	buildFindingsTrackerSummary,
+	getCandidateFindingQueue,
 	type DeadEndRecord,
 	type EvidenceRecord,
 	type FindingRecord,
@@ -240,10 +241,42 @@ export function formatSessionTypePrompt(sessionType: PireSessionType): string {
 	].join("\n");
 }
 
+export function buildLeadWorkflowPrompt(mode: PireMode, tracker: FindingsTracker): string {
+	const summary = buildFindingsTrackerSummary(tracker);
+	const queue = getCandidateFindingQueue(tracker).slice(0, 3);
+	const lines = [
+		"[PIRE LEAD WORKFLOW]",
+		"Work the loop in order: sweep for candidates, verify or kill the best lead, then report only what survives evidence review.",
+		"Use diverse entrypoints during sweep so the search does not collapse onto one comfortable explanation.",
+		"During verification, look for disconfirming evidence and alternate explanations before you strengthen the claim.",
+		"Treat missing findings as costly, but do not convert uncertainty into a confirmed claim without concrete evidence.",
+	];
+	if (mode === "recon" || mode === "dynamic") {
+		lines.push("Do not stop at a plausible candidate if the next low-risk verification step is obvious.");
+	}
+	if (mode === "proofing") {
+		lines.push("Use proofing to close narrow proof gaps, not to expand scope or mutate unrelated surfaces.");
+	}
+	if (mode === "report") {
+		lines.push("In report mode, downgrade or defer anything that has not survived verification.");
+	}
+	lines.push(
+		`Current backlog: ${summary.candidateFindings} candidate, ${summary.confirmedFindings} confirmed/reported, ${summary.totalEvidence} evidence records.`,
+	);
+	if (queue.length > 0) {
+		lines.push("Top leads to follow now:");
+		for (const record of queue) {
+			lines.push(`- ${record.id} [${record.severity}/${record.reproStatus}] ${record.title} -> ${record.nextStep}`);
+		}
+	}
+	return lines.join("\n");
+}
+
 export function buildResearchCompactionSummary(input: ResearchCompactionInput): string {
 	const trackerSummary = buildFindingsTrackerSummary(input.tracker);
 	const artifactSummary = buildArtifactManifestSummary(input.manifest);
 	const campaignSummary = input.campaign ? buildCampaignLedgerSummary(input.campaign) : undefined;
+	const candidateQueue = getCandidateFindingQueue(input.tracker).slice(0, 5);
 	const lines: string[] = [
 		"# Pire Research Compaction",
 		"",
@@ -260,7 +293,7 @@ export function buildResearchCompactionSummary(input: ResearchCompactionInput): 
 		"",
 		"## Tracker Summary",
 		`- hypotheses: ${trackerSummary.totalHypotheses} (${trackerSummary.openHypotheses} open, ${trackerSummary.supportedHypotheses} supported, ${trackerSummary.refutedHypotheses} refuted)`,
-		`- findings: ${trackerSummary.totalFindings} (${trackerSummary.confirmedFindings} confirmed/reported)`,
+		`- findings: ${trackerSummary.totalFindings} (${trackerSummary.candidateFindings} candidate, ${trackerSummary.confirmedFindings} confirmed/reported)`,
 		`- questions: ${trackerSummary.totalQuestions} (${trackerSummary.blockedQuestions} blocked)`,
 		`- evidence: ${trackerSummary.totalEvidence}`,
 		`- dead ends: ${trackerSummary.totalDeadEnds}`,
@@ -315,6 +348,16 @@ export function buildResearchCompactionSummary(input: ResearchCompactionInput): 
 		for (const record of confirmedFindings.slice(-5).reverse()) {
 			lines.push(`- ${record.id} [${record.status}/${record.severity}] ${record.title}`);
 			lines.push(`  statement: ${truncate(record.statement, 180)}`);
+		}
+	}
+
+	if (candidateQueue.length > 0) {
+		lines.push("", "## Verification Backlog");
+		for (const record of candidateQueue) {
+			lines.push(
+				`- ${record.id} [${record.severity}/${record.reproStatus}] ${record.title} (evidence:${record.evidenceCount}, basis:${record.basisCount})`,
+			);
+			lines.push(`  next: ${record.nextStep}`);
 		}
 	}
 

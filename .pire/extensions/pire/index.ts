@@ -76,11 +76,13 @@ import {
 	addHypothesis,
 	addQuestion,
 	buildArtifactRef,
+	getCandidateFindingQueue,
 	buildFindingsPromptSummary,
 	buildFindingsTrackerSummary,
 	buildFindingsWidgetLines,
 	loadFindingsTracker,
 	saveFindingsTracker,
+	summarizeCandidateFindings,
 	summarizeFindingsTracker,
 	updateFinding,
 	updateHypothesis,
@@ -135,6 +137,7 @@ import {
 	type NotebookFormat,
 } from "./reporting.js";
 import {
+	buildLeadWorkflowPrompt,
 	buildResearchCompactionSummary,
 	formatRolePrompt,
 	formatSessionTypePrompt,
@@ -399,7 +402,10 @@ function updateTrackerStatus(ctx: ExtensionContext, tracker: FindingsTracker): v
 	const summary = buildFindingsTrackerSummary(tracker);
 	ctx.ui.setStatus(
 		"pire-tracker",
-		ctx.ui.theme.fg("accent", `tracker:h${summary.openHypotheses}/f${summary.confirmedFindings}/q${summary.blockedQuestions}`),
+		ctx.ui.theme.fg(
+			"accent",
+			`tracker:h${summary.openHypotheses}/c${summary.candidateFindings}/f${summary.confirmedFindings}/q${summary.blockedQuestions}`,
+		),
 	);
 	ctx.ui.setWidget("pire-tracker", buildFindingsWidgetLines(tracker), { placement: "belowEditor" });
 }
@@ -701,6 +707,23 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					filter: filterText,
 					summary: buildFindingsTrackerSummary(findingsTracker),
 					tracker: findingsTracker,
+				},
+			},
+			{ triggerTurn: false },
+		);
+	};
+
+	const showCandidateQueue = (filterText?: string): void => {
+		const queue = getCandidateFindingQueue(findingsTracker);
+		pi.sendMessage(
+			{
+				customType: "pire-candidate-queue",
+				content: summarizeCandidateFindings(findingsTracker, filterText),
+				display: true,
+				details: {
+					filter: filterText,
+					candidates: queue,
+					summary: buildFindingsTrackerSummary(findingsTracker),
 				},
 			},
 			{ triggerTurn: false },
@@ -2592,6 +2615,22 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("candidate-queue", {
+		description: "Show the current candidate-finding verification backlog, optionally filtered by substring",
+		handler: async (args) => {
+			const filterText = args.trim();
+			showCandidateQueue(filterText.length > 0 ? filterText : undefined);
+		},
+	});
+
+	pi.registerCommand("leads", {
+		description: "Alias for /candidate-queue",
+		handler: async (args) => {
+			const filterText = args.trim();
+			showCandidateQueue(filterText.length > 0 ? filterText : undefined);
+		},
+	});
+
 	pi.registerCommand("campaign", {
 		description: "Show the current pire campaign ledger, optionally filtered by substring",
 		handler: async (args) => {
@@ -2969,6 +3008,61 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.registerCommand("verify-finding", {
+		description: "Switch into verification mode for one candidate finding and emit a follow-up checklist: /verify-finding <finding-id> [dynamic|proofing]",
+		handler: async (args, ctx) => {
+			const [findingId, requestedMode] = args.trim().split(/\s+/).filter((part) => part.length > 0);
+			if (!findingId) {
+				ctx.ui.notify("Usage: /verify-finding <finding-id> [dynamic|proofing]", "warning");
+				return;
+			}
+			if (requestedMode && requestedMode !== "dynamic" && requestedMode !== "proofing") {
+				ctx.ui.notify("verify-finding mode must be dynamic or proofing", "warning");
+				return;
+			}
+			const finding = findingsTracker.findings.find((record) => record.id === findingId);
+			if (!finding) {
+				ctx.ui.notify(`Unknown finding: ${findingId}`, "error");
+				return;
+			}
+			const nextMode: PireMode = requestedMode
+				? (requestedMode as PireMode)
+				: finding.reproStatus === "partial" || finding.reproStatus === "reproduced"
+					? "proofing"
+					: "dynamic";
+			applyMode(ctx, nextMode, { notify: false });
+			pi.sendMessage(
+				{
+					customType: "pire-verify-finding",
+					content: [
+						"Pire Verification Focus",
+						`- finding: ${finding.id}`,
+						`- title: ${finding.title}`,
+						`- posture: mode=${nextMode}`,
+						`- severity: ${finding.severity}`,
+						`- repro: ${finding.reproStatus}`,
+						`- evidence links: ${finding.relatedEvidenceIds.length}`,
+						`- artifact links: ${finding.relatedArtifactIds.length}`,
+						`- basis items: ${finding.basis.length}`,
+						`- next: ${
+							getCandidateFindingQueue(findingsTracker).find((record) => record.id === finding.id)?.nextStep ??
+							"run one narrow check that could falsify the claim"
+						}`,
+						"- verification rule: prefer disconfirming checks before strengthening the claim",
+						"- promotion rule: confirm only after concrete evidence or a reproducible path survives review",
+					].join("\n"),
+					display: true,
+					details: {
+						findingId: finding.id,
+						mode: nextMode,
+					},
+				},
+				{ triggerTurn: false },
+			);
+			ctx.ui.notify(`Verification focus: ${finding.id} (${nextMode})`, "info");
+		},
+	});
+
 	pi.registerCommand("mark-dead-end", {
 		description: "Record a dead end: /mark-dead-end <summary> :: <why-it-failed>",
 		handler: async (args, ctx) => {
@@ -3219,6 +3313,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				customType: "pire-mode-context",
 				content: [
 						formatModePrompt(currentMode),
+						buildLeadWorkflowPrompt(currentMode, findingsTracker),
 						currentSessionType ? formatSessionTypePrompt(currentSessionType) : undefined,
 						currentRole ? formatRolePrompt(currentRole) : undefined,
 						buildSafetyPrompt(currentSafety),

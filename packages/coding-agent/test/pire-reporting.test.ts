@@ -83,6 +83,7 @@ describe("pire reporting helpers", () => {
 				supportedHypotheses: 0,
 				refutedHypotheses: 0,
 				totalFindings: 1,
+				candidateFindings: 0,
 				confirmedFindings: 1,
 				totalQuestions: 0,
 				openQuestions: 0,
