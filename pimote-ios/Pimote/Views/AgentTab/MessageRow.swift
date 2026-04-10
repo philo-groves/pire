@@ -5,30 +5,22 @@ struct MessageRow: View {
     let message: AgentMessage
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            // Role icon
-            Image(systemName: iconName)
-                .font(.caption)
-                .foregroundColor(roleColor)
-                .frame(width: 24, height: 24)
-                .background(roleColor.opacity(0.15))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 2) {
+            // Role label with icon — above message
+            HStack(spacing: 4) {
+                Image(systemName: iconName)
+                    .font(.system(size: 9))
+                    .foregroundColor(roleColor)
                 Text(roleLabel)
-                    .font(.caption)
+                    .font(.system(size: 10, design: .monospaced))
                     .fontWeight(.semibold)
                     .foregroundColor(roleColor)
-
-                Text(message.text)
-                    .font(.body)
-                    .textSelection(.enabled)
             }
 
-            Spacer(minLength: 0)
+            MarkdownText(message.text)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
     }
 
     private var iconName: String {

@@ -23,6 +23,7 @@
 		A10014 /* ConnectionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10014; };
 		A10015 /* xterm.html in Resources */ = {isa = PBXBuildFile; fileRef = B10015; };
 		A10016 /* SessionInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10017; };
+		A10018 /* MarkdownText.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10018; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -43,6 +44,7 @@
 		B10015 /* xterm.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = xterm.html; sourceTree = "<group>"; };
 		B10016 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B10017 /* SessionInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionInfo.swift; sourceTree = "<group>"; };
+		B10018 /* MarkdownText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownText.swift; sourceTree = "<group>"; };
 		C10001 /* Pimote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Pimote.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -105,6 +107,7 @@
 			children = (
 				B10004 /* AgentView.swift */,
 				B10005 /* MessageRow.swift */,
+				B10018 /* MarkdownText.swift */,
 			);
 			path = AgentTab;
 			sourceTree = "<group>";
@@ -237,6 +240,7 @@
 				A10013 /* KeychainService.swift in Sources */,
 				A10014 /* ConnectionManager.swift in Sources */,
 				A10016 /* SessionInfo.swift in Sources */,
+				A10018 /* MarkdownText.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
