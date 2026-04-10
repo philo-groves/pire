@@ -74,16 +74,11 @@ import {
 	type TurnStartEvent,
 	wrapRegisteredTools,
 } from "./extensions/index.js";
-import {
-	extractTextContent,
-	IMPLICIT_CONTINUATION_MESSAGE,
-	isImplicitContinuationUserMessage,
-} from "./implicit-continuation.js";
 import { type BashExecutionMessage, type CustomMessage, convertToLlm } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
-import type { BranchSummaryEntry, CompactionEntry } from "./session-manager.js";
+import type { BranchSummaryEntry, CompactionEntry, SessionEntry } from "./session-manager.js";
 import {
 	CURRENT_SESSION_VERSION,
 	getLatestCompactionEntry,
@@ -413,10 +408,30 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 /** Thinking levels including xhigh (for supported models) */
 const THINKING_LEVELS_WITH_XHIGH: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
-const MAX_IMPLICIT_CONTINUATIONS_PER_PROMPT = 1;
-const MAX_AUTOPILOT_CONTINUATIONS_PER_PROMPT = 12;
+const MAX_IMPLICIT_CONTINUATIONS_PER_PROMPT = 8;
 const IMPLICIT_CONTINUATION_PREFIX =
 	/^(?:let me|i(?:'ll| will)\b|i am going to\b|next,?\s+i(?:'ll| will)\b|first,?\s+i(?:'ll| will)\b)/i;
+const IMPLICIT_CONTINUATION_MESSAGE = "Continue with the next concrete step. Do not stop after announcing intent.";
+
+export function extractTextContent(content: string | Array<{ type: string; text?: string }> | undefined): string {
+	if (content === undefined) return "";
+	if (typeof content === "string") return content;
+	return content
+		.filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
+		.map((part) => part.text)
+		.join("\n");
+}
+
+export function isImplicitContinuationUserMessage(message: {
+	role: string;
+	content?: string | Array<{ type: string; text?: string }>;
+}): boolean {
+	return message.role === "user" && extractTextContent(message.content).trim() === IMPLICIT_CONTINUATION_MESSAGE;
+}
+
+export function isImplicitContinuationEntry(entry: SessionEntry): boolean {
+	return entry.type === "message" && isImplicitContinuationUserMessage(entry.message);
+}
 
 // ============================================================================
 // AgentSession Class
@@ -876,12 +891,7 @@ export class AgentSession {
 	}
 
 	private _shouldImplicitlyContinue(message: AssistantMessage): boolean {
-		const autopilotEnabled = this.settingsManager.getAutopilotEnabled();
-		const maxContinuations = autopilotEnabled
-			? MAX_AUTOPILOT_CONTINUATIONS_PER_PROMPT
-			: MAX_IMPLICIT_CONTINUATIONS_PER_PROMPT;
-
-		if (this._implicitContinuationCount >= maxContinuations) {
+		if (this._implicitContinuationCount >= MAX_IMPLICIT_CONTINUATIONS_PER_PROMPT) {
 			return false;
 		}
 		if (this._retryPromise || this.agent.hasQueuedMessages()) {
@@ -894,9 +904,6 @@ export class AgentSession {
 			return false;
 		}
 		if (message.stopReason === "length") {
-			return true;
-		}
-		if (autopilotEnabled) {
 			return true;
 		}
 

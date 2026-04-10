@@ -304,6 +304,15 @@ function formatModePrompt(mode: PireMode): string {
 		"Distinguish facts, inferences, and assumptions explicitly.",
 		"Preserve exact commands, hashes, offsets, addresses, symbols, and crash signatures.",
 		"Prefer bash plus the standard CLI tooling available in PATH. Reach for custom harness tools only when they add durable research state such as tracker or inventory records.",
+		"",
+		"[AUTONOMOUS RESEARCH]",
+		"Continue research operations autonomously unless you are blocked on a decision that requires human input, or you have fully completed and verified a proof.",
+		'At each step boundary, announce your next action: "Let me ______" where the blank is the concrete next task. Then execute it immediately.',
+		"Do not pause to ask permission for routine analysis steps (reading files, running tools, chaining hypotheses). Only stop when:",
+		"- You need the human to make a scoping decision (e.g. which target, what risk tolerance)",
+		"- You are blocked on credentials, access, or resources you cannot obtain",
+		"- You have completed a proof and documented it in the tracker",
+		"- You have exhausted all promising leads and need new direction",
 	];
 
 	if (mode === "recon") {

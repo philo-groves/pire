@@ -51,6 +51,7 @@ import {
 	type AgentSession,
 	type AgentSessionEvent,
 	type BackgroundTaskInfo,
+	isImplicitContinuationUserMessage,
 	parseSkillBlock,
 	type SubagentInfo,
 } from "../../core/agent-session.js";
@@ -63,7 +64,6 @@ import type {
 	ExtensionWidgetOptions,
 } from "../../core/extensions/index.js";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.js";
-import { isImplicitContinuationUserMessage } from "../../core/implicit-continuation.js";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.js";
 import { createCompactionSummaryMessage } from "../../core/messages.js";
 import { findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.js";
@@ -209,7 +209,6 @@ export class InteractiveMode {
 
 	// Thinking block visibility state
 	private hideThinkingBlock = false;
-	private autopilotEnabled = false;
 
 	// Skill commands: command name -> skill file path
 	private skillCommands = new Map<string, string>();
@@ -309,8 +308,6 @@ export class InteractiveMode {
 
 		// Load hide thinking block setting
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
-		this.autopilotEnabled = this.settingsManager.getAutopilotEnabled();
-		this.footer.setAutopilotEnabled(this.autopilotEnabled);
 
 		// Register themes from resource loader and initialize
 		setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
@@ -497,7 +494,6 @@ export class InteractiveMode {
 				hint("app.backgroundTask.wait", "wait task"),
 				hint("app.backgroundTask.cancel", "cancel task"),
 				hint("app.backgroundTask.copy", "copy task"),
-				hint("app.autopilot.toggle", "to toggle autopilot"),
 				hint("app.message.dequeue", "to edit all queued messages"),
 				hint("app.clipboard.pasteImage", "to paste image"),
 				rawKeyHint("drop files", "to attach"),
@@ -2091,7 +2087,6 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
 		this.defaultEditor.onAction("app.editor.external", () => this.openExternalEditor());
 		this.defaultEditor.onAction("app.message.followUp", () => this.handleFollowUp());
-		this.defaultEditor.onAction("app.autopilot.toggle", () => this.toggleAutopilot());
 		this.defaultEditor.onAction("app.message.dequeue", () => this.handleDequeue());
 		this.defaultEditor.onAction("app.session.new", () => this.handleClearCommand());
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
@@ -3304,15 +3299,6 @@ export class InteractiveMode {
 		}
 
 		this.showStatus(`Thinking blocks: ${this.hideThinkingBlock ? "hidden" : "visible"}`);
-	}
-
-	private toggleAutopilot(): void {
-		const next = !this.settingsManager.getAutopilotEnabled();
-		this.settingsManager.setAutopilotEnabled(next);
-		this.autopilotEnabled = next;
-		this.footer.setAutopilotEnabled(next);
-		this.showStatus(`Autopilot ${next ? "enabled" : "disabled"}`);
-		this.ui.requestRender();
 	}
 
 	private openExternalEditor(): void {
@@ -4726,7 +4712,6 @@ export class InteractiveMode {
 		const externalEditor = this.getAppKeyDisplay("app.editor.external");
 		const cycleModelBackward = this.getAppKeyDisplay("app.model.cycleBackward");
 		const followUp = this.getAppKeyDisplay("app.message.followUp");
-		const autopilotToggle = this.getAppKeyDisplay("app.autopilot.toggle");
 		const dequeue = this.getAppKeyDisplay("app.message.dequeue");
 		const previousSubagent = this.getAppKeyDisplay("app.subagent.previous");
 		const nextSubagent = this.getAppKeyDisplay("app.subagent.next");
@@ -4780,7 +4765,6 @@ export class InteractiveMode {
 | \`${toggleThinking}\` | Toggle thinking block visibility |
 | \`${externalEditor}\` | Edit message in external editor |
 | \`${followUp}\` | Queue follow-up message |
-| \`${autopilotToggle}\` | Toggle autopilot |
 | \`${dequeue}\` | Restore queued messages |
 | \`${previousSubagent}\` / \`${nextSubagent}\` | Select previous / next subagent row |
 | \`${waitSubagent}\` / \`${closeSubagent}\` / \`${copySubagent}\` | Wait / close / copy selected subagent |

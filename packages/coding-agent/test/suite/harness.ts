@@ -9,10 +9,13 @@ import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { FauxModelDefinition, FauxProviderRegistration, FauxResponseStep, Model } from "@mariozechner/pi-ai";
 import { registerFauxProvider } from "@mariozechner/pi-ai";
-import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.js";
+import {
+	AgentSession,
+	type AgentSessionEvent,
+	isImplicitContinuationUserMessage,
+} from "../../src/core/agent-session.js";
 import { AuthStorage } from "../../src/core/auth-storage.js";
 import type { ExtensionRunner } from "../../src/core/extensions/index.js";
-import { isImplicitContinuationUserMessage } from "../../src/core/implicit-continuation.js";
 import { convertToLlm } from "../../src/core/messages.js";
 import { ModelRegistry } from "../../src/core/model-registry.js";
 import { SessionManager } from "../../src/core/session-manager.js";

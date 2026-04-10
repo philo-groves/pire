@@ -10,7 +10,7 @@ import {
 	TruncatedText,
 	truncateToWidth,
 } from "@mariozechner/pi-tui";
-import { isImplicitContinuationUserMessage } from "../../../core/implicit-continuation.js";
+import { isImplicitContinuationUserMessage } from "../../../core/agent-session.js";
 import type { SessionTreeNode } from "../../../core/session-manager.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
