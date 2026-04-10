@@ -152,39 +152,55 @@ class AgentService: ObservableObject {
         switch event.type {
         case "message_start":
             if let msg = event.message {
-                let role: AgentMessage.MessageRole
-                switch msg.role {
-                case "user": role = .user
-                case "assistant": role = .assistant
-                default: role = .system
-                }
+                let role = parseRole(msg.role)
                 let id = msg.id ?? UUID().uuidString
+                let text = msg.text ?? msg.content?.textValue ?? ""
                 currentStreamId = id
-                currentStreamText = msg.text ?? msg.content?.textValue ?? ""
-                isStreaming = true
+                isStreaming = msg.role == "assistant"
                 messages.append(AgentMessage(
                     id: id,
                     role: role,
-                    text: currentStreamText,
+                    text: text,
                     timestamp: Date()
                 ))
             }
 
-        case "message_delta", "text_delta":
-            if let delta = event.delta ?? event.text,
-               let id = currentStreamId,
+        case "message_update":
+            // Server sends full accumulated text, not a delta
+            if let msg = event.message,
+               let id = msg.id ?? currentStreamId,
                let idx = messages.lastIndex(where: { $0.id == id }) {
-                currentStreamText += delta
-                messages[idx].text = currentStreamText
+                let text = msg.text ?? msg.content?.textValue ?? ""
+                messages[idx].text = text
             }
 
-        case "message_end", "message_stop":
+        case "message_end":
+            if let msg = event.message,
+               let id = msg.id ?? currentStreamId,
+               let idx = messages.lastIndex(where: { $0.id == id }) {
+                let text = msg.text ?? msg.content?.textValue ?? ""
+                messages[idx].text = text
+            }
             currentStreamId = nil
-            currentStreamText = ""
             isStreaming = false
+
+        case "agent_end":
+            // Agent finished — refresh full message list to stay in sync
+            isStreaming = false
+            currentStreamId = nil
+            sendCommand(type: "get_messages")
 
         default:
             break
+        }
+    }
+
+    private func parseRole(_ role: String?) -> AgentMessage.MessageRole {
+        switch role {
+        case "user": return .user
+        case "assistant": return .assistant
+        case "tool": return .tool
+        default: return .system
         }
     }
 }

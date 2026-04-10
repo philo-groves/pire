@@ -20,6 +20,85 @@ import { hashPin } from "./auth.js";
 import { startServer } from "./server.js";
 import { startTunnel } from "./tunnel.js";
 
+const IMPLICIT_CONTINUATION = "Continue with the next concrete step. Do not stop after announcing intent.";
+
+function isImplicitContinuation(text: string): boolean {
+	return text.trim() === IMPLICIT_CONTINUATION;
+}
+
+/**
+ * Extract text from an AgentMessage content array.
+ */
+function extractText(msg: any): string {
+	if (typeof msg.text === "string") return msg.text;
+	if (typeof msg.content === "string") return msg.content;
+	if (Array.isArray(msg.content)) {
+		return msg.content
+			.filter((c: any) => c.type === "text")
+			.map((c: any) => c.text)
+			.join("\n");
+	}
+	return "";
+}
+
+/**
+ * Simplify raw AgentSessionEvents into mobile-friendly events.
+ * Returns null for events that should be suppressed.
+ */
+function simplifyEvent(event: any): any | null {
+	switch (event.type) {
+		case "message_start": {
+			const msg = event.message;
+			if (!msg) return null;
+			if (msg.role !== "user" && msg.role !== "assistant") return null;
+			const text = extractText(msg);
+			if (isImplicitContinuation(text)) return null;
+			return {
+				type: "message_start",
+				message: { id: msg.id, role: msg.role, text },
+			};
+		}
+
+		case "message_update": {
+			const msg = event.message;
+			if (!msg || (msg.role !== "user" && msg.role !== "assistant")) return null;
+			// Send the accumulated text so the client can replace (not append)
+			return {
+				type: "message_update",
+				message: {
+					id: msg.id,
+					role: msg.role,
+					text: extractText(msg),
+				},
+			};
+		}
+
+		case "message_end": {
+			const msg = event.message;
+			if (!msg || (msg.role !== "user" && msg.role !== "assistant")) return null;
+			return {
+				type: "message_end",
+				message: {
+					id: msg.id,
+					role: msg.role,
+					text: extractText(msg),
+				},
+			};
+		}
+
+		case "agent_start":
+		case "agent_end":
+		case "turn_start":
+		case "turn_end":
+			// Forward lifecycle events as-is (lightweight)
+			return event;
+
+		default:
+			// Suppress tool execution, compaction, queue updates, etc.
+			return null;
+	}
+}
+
 async function main() {
 	const args = process.argv.slice(2);
 	let pin: string | undefined;
@@ -142,14 +221,19 @@ async function main() {
 							}
 							return { id: m.id, role: m.role, text: m.text ?? m.content ?? "" };
 						})
-						.filter((m: any) => m.text && m.text.length > 0);
+						.filter((m: any) => m.text && m.text.length > 0 && !isImplicitContinuation(m.text));
 				}
 				return response;
 			}
 
 			return innerHandler.handleCommand(command);
 		},
-		subscribe: innerHandler.subscribe.bind(innerHandler),
+		subscribe(listener: (event: any) => void): () => void {
+			return innerHandler.subscribe((event: any) => {
+				const simplified = simplifyEvent(event);
+				if (simplified) listener(simplified);
+			});
+		},
 		dispose: innerHandler.dispose.bind(innerHandler),
 	};
 
