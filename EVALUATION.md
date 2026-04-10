@@ -443,6 +443,18 @@ Minimum validation after eval or lab changes:
 4. for new or changed labs, run `make build`, `make reset`, and the benign target path once to confirm no proof artifact is emitted
 5. run `npm run check`
 
+For new OS-targeted lab authoring, start from the scaffold generator instead of
+copying an existing lab by hand:
+
+```bash
+./labs/scaffolds/create-os-live-lab.sh --os windows --name <slug>
+./labs/scaffolds/create-os-live-lab.sh --os apple --name <slug>
+./labs/scaffolds/create-os-live-lab.sh --os android --name <slug>
+```
+
+Generated labs stay out of the audited inventory until they have a real target,
+stable proof validation, and a documented benign path.
+
 ## Real-World Intake
 
 Good sources for new harder tasks:

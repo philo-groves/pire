@@ -65,3 +65,34 @@ Recommended workflow:
 3. run `make reset`
 4. launch PiRE from that directory with `./scripts/run-pire.sh`
 5. keep the proof boundary stable between iterations
+
+## Per-OS Scaffolding
+
+The current audited inventory stays flat under `labs/<name>-live` so the existing
+live-lab sweeps and inventory checks remain stable.
+
+For new platform-specific work, use the scaffold generator under `labs/scaffolds/`
+to create a flat live-lab directory with explicit OS metadata and the standard lab
+layout:
+
+```bash
+./labs/scaffolds/create-os-live-lab.sh --os windows --name kcfg-race
+./labs/scaffolds/create-os-live-lab.sh --os apple --name pmap-uaf
+./labs/scaffolds/create-os-live-lab.sh --os android --name binder-refcount
+```
+
+The generator creates:
+- `labs/<os>-<slug>-live/README.md`
+- `labs/<os>-<slug>-live/.pire/TARGET.md`
+- `labs/<os>-<slug>-live/lab.json`
+- `labs/<os>-<slug>-live/fixtures/`, `runtime/`, `scripts/`, `src/`, and `tmp/`
+- placeholder `build`, `reset`, `run-target`, and `run-pire` scripts
+
+Do not add a generated scaffold to the audited inventory in this README or in
+`EVALUATION.md` until the lab has a real target, a fixed proof boundary, and a
+benign path that stays proof-free.
+
+Platform briefs live here:
+- `labs/scaffolds/windows/README.md`
+- `labs/scaffolds/apple/README.md`
+- `labs/scaffolds/android/README.md`
