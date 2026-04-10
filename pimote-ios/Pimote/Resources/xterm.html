@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            background: #1e1e1e;
+            overflow: hidden;
+        }
+        #terminal {
+            height: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div id="terminal"></div>
+    <script>
+        const term = new Terminal({
+            fontSize: 14,
+            fontFamily: 'Menlo, monospace',
+            theme: {
+                background: '#1e1e1e',
+                foreground: '#d4d4d4',
+                cursor: '#d4d4d4',
+            },
+            cursorBlink: true,
+            allowProposedApi: true,
+        });
+
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        term.open(document.getElementById('terminal'));
+        fitAddon.fit();
+
+        // Forward keyboard input to native
+        term.onData(function(data) {
+            window.webkit.messageHandlers.shellInput.postMessage(data);
+        });
+
+        // Called from Swift to write server output
+        function writeToTerminal(data) {
+            term.write(data);
+        }
+
+        // Track resize
+        const resizeObserver = new ResizeObserver(function() {
+            fitAddon.fit();
+            window.webkit.messageHandlers.shellResize.postMessage({
+                cols: term.cols,
+                rows: term.rows,
+            });
+        });
+        resizeObserver.observe(document.getElementById('terminal'));
+    </script>
+</body>
+</html>

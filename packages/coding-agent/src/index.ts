@@ -412,9 +412,12 @@ export {
 export { main } from "./main.js";
 // Run modes for programmatic SDK usage
 export {
+	createRpcHandler,
 	InteractiveMode,
 	type InteractiveModeOptions,
 	type PrintModeOptions,
+	type RpcHandler,
+	type RpcHandlerOptions,
 	runPrintMode,
 	runRpcMode,
 } from "./modes/index.js";
