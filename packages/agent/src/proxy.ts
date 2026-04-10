@@ -3,6 +3,15 @@
  * The server manages auth and proxies requests to LLM providers.
  */
 
+// Minimal fetch Response interface for tsgo compatibility
+interface FetchResponse {
+	ok: boolean;
+	status: number;
+	statusText: string;
+	json(): Promise<unknown>;
+	body: ReadableStream<Uint8Array> | null;
+}
+
 // Internal import for JSON parsing utility
 import {
 	type AssistantMessage,
@@ -118,7 +127,7 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 		}
 
 		try {
-			const response = await fetch(`${options.proxyUrl}/api/stream`, {
+			const response = (await fetch(`${options.proxyUrl}/api/stream`, {
 				method: "POST",
 				headers: {
 					Authorization: `Bearer ${options.authToken}`,
@@ -134,7 +143,7 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 					},
 				}),
 				signal: options.signal,
-			});
+			})) as unknown as FetchResponse;
 
 			if (!response.ok) {
 				let errorMessage = `Proxy error: ${response.status} ${response.statusText}`;
@@ -149,7 +158,8 @@ export function streamProxy(model: Model<any>, context: Context, options: ProxyS
 				throw new Error(errorMessage);
 			}
 
-			reader = response.body!.getReader();
+			if (!response.body) throw new Error("Proxy response has no body");
+			reader = response.body.getReader();
 			const decoder = new TextDecoder();
 			let buffer = "";
 

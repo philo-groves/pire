@@ -27,16 +27,23 @@ function isImplicitContinuation(text: string): boolean {
 }
 
 /**
- * Extract text from an AgentMessage content array.
+ * Extract text and thinking from an AgentMessage content array.
+ * Thinking blocks are wrapped in <thinking>...</thinking> markers
+ * so the mobile client can render them distinctly.
  */
 function extractText(msg: any): string {
 	if (typeof msg.text === "string") return msg.text;
 	if (typeof msg.content === "string") return msg.content;
 	if (Array.isArray(msg.content)) {
-		return msg.content
-			.filter((c: any) => c.type === "text")
-			.map((c: any) => c.text)
-			.join("\n");
+		const parts: string[] = [];
+		for (const c of msg.content) {
+			if (c.type === "text" && c.text) {
+				parts.push(c.text);
+			} else if (c.type === "thinking" && c.thinking) {
+				parts.push(`<thinking>${c.thinking}</thinking>`);
+			}
+		}
+		return parts.join("\n");
 	}
 	return "";
 }
@@ -86,15 +93,25 @@ function simplifyEvent(event: any): any | null {
 			};
 		}
 
+		case "tool_execution_start": {
+			// Show as a compact tool call indicator
+			return {
+				type: "message_start",
+				message: {
+					id: `tool-${event.toolCallId ?? Date.now()}`,
+					role: "tool",
+					text: `Tool: \`${event.toolName}\``,
+				},
+			};
+		}
+
 		case "agent_start":
 		case "agent_end":
 		case "turn_start":
 		case "turn_end":
-			// Forward lifecycle events as-is (lightweight)
 			return event;
 
 		default:
-			// Suppress tool execution, compaction, queue updates, etc.
 			return null;
 	}
 }
@@ -208,20 +225,35 @@ async function main() {
 			if (command.type === "get_messages") {
 				const response = (await innerHandler.handleCommand(command)) as any;
 				if (response.success && response.data?.messages) {
-					response.data.messages = response.data.messages
-						.filter((m: any) => m.role === "user" || m.role === "assistant")
-						.map((m: any) => {
-							// Flatten content arrays to just text
+					const simplified: any[] = [];
+					for (const m of response.data.messages) {
+						if (m.role === "user" || m.role === "assistant") {
 							if (Array.isArray(m.content)) {
-								const text = m.content
-									.filter((c: any) => c.type === "text")
-									.map((c: any) => c.text)
-									.join("\n");
-								return { id: m.id, role: m.role, text };
+								const parts: string[] = [];
+								const toolNames: string[] = [];
+								for (const c of m.content) {
+									if (c.type === "text" && c.text) parts.push(c.text);
+									else if (c.type === "thinking" && c.thinking)
+										parts.push(`<thinking>${c.thinking}</thinking>`);
+									else if (c.type === "toolCall" && c.name) toolNames.push(c.name);
+								}
+								const text = parts.join("\n");
+								if (text.length > 0 && !isImplicitContinuation(text)) {
+									simplified.push({ id: m.id, role: m.role, text });
+								}
+								// Add compact tool call indicators after the message
+								for (const name of toolNames) {
+									simplified.push({ id: `${m.id}-tool-${name}`, role: "tool", text: `Tool: \`${name}\`` });
+								}
+							} else {
+								const text = m.text ?? m.content ?? "";
+								if (text.length > 0 && !isImplicitContinuation(text)) {
+									simplified.push({ id: m.id, role: m.role, text });
+								}
 							}
-							return { id: m.id, role: m.role, text: m.text ?? m.content ?? "" };
-						})
-						.filter((m: any) => m.text && m.text.length > 0 && !isImplicitContinuation(m.text));
+						}
+					}
+					response.data.messages = simplified;
 				}
 				return response;
 			}
@@ -241,14 +273,40 @@ async function main() {
 	const pinHash = await hashPin(pin);
 	const _server = await startServer({ port, host, pinHash, rpcHandler });
 
+	// Show connection info
 	console.log(`\npimote server on http://${host}:${port}`);
 	console.log(`Session: ${runtime.session.sessionId} (${runtime.session.messages.length} msgs)`);
 
+	// Show local network IPs
+	const { networkInterfaces } = await import("node:os");
+	const nets = networkInterfaces();
+	const localIps: string[] = [];
+	for (const [, addrs] of Object.entries(nets)) {
+		for (const addr of addrs ?? []) {
+			if (addr.family === "IPv4" && !addr.internal) {
+				localIps.push(addr.address);
+			}
+		}
+	}
+	if (localIps.length > 0) {
+		console.log(`\nLocal network:`);
+		for (const ip of localIps) {
+			console.log(`  http://${ip}:${port}`);
+		}
+	}
+
+	// Try cloudflared tunnel for external access
 	try {
 		const tunnel = await startTunnel(port);
-		console.log(`Tunnel: ${tunnel.url}`);
-	} catch {
-		// no tunnel
+		console.log(`\nTunnel (external access): ${tunnel.url}`);
+		const { printQrCode } = await import("./qr.js");
+		await printQrCode(tunnel.url);
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : String(err);
+		if (msg.includes("not found")) {
+			console.log(`\nNo cloudflared — local access only. Install for external access:`);
+			console.log(`  brew install cloudflare/cloudflare/cloudflared`);
+		}
 	}
 
 	console.log("\nWaiting for connections...");

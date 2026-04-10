@@ -21,13 +21,49 @@ struct MarkdownText: View {
         var result = AttributedString()
         var inCodeBlock = false
         var codeBlockLines: [String] = []
+        var inThinking = false
+        var thinkingLines: [String] = []
         var isFirst = true
 
         for line in lines {
+            // Thinking block markers
+            if line.hasPrefix("<thinking>") {
+                inThinking = true
+                let after = String(line.dropFirst("<thinking>".count))
+                if after.hasSuffix("</thinking>") {
+                    // Single-line thinking
+                    let content = String(after.dropLast("</thinking>".count))
+                    if !content.isEmpty {
+                        if !isFirst { result.append(newline()) }
+                        result.append(thinkingText(content))
+                        isFirst = false
+                    }
+                    inThinking = false
+                } else if !after.isEmpty {
+                    thinkingLines.append(after)
+                }
+                continue
+            }
+            if inThinking {
+                if line.hasSuffix("</thinking>") {
+                    let before = String(line.dropLast("</thinking>".count))
+                    if !before.isEmpty { thinkingLines.append(before) }
+                    if !thinkingLines.isEmpty {
+                        if !isFirst { result.append(newline()) }
+                        result.append(thinkingText(thinkingLines.joined(separator: "\n")))
+                        isFirst = false
+                    }
+                    thinkingLines = []
+                    inThinking = false
+                } else {
+                    thinkingLines.append(line)
+                }
+                continue
+            }
+
             // Code block fences
             if line.hasPrefix("```") {
                 if inCodeBlock {
-                    // End code block
                     if !isFirst { result.append(newline()) }
                     result.append(codeBlock(codeBlockLines.joined(separator: "\n")))
                     codeBlockLines = []
@@ -63,6 +99,12 @@ struct MarkdownText: View {
                 result.append(parseInline(line))
             }
             isFirst = false
+        }
+
+        // Unclosed thinking block
+        if inThinking && !thinkingLines.isEmpty {
+            if !isFirst { result.append(newline()) }
+            result.append(thinkingText(thinkingLines.joined(separator: "\n")))
         }
 
         // Unclosed code block
@@ -161,6 +203,13 @@ struct MarkdownText: View {
         s.font = .system(size: 11, design: .monospaced)
         s.foregroundColor = .green
         s.backgroundColor = Color(white: 0.15)
+        return s
+    }
+
+    private func thinkingText(_ text: String) -> AttributedString {
+        var s = AttributedString(text)
+        s.font = .system(size: 11, design: .monospaced).italic()
+        s.foregroundColor = Color(white: 0.5)
         return s
     }
 

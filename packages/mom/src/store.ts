@@ -3,6 +3,14 @@ import { appendFile, writeFile } from "fs/promises";
 import { join } from "path";
 import * as log from "./log.js";
 
+// Minimal fetch Response interface for tsgo compatibility
+interface FetchResponse {
+	ok: boolean;
+	status: number;
+	statusText: string;
+	arrayBuffer(): Promise<ArrayBuffer>;
+}
+
 export interface Attachment {
 	original: string; // original filename from uploader
 	local: string; // path relative to working dir (e.g., "C12345/attachments/1732531234567_file.png")
@@ -218,11 +226,11 @@ export class ChannelStore {
 			mkdirSync(dir, { recursive: true });
 		}
 
-		const response = await fetch(url, {
+		const response = (await fetch(url, {
 			headers: {
 				Authorization: `Bearer ${this.botToken}`,
 			},
-		});
+		})) as unknown as FetchResponse;
 
 		if (!response.ok) {
 			throw new Error(`HTTP ${response.status}: ${response.statusText}`);

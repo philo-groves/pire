@@ -5,6 +5,7 @@ import AVFoundation
 struct PairView: View {
     @EnvironmentObject var connectionManager: ConnectionManager
     @State private var showManualEntry = false
+    @State private var showScanner = false
     @State private var url = ""
     @State private var pin = ""
     @State private var errorMessage: String?
@@ -79,10 +80,11 @@ struct PairView: View {
 
                 Spacer()
 
+                // Scan QR button
                 Button {
-                    showManualEntry = true
+                    showScanner = true
                 } label: {
-                    Label("Enter Manually", systemImage: "keyboard")
+                    Label("Scan QR Code", systemImage: "qrcode.viewfinder")
                         .frame(maxWidth: .infinity)
                         .padding()
                         .background(Color.accentColor)
@@ -90,9 +92,30 @@ struct PairView: View {
                         .cornerRadius(12)
                 }
                 .padding(.horizontal, 32)
+
+                // Manual entry button
+                Button {
+                    showManualEntry = true
+                } label: {
+                    Label("Enter Manually", systemImage: "keyboard")
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color(.secondarySystemBackground))
+                        .foregroundColor(.primary)
+                        .cornerRadius(12)
+                }
+                .padding(.horizontal, 32)
                 .padding(.bottom, 32)
             }
             .navigationTitle("Pimote")
+            .sheet(isPresented: $showScanner) {
+                QRScanSheet(onScanned: { scannedUrl in
+                    showScanner = false
+                    url = scannedUrl
+                    // Auto-open PIN entry with pre-filled URL
+                    showManualEntry = true
+                })
+            }
             .sheet(isPresented: $showManualEntry) {
                 ManualEntrySheet(url: $url, pin: $pin, errorMessage: $errorMessage) {
                     guard !url.isEmpty, !pin.isEmpty else {
@@ -111,6 +134,31 @@ struct PairView: View {
     }
 }
 
+// MARK: - QR Scanner Sheet
+
+struct QRScanSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var onScanned: (String) -> Void
+
+    var body: some View {
+        NavigationStack {
+            QRScannerView { url in
+                onScanned(url)
+            }
+            .ignoresSafeArea()
+            .navigationTitle("Scan QR Code")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Manual Entry Sheet
+
 struct ManualEntrySheet: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var url: String
@@ -122,7 +170,7 @@ struct ManualEntrySheet: View {
         NavigationStack {
             Form {
                 Section("Server URL") {
-                    TextField("http://192.168.x.x:19836", text: $url)
+                    TextField("https://xxx.trycloudflare.com", text: $url)
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -140,7 +188,7 @@ struct ManualEntrySheet: View {
                     }
                 }
             }
-            .navigationTitle("Manual Connection")
+            .navigationTitle("Connect")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

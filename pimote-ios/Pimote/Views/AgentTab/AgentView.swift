@@ -58,6 +58,9 @@ struct AgentView: View {
                         }
                         .padding(.vertical, 8)
                     }
+                    .onTapGesture {
+                        inputFocused = false
+                    }
                     .onChange(of: agentService.messages.count) {
                         if let last = agentService.messages.last {
                             withAnimation {
