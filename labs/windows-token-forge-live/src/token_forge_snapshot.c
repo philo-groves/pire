@@ -22,12 +22,20 @@ static const unsigned char SECRET_TOKEN_XOR[] = {
 #define SECRET_TOKEN_LEN 14
 #define XOR_KEY 0x33
 
-/* ── The 8-byte validation token (fixed, embedded) ── */
-static const uint8_t VALID_TOKEN[8] = {
-    0x4A, 0x7F, 0x13, 0xD2, 0x8B, 0x06, 0xE1, 0x55
-};
 #define TOKEN_BYTES 8
 #define PREFIX_BYTES 7  /* first 7 bytes disclosed, last 1 must be computed */
+
+/* ── The 7-byte disclosed prefix (the 8th byte is NOT stored anywhere).
+ *    The full valid token is never materialised in the binary; submissions
+ *    are validated purely by matching the expected checksum byte. ── */
+static const uint8_t TOKEN_PREFIX[PREFIX_BYTES] = {
+    0x4A, 0x7F, 0x13, 0xD2, 0x8B, 0x06, 0xE1
+};
+
+/* Expected checksum of the 8-byte valid token.
+ * Derived offline from compute_checksum(VALID_TOKEN, 8), stored as an opaque
+ * byte so no reference token ever lives in this binary. */
+#define EXPECTED_CHECKSUM 0xDC
 
 /* ── Checksum: rotate-XOR accumulator ── */
 static uint8_t compute_checksum(const uint8_t *data, int len) {
@@ -170,8 +178,7 @@ int main(int argc, char *argv[]) {
 
     log_msg(runtime_dir, "val", "validator started");
 
-    /* Compute the expected checksum from the embedded valid token */
-    uint8_t expected_checksum = compute_checksum(VALID_TOKEN, TOKEN_BYTES);
+    const uint8_t expected_checksum = EXPECTED_CHECKSUM;
 
     /* ═══ Disclosure ═══ */
     if (inv.trace_validator) {
@@ -180,7 +187,7 @@ int main(int argc, char *argv[]) {
 
         char prefix_hex[32] = {0};
         for (int i = 0; i < PREFIX_BYTES; i++)
-            snprintf(prefix_hex + i * 2, 3, "%02x", VALID_TOKEN[i]);
+            snprintf(prefix_hex + i * 2, 3, "%02x", TOKEN_PREFIX[i]);
 
         log_msg(runtime_dir, "val", "state dump v2.0");
         log_msg(runtime_dir, "val", "token_len=%d prefix_len=%d",
