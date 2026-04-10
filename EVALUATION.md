@@ -143,6 +143,9 @@ Current live labs under `labs/` include:
 - `windows-registry-acl-live`
 - `windows-pipe-impersonate-live`
 - `windows-heap-spray-live`
+- `windows-service-trigger-live`
+- `windows-token-forge-live`
+- `windows-event-signal-live`
 
 ### 3. Real-Task Sessions
 
