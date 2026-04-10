@@ -38,34 +38,6 @@ That direction shows up in three places across the repo:
 
 For the full CLI workflow, install instructions, and PiRE-specific runtime details, read [packages/coding-agent/README.md](packages/coding-agent/README.md).
 
-## Share your OSS coding agent sessions
-
-If you use pire or other coding agents for open source work, please share your sessions.
-
-Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
-
-For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
-
-To publish sessions, use [`badlogic/pire-share-hf`](https://github.com/badlogic/pire-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pire-share-hf`.
-
-You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `pire-mono` sessions.
-
-I regularly publish my own `pire-mono` work sessions here:
-
-- [badlogicgames/pire-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pire-mono)
-
-## Packages
-
-| Package | Description |
-|---------|-------------|
-| **[@mariozechner/pire-ai](packages/ai)** | Unified multi-provider LLM API used by PiRE and other runtimes |
-| **[@mariozechner/pire-agent-core](packages/agent)** | Agent runtime with tool calling, state management, and delegation primitives |
-| **[@mariozechner/pire-coding-agent](packages/coding-agent)** | PiRE CLI/runtime for coding, research, subagents, and eval-driven workflows |
-| **[@mariozechner/pire-mom](packages/mom)** | Slack bot that delegates messages to the pire coding agent |
-| **[@mariozechner/pire-tui](packages/tui)** | Terminal UI library with differential rendering |
-| **[@mariozechner/pire-web-ui](packages/web-ui)** | Web components for AI chat interfaces |
-| **[@mariozechner/pire-pods](packages/pods)** | CLI for managing vLLM deployments on GPU pods |
-
 ## Research Workflow
 
 If you are working in a PiRE-enabled target repo, the important local surface is usually:
