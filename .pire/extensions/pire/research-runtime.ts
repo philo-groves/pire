@@ -19,7 +19,7 @@ export type PireSessionType =
 	| "firmware-analysis"
 	| "web-security-review"
 	| "malware-analysis";
-export type PireMode = "recon" | "dynamic" | "proofing" | "report";
+export type PireMode = "recon" | "triage" | "dynamic" | "proofing" | "report";
 
 export interface PireToolActivity {
 	tool: string;
@@ -253,7 +253,7 @@ export function buildLeadWorkflowPrompt(mode: PireMode, tracker: FindingsTracker
 		"Treat missing findings as costly, but do not convert uncertainty into a confirmed claim without concrete evidence.",
 		"Reasoning, chaining analysis, and logic-bug identification are higher-value work than building harnesses. Only move to code when you have a strong hypothesis worth testing.",
 	];
-	if (mode === "recon" || mode === "dynamic") {
+	if (mode === "recon" || mode === "triage" || mode === "dynamic") {
 		lines.push("Do not stop at a plausible candidate if the next low-risk verification step is obvious — but prefer source reasoning over writing code when both can answer the question.");
 	}
 	if (mode === "proofing") {

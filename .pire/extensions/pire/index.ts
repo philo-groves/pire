@@ -228,6 +228,7 @@ const ROLE_FLAG = "pire-role";
 const SESSION_TYPE_FLAG = "pire-session";
 const MODE_TOOLS: Record<PireMode, string[]> = {
 	recon: ["research_tracker", "read", "bash", "environment_inventory"],
+	triage: ["research_tracker", "read", "bash", "environment_inventory"],
 	dynamic: ["research_tracker", "read", "bash", "environment_inventory"],
 	proofing: ["research_tracker", "read", "bash", "edit", "write", "environment_inventory"],
 	report: ["research_tracker", "read", "bash", "edit", "write", "environment_inventory"],
@@ -274,31 +275,37 @@ const DYNAMIC_PATTERNS = [
 ];
 
 function isPireMode(value: string): value is PireMode {
-	return value === "recon" || value === "dynamic" || value === "proofing" || value === "report";
+	return value === "recon" || value === "triage" || value === "dynamic" || value === "proofing" || value === "report";
 }
 
 function isAllowedResearchCommand(command: string, mode: PireMode): boolean {
-	// Pimote infrastructure commands are always allowed
-	if (command.includes("serve-session.ts") || command.includes("pimote") || command.includes("127.0.0.1:19836")) {
+	// Pimote infrastructure is always allowed
+	if (command.includes("serve-session") || command.includes("pimote") || command.includes("19836")) {
 		return true;
 	}
 
+	// Proofing + dynamic: everything allowed, no restrictions
+	if (mode === "proofing" || mode === "dynamic") {
+		return true;
+	}
+
+	// Active probing patterns are blocked in recon/triage/report
+	if (ACTIVE_PROBING_PATTERNS.some((pattern) => pattern.test(command))) {
+		return false;
+	}
+
+	// Recon + triage: allow all local read/search/analysis commands
+	if (mode === "recon" || mode === "triage") {
+		if (/\brm\s+-rf\b/i.test(command)) return false;
+		if (/\bsudo\b/i.test(command)) return false;
+		if (/\bgit\s+(push|reset\s+--hard)/i.test(command)) return false;
+		return true;
+	}
+
+	// Report mode: allow reads, block mutation
 	if (DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command))) {
 		return false;
 	}
-
-	if (mode !== "proofing" && ACTIVE_PROBING_PATTERNS.some((pattern) => pattern.test(command))) {
-		return false;
-	}
-
-	if (mode === "proofing") {
-		return true;
-	}
-
-	if (DYNAMIC_PATTERNS.some((pattern) => pattern.test(command))) {
-		return mode === "dynamic";
-	}
-
 	return true;
 }
 
@@ -321,20 +328,37 @@ function formatModePrompt(mode: PireMode): string {
 	];
 
 	// Always allowed regardless of mode
-	lines.push("Exception: /skill:pimote and pimote server commands (serve-session.ts, cloudflared tunnel, curl to 127.0.0.1:19836) are always permitted in any mode — they are infrastructure, not research operations.");
+	lines.push("Infrastructure commands (pimote, serve-session, cloudflared, curl to 127.0.0.1:19836) are always permitted.");
 
+	// Phase-permissions matrix
 	if (mode === "recon") {
-		lines.push("Recon mode: prefer reading, inventory, and hypothesis generation. Avoid editing files or active external probing, but keep moving with local analysis.");
+		lines.push("");
+		lines.push("[RECON PERMISSIONS]");
+		lines.push("ALLOWED: any local file reads, broad recursive grep/rg/search, source diffing, binary metadata (strings/nm/readelf/objdump/hexdump/file), reading existing analysis artifacts, running previously-built benign local probes in observation mode.");
+		lines.push("NOT ALLOWED: writing new code, modifying repo files, active external probing, network interaction.");
+		lines.push("Focus: inventory, environment validation, hypothesis generation, source-level exploitability reasoning.");
+	} else if (mode === "triage") {
+		lines.push("");
+		lines.push("[TRIAGE PERMISSIONS]");
+		lines.push("ALLOWED: everything in recon, plus: running existing PoCs/harnesses locally, small one-off local commands to answer a defined hypothesis, compiling already-present PoC source without editing it.");
+		lines.push("NOT ALLOWED: fuzzing, broad active probing, external target interaction, writing new harnesses.");
+		lines.push("Focus: validating or killing hypotheses using existing local tooling and artifacts. Transition to /dynamic or /proofing when you need runtime tracing or new code.");
 	} else if (mode === "dynamic") {
-		lines.push("Dynamic mode allows runtime observation and tracing while still avoiding mutation and active external probing by default.");
-		lines.push("Do not edit or write files unless the user explicitly switches to proofing or report mode, but do not stall on safe local runtime checks.");
+		lines.push("");
+		lines.push("[DYNAMIC PERMISSIONS]");
+		lines.push("ALLOWED: everything. No restrictions. File edits, new code, debuggers, tracers, probes, network access — all permitted.");
+		lines.push("Focus: whatever is needed to validate hypotheses. Use debuggers, build harnesses, edit files, run probes freely.");
 	} else if (mode === "proofing") {
-		lines.push("Proofing mode is authorized for mutation and tightly scoped proof-of-concept work.");
-		lines.push("Keep modifications narrow and evidence-driven. Only build code to test a hypothesis you have already articulated — not to explore.");
-		lines.push("Prefer the smallest possible probe over a comprehensive harness. A 30-line PoC that tests one theory is better than a 300-line harness.");
+		lines.push("");
+		lines.push("[PROOFING PERMISSIONS]");
+		lines.push("ALLOWED: everything. Mutation, new code, tightly scoped PoC work.");
+		lines.push("GUIDANCE: keep modifications narrow and evidence-driven. Only build code to test a hypothesis you have already articulated. Prefer 30-line PoC over 300-line harness.");
 	} else {
-		lines.push("Report mode focuses on synthesizing evidence into durable notes, advisories, and reproducible write-ups.");
-		lines.push("Preserve technical specificity and label uncertainty clearly.");
+		lines.push("");
+		lines.push("[REPORT PERMISSIONS]");
+		lines.push("ALLOWED: reads, analysis, writing reports/notes/advisories.");
+		lines.push("NOT ALLOWED: new probes, active probing.");
+		lines.push("Focus: synthesize evidence into durable write-ups. Preserve technical specificity. Label uncertainty clearly. Downgrade anything that has not survived verification.");
 	}
 
 	return lines.join("\n");
@@ -2525,12 +2549,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.registerCommand("mode", {
-		description: "Show or change pire mode: /mode [recon|dynamic|proofing|report]",
+		description: "Show or change pire mode: /mode [recon|triage|dynamic|proofing|report]",
 		handler: async (args, ctx) => {
 			const requested = args.trim().toLowerCase();
 			if (!requested) {
 				const choice = ctx.hasUI
-					? await ctx.ui.select("Select pire mode", ["recon", "dynamic", "proofing", "report"])
+					? await ctx.ui.select("Select pire mode", ["recon", "triage", "dynamic", "proofing", "report"])
 					: undefined;
 				if (!choice) {
 					ctx.ui.notify(`current pire mode: ${currentMode}`, "info");
@@ -2549,7 +2573,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		},
 	});
 
-	for (const mode of ["recon", "dynamic", "proofing", "report"] as const) {
+	for (const mode of ["recon", "triage", "dynamic", "proofing", "report"] as const) {
 		pi.registerCommand(mode, {
 			description: `Switch pire to ${mode} mode`,
 			handler: async (_args, ctx) => applyMode(ctx, mode),
@@ -3403,7 +3427,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			return;
 		}
 
-		if ((event.toolName === "edit" || event.toolName === "write") && (currentMode === "recon" || currentMode === "dynamic")) {
+		if ((event.toolName === "edit" || event.toolName === "write") && (currentMode === "recon" || currentMode === "triage")) {
 			return {
 				block: true,
 				reason: `pire ${currentMode} mode blocks file mutation. Switch to /proofing or /report first if mutation is intentional.`,
