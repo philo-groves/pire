@@ -278,6 +278,11 @@ function isPireMode(value: string): value is PireMode {
 }
 
 function isAllowedResearchCommand(command: string, mode: PireMode): boolean {
+	// Pimote infrastructure commands are always allowed
+	if (command.includes("serve-session.ts") || command.includes("pimote") || command.includes("127.0.0.1:19836")) {
+		return true;
+	}
+
 	if (DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command))) {
 		return false;
 	}
@@ -315,9 +320,11 @@ function formatModePrompt(mode: PireMode): string {
 		"- You have exhausted all promising leads and need new direction",
 	];
 
+	// Always allowed regardless of mode
+	lines.push("Exception: /skill:pimote and pimote server commands (serve-session.ts, cloudflared tunnel, curl to 127.0.0.1:19836) are always permitted in any mode — they are infrastructure, not research operations.");
+
 	if (mode === "recon") {
-		lines.push("Recon mode starts with inventory, environment validation, and hypothesis generation before mutation.");
-		lines.push("Do not edit or write files. Avoid active probing or destructive commands, but keep moving with benign local analysis.");
+		lines.push("Recon mode: prefer reading, inventory, and hypothesis generation. Avoid editing files or active external probing, but keep moving with local analysis.");
 	} else if (mode === "dynamic") {
 		lines.push("Dynamic mode allows runtime observation and tracing while still avoiding mutation and active external probing by default.");
 		lines.push("Do not edit or write files unless the user explicitly switches to proofing or report mode, but do not stall on safe local runtime checks.");
@@ -3405,6 +3412,10 @@ export default function pireExtension(pi: ExtensionAPI): void {
 
 		if (event.toolName === "bash") {
 			const command = typeof event.input.command === "string" ? event.input.command : "";
+			// Pimote infrastructure is always allowed
+			if (command.includes("serve-session") || command.includes("pimote") || command.includes("19836")) {
+				return;
+			}
 			if (PERSISTENCE_PATTERNS.some((pattern) => pattern.test(command))) {
 				const decision = allowPersistence(currentSafety);
 				if (!decision.allowed) {

@@ -36,10 +36,23 @@ class AgentService: ObservableObject {
     }
 
     func sendPrompt(_ text: String) {
+        // Show locally immediately
+        messages.append(AgentMessage(
+            id: UUID().uuidString,
+            role: .user,
+            text: text,
+            timestamp: Date()
+        ))
         sendCommand(type: "prompt", extra: ["message": text])
     }
 
     func sendFollowUp(_ text: String) {
+        messages.append(AgentMessage(
+            id: UUID().uuidString,
+            role: .user,
+            text: text,
+            timestamp: Date()
+        ))
         sendCommand(type: "follow_up", extra: ["message": text])
     }
 
@@ -137,6 +150,13 @@ class AgentService: ObservableObject {
                     )
                 }
             }
+            return
+        }
+
+        // Handle session_refresh — file watcher detected changes, re-fetch
+        if let event = try? JSONDecoder().decode(AgentSessionEvent.self, from: data),
+           event.type == "session_refresh" {
+            sendCommand(type: "get_messages")
             return
         }
 

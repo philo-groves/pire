@@ -26,6 +26,8 @@ export interface PimoteServerOptions {
 	host?: string;
 	pinHash: string;
 	rpcHandler: RpcHandler;
+	/** Optional: drain queued mobile input messages. Called by GET /input from pire extension. */
+	drainInput?: () => string[];
 }
 
 export interface PimoteServer {
@@ -35,7 +37,7 @@ export interface PimoteServer {
 }
 
 export async function startServer(options: PimoteServerOptions): Promise<PimoteServer> {
-	const { port, host = "127.0.0.1", pinHash, rpcHandler } = options;
+	const { port, host = "127.0.0.1", pinHash, rpcHandler, drainInput } = options;
 
 	const agentWss = new WebSocketServer({ noServer: true });
 	const shellWss = new WebSocketServer({ noServer: true });
@@ -46,6 +48,13 @@ export async function startServer(options: PimoteServerOptions): Promise<PimoteS
 		if (req.url === "/health") {
 			res.writeHead(200, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ status: "ok", clients: clients.size }));
+			return;
+		}
+		// Drain queued mobile input — called by pire extension poller
+		if (req.url === "/input" && drainInput) {
+			const messages = drainInput();
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end(JSON.stringify({ messages }));
 			return;
 		}
 		res.writeHead(404);

@@ -8,11 +8,13 @@ Start the pimote server to enable remote access to this pire session from the Pi
 
 ## What to do
 
-The user will provide a PIN (or use the default). Run the serve-session script:
+The user will provide a PIN (or use the default). Run the serve-session script with the **current working directory** as `--cwd`:
 
 ```bash
-npx tsx packages/pimote/src/serve-session.ts --pin <PIN> --cwd $(pwd)
+npx tsx /Users/philogroves/pire/packages/pimote/src/serve-session.ts --pin <PIN> --cwd $(pwd) &
 ```
+
+**CRITICAL**: Use `$(pwd)` for `--cwd`, NOT a hardcoded path. The server must observe the session directory matching the current pire working directory.
 
 This will:
 1. Resume the most recent session for this working directory
@@ -20,7 +22,7 @@ This will:
 3. Start a Cloudflare tunnel for external access
 4. Print the tunnel URL and QR code
 
-**Important**: Run this command in the background so the session remains interactive. Use the bash tool with `&` or tell the user to run it in a separate terminal.
+Run this command in the background with `&` so the session remains interactive.
 
 ## Arguments
 
@@ -32,19 +34,17 @@ User says: `/pimote 1234`
 
 Run:
 ```bash
-npx tsx packages/pimote/src/serve-session.ts --pin 1234 --cwd /Users/philogroves/pire &
+npx tsx /Users/philogroves/pire/packages/pimote/src/serve-session.ts --pin 1234 --cwd $(pwd) &
 ```
 
-Then wait a few seconds and check:
+Wait a few seconds, then check health and report the tunnel URL:
 ```bash
-curl -s http://127.0.0.1:19836/health
+sleep 15 && curl -s http://127.0.0.1:19836/health
 ```
-
-Report the tunnel URL and connection details to the user.
 
 ## Stopping
 
-To stop pimote, kill the process:
+To stop pimote:
 ```bash
 lsof -ti:19836 | xargs kill
 ```

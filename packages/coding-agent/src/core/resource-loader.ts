@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import chalk from "chalk";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { loadThemeFromPath, type Theme } from "../modes/interactive/theme/theme.js";
@@ -945,16 +946,31 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	private getPireResourcePaths(resourceType: "skills" | "prompts" | "extensions"): string[] {
-		const resourcePath = join(this.cwd, PIRE_DIR_NAME, resourceType);
-		if (!existsSync(resourcePath)) {
-			return [];
-		}
+		const paths: string[] = [];
+		const seen = new Set<string>();
 
-		if (resourceType === "extensions") {
-			return discoverExtensionEntriesInDir(resourcePath);
-		}
+		const addDir = (dir: string) => {
+			if (seen.has(dir) || !existsSync(dir)) return;
+			seen.add(dir);
+			if (resourceType === "extensions") {
+				paths.push(...discoverExtensionEntriesInDir(dir));
+			} else {
+				paths.push(dir);
+			}
+		};
 
-		return [resourcePath];
+		// 1. Agent-level (always loaded for this user)
+		addDir(join(this.agentDir, resourceType));
+
+		// 2. cwd's .pire/
+		addDir(join(this.cwd, PIRE_DIR_NAME, resourceType));
+
+		// 2. Pire repo's .pire/ (always loaded regardless of cwd)
+		// resource-loader.ts is at packages/coding-agent/src/core/ — 4 levels up = repo root
+		const repoDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
+		addDir(join(repoDir, PIRE_DIR_NAME, resourceType));
+
+		return paths;
 	}
 
 	private isUnderPath(target: string, root: string): boolean {

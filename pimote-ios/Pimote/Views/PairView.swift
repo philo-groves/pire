@@ -67,7 +67,12 @@ struct PairView: View {
                             }
                             .buttonStyle(.plain)
                             .padding(.horizontal)
-                            .swipeActions(edge: .trailing) {
+                            .contextMenu {
+                                Button {
+                                    connectionManager.connect(to: conn)
+                                } label: {
+                                    Label("Connect", systemImage: "bolt.fill")
+                                }
                                 Button(role: .destructive) {
                                     connectionManager.removeConnection(conn)
                                 } label: {

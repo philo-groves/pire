@@ -1,21 +1,17 @@
 #!/usr/bin/env node
 
 /**
- * Standalone pimote server that resumes the most recent pire session.
+ * Pimote session observer — reads the live pire session file and streams
+ * updates to mobile clients over WebSocket. Does NOT create its own
+ * AgentSessionRuntime, so it never competes with the running pire process.
  *
  * Usage:
  *   npx tsx packages/pimote/src/serve-session.ts --pin 1234 [--port 19836] [--host 0.0.0.0]
  */
 
+import * as fs from "node:fs";
 import { join } from "node:path";
-import {
-	type CreateAgentSessionRuntimeFactory,
-	createAgentSession,
-	createAgentSessionRuntime,
-	createRpcHandler,
-	getAgentDir,
-	SessionManager,
-} from "@philogroves/pire";
+import { getAgentDir, type SessionInfo, SessionManager } from "@philogroves/pire";
 import { hashPin } from "./auth.js";
 import { startServer } from "./server.js";
 import { startTunnel } from "./tunnel.js";
@@ -26,94 +22,124 @@ function isImplicitContinuation(text: string): boolean {
 	return text.trim() === IMPLICIT_CONTINUATION;
 }
 
-/**
- * Extract text and thinking from an AgentMessage content array.
- * Thinking blocks are wrapped in <thinking>...</thinking> markers
- * so the mobile client can render them distinctly.
- */
-function extractText(msg: any): string {
-	if (typeof msg.text === "string") return msg.text;
+/** Extract user-visible text from a session entry's message content. */
+function extractMessageText(msg: any): string {
 	if (typeof msg.content === "string") return msg.content;
 	if (Array.isArray(msg.content)) {
 		const parts: string[] = [];
 		for (const c of msg.content) {
-			if (c.type === "text" && c.text) {
-				parts.push(c.text);
-			} else if (c.type === "thinking" && c.thinking) {
-				parts.push(`<thinking>${c.thinking}</thinking>`);
-			}
+			if (c.type === "text" && c.text) parts.push(c.text);
+			else if (c.type === "thinking" && c.thinking) parts.push(`<thinking>${c.thinking}</thinking>`);
 		}
 		return parts.join("\n");
 	}
-	return "";
+	return msg.text ?? "";
+}
+
+/** Extract tool call names from a message content array. */
+function extractToolNames(msg: any): string[] {
+	if (!Array.isArray(msg.content)) return [];
+	return msg.content.filter((c: any) => c.type === "toolCall" && c.name).map((c: any) => c.name);
+}
+
+/** Parse a session JSONL file into mobile-friendly messages. */
+function parseSessionFile(filePath: string): any[] {
+	if (!fs.existsSync(filePath)) return [];
+	const lines = fs.readFileSync(filePath, "utf-8").split("\n").filter(Boolean);
+	const simplified: any[] = [];
+
+	for (const line of lines) {
+		let entry: any;
+		try {
+			entry = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (entry.type !== "message") continue;
+		const msg = entry.message;
+		if (!msg || (msg.role !== "user" && msg.role !== "assistant")) continue;
+
+		const text = extractMessageText(msg);
+		if (text.length > 0 && !isImplicitContinuation(text)) {
+			simplified.push({ id: msg.id ?? entry.id, role: msg.role, text });
+		}
+
+		const toolNames = extractToolNames(msg);
+		for (const name of toolNames) {
+			simplified.push({ id: `${msg.id ?? entry.id}-tool-${name}`, role: "tool", text: `Tool: \`${name}\`` });
+		}
+	}
+
+	return simplified;
 }
 
 /**
- * Simplify raw AgentSessionEvents into mobile-friendly events.
- * Returns null for events that should be suppressed.
+ * Watch a session directory for the most recently modified JSONL file.
+ * Auto-switches to new files when they appear (e.g. new pire session).
+ * Calls listener whenever the active file's content changes.
  */
-function simplifyEvent(event: any): any | null {
-	switch (event.type) {
-		case "message_start": {
-			const msg = event.message;
-			if (!msg) return null;
-			if (msg.role !== "user" && msg.role !== "assistant") return null;
-			const text = extractText(msg);
-			if (isImplicitContinuation(text)) return null;
-			return {
-				type: "message_start",
-				message: { id: msg.id, role: msg.role, text },
-			};
+function watchSessionDir(
+	sessionDir: string,
+	onFileChanged: (filePath: string, messages: any[]) => void,
+): { getCurrentFile: () => string | undefined; stop: () => void } {
+	let currentFile = findMostRecentSessionFile(sessionDir);
+	let lastSize = 0;
+	let lastMtime = 0;
+	try {
+		if (currentFile) {
+			const stat = fs.statSync(currentFile);
+			lastSize = stat.size;
+			lastMtime = stat.mtimeMs;
 		}
+	} catch {}
 
-		case "message_update": {
-			const msg = event.message;
-			if (!msg || (msg.role !== "user" && msg.role !== "assistant")) return null;
-			// Send the accumulated text so the client can replace (not append)
-			return {
-				type: "message_update",
-				message: {
-					id: msg.id,
-					role: msg.role,
-					text: extractText(msg),
-				},
-			};
+	const check = () => {
+		try {
+			// Check if a newer file appeared in the directory
+			const newest = findMostRecentSessionFile(sessionDir);
+			if (newest && newest !== currentFile) {
+				currentFile = newest;
+				lastSize = 0;
+				lastMtime = 0;
+				console.log(`[pimote] Switched to session: ${newest}`);
+			}
+
+			if (!currentFile) return;
+
+			const stat = fs.statSync(currentFile);
+			if (stat.size !== lastSize || stat.mtimeMs !== lastMtime) {
+				lastSize = stat.size;
+				lastMtime = stat.mtimeMs;
+				const messages = parseSessionFile(currentFile);
+				onFileChanged(currentFile, messages);
+			}
+		} catch {
+			// file may be temporarily unavailable
 		}
+	};
 
-		case "message_end": {
-			const msg = event.message;
-			if (!msg || (msg.role !== "user" && msg.role !== "assistant")) return null;
-			return {
-				type: "message_end",
-				message: {
-					id: msg.id,
-					role: msg.role,
-					text: extractText(msg),
-				},
-			};
-		}
+	const interval = setInterval(check, 500);
+	return {
+		getCurrentFile: () => currentFile,
+		stop: () => clearInterval(interval),
+	};
+}
 
-		case "tool_execution_start": {
-			// Show as a compact tool call indicator
-			return {
-				type: "message_start",
-				message: {
-					id: `tool-${event.toolCallId ?? Date.now()}`,
-					role: "tool",
-					text: `Tool: \`${event.toolName}\``,
-				},
-			};
-		}
-
-		case "agent_start":
-		case "agent_end":
-		case "turn_start":
-		case "turn_end":
-			return event;
-
-		default:
-			return null;
-	}
+/** Find the most recent session JSONL file in a directory. */
+function findMostRecentSessionFile(sessionDir: string): string | undefined {
+	if (!fs.existsSync(sessionDir)) return undefined;
+	const files = fs
+		.readdirSync(sessionDir)
+		.filter((f) => f.endsWith(".jsonl"))
+		.sort();
+	if (files.length === 0) return undefined;
+	// Sort by mtime to get the most recent
+	const withMtime = files.map((f) => {
+		const p = join(sessionDir, f);
+		return { path: p, mtime: fs.statSync(p).mtimeMs };
+	});
+	withMtime.sort((a, b) => b.mtime - a.mtime);
+	return withMtime[0]?.path;
 }
 
 async function main() {
@@ -148,134 +174,148 @@ async function main() {
 	const agentDir = getAgentDir();
 	const sessionDir = join(agentDir, "sessions", `--${cwd.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`);
 
-	// Try to continue the most recent session
-	let sessionManager: SessionManager;
-	try {
-		sessionManager = SessionManager.continueRecent(cwd, sessionDir);
-		console.log(`Resuming session: ${sessionManager.getSessionId()}`);
-	} catch {
-		console.log("No existing session found, creating new one");
-		sessionManager = SessionManager.create(cwd, sessionDir);
+	// Find the most recent session file
+	const initialFile = findMostRecentSessionFile(sessionDir);
+	if (!initialFile) {
+		console.error("No session files found in", sessionDir);
+		process.exit(1);
 	}
 
-	// Create a runtime factory for session switching
-	const createRuntime: CreateAgentSessionRuntimeFactory = async (opts) => {
-		const result = await createAgentSession({
-			cwd: opts.cwd,
-			agentDir: opts.agentDir,
-			sessionManager: opts.sessionManager,
-			sessionStartEvent: opts.sessionStartEvent,
-		});
-		return {
-			...result,
-			services: { cwd: opts.cwd, agentDir: opts.agentDir } as any,
-			diagnostics: [],
-		};
-	};
+	console.log(`Observing session: ${initialFile}`);
+	let currentMessages = parseSessionFile(initialFile);
+	console.log(`Loaded ${currentMessages.length} messages`);
 
-	// Create the runtime
-	const runtime = await createAgentSessionRuntime(createRuntime, {
-		cwd,
-		agentDir,
-		sessionManager,
+	// Track connected WebSocket listeners for broadcasting
+	const wsListeners = new Set<(event: any) => void>();
+
+	// Queue for messages sent from mobile, drained by pire extension polling /input
+	const pendingInput: string[] = [];
+
+	// Watch the entire session directory — auto-switches to newest file
+	const watcher = watchSessionDir(sessionDir, (_filePath, messages) => {
+		currentMessages = messages;
+		for (const listener of wsListeners) {
+			listener({ type: "session_refresh" });
+		}
 	});
 
-	console.log(`Session loaded: ${runtime.session.messages.length} messages`);
-
-	// Create the shared RPC handler and wrap it with session listing
-	const innerHandler = createRpcHandler(runtime);
-
+	// Build a read-only RPC handler
 	const rpcHandler = {
 		handleCommand: async (command: any): Promise<any> => {
-			// Custom command: list available sessions
-			if (command.type === "list_sessions") {
-				try {
-					const sessions = await SessionManager.list(cwd, sessionDir);
+			const id = command.id;
+
+			switch (command.type) {
+				case "get_messages":
 					return {
-						id: command.id,
+						id,
 						type: "response",
-						command: "list_sessions",
+						command: "get_messages",
+						success: true,
+						data: { messages: currentMessages },
+					};
+
+				case "list_sessions": {
+					try {
+						const sessions = await SessionManager.list(cwd, sessionDir);
+						return {
+							id,
+							type: "response",
+							command: "list_sessions",
+							success: true,
+							data: {
+								currentSessionId: watcher.getCurrentFile(),
+								sessions: sessions.map((s: SessionInfo) => ({
+									id: s.id,
+									path: s.path,
+									name: s.name,
+									cwd: s.cwd,
+									created: s.created.toISOString(),
+									modified: s.modified.toISOString(),
+									messageCount: s.messageCount,
+									firstMessage: s.firstMessage?.slice(0, 120),
+								})),
+							},
+						};
+					} catch (err: unknown) {
+						return {
+							id,
+							type: "response",
+							command: "list_sessions",
+							success: false,
+							error: err instanceof Error ? err.message : String(err),
+						};
+					}
+				}
+
+				case "switch_session": {
+					const newPath = command.sessionPath;
+					if (!newPath || !fs.existsSync(newPath)) {
+						return {
+							id,
+							type: "response",
+							command: "switch_session",
+							success: false,
+							error: "Session file not found",
+						};
+					}
+					// Load the requested session (watcher will auto-track the most recent)
+					currentMessages = parseSessionFile(newPath);
+					return { id, type: "response", command: "switch_session", success: true, data: { cancelled: false } };
+				}
+
+				case "prompt":
+				case "steer":
+				case "follow_up": {
+					const inputMsg = command.message ?? "";
+					if (inputMsg.length > 0) {
+						pendingInput.push(inputMsg);
+						console.log(`[pimote] Queued remote input: ${inputMsg.slice(0, 80)}`);
+					}
+					return { id, type: "response", command: command.type, success: true };
+				}
+
+				case "get_state":
+					return {
+						id,
+						type: "response",
+						command: "get_state",
 						success: true,
 						data: {
-							currentSessionId: runtime.session.sessionId,
-							sessions: sessions.map((s: any) => ({
-								id: s.id,
-								path: s.path,
-								name: s.name,
-								cwd: s.cwd,
-								created: s.created.toISOString(),
-								modified: s.modified.toISOString(),
-								messageCount: s.messageCount,
-								firstMessage: s.firstMessage?.slice(0, 120),
-							})),
+							isStreaming: false,
+							messageCount: currentMessages.length,
+							sessionFile: watcher.getCurrentFile(),
 						},
 					};
-				} catch (err: unknown) {
-					return {
-						id: command.id,
-						type: "response",
-						command: "list_sessions",
-						success: false,
-						error: err instanceof Error ? err.message : String(err),
-					};
-				}
-			}
 
-			// Intercept get_messages to filter for mobile-friendly payload
-			if (command.type === "get_messages") {
-				const response = (await innerHandler.handleCommand(command)) as any;
-				if (response.success && response.data?.messages) {
-					const simplified: any[] = [];
-					for (const m of response.data.messages) {
-						if (m.role === "user" || m.role === "assistant") {
-							if (Array.isArray(m.content)) {
-								const parts: string[] = [];
-								const toolNames: string[] = [];
-								for (const c of m.content) {
-									if (c.type === "text" && c.text) parts.push(c.text);
-									else if (c.type === "thinking" && c.thinking)
-										parts.push(`<thinking>${c.thinking}</thinking>`);
-									else if (c.type === "toolCall" && c.name) toolNames.push(c.name);
-								}
-								const text = parts.join("\n");
-								if (text.length > 0 && !isImplicitContinuation(text)) {
-									simplified.push({ id: m.id, role: m.role, text });
-								}
-								// Add compact tool call indicators after the message
-								for (const name of toolNames) {
-									simplified.push({ id: `${m.id}-tool-${name}`, role: "tool", text: `Tool: \`${name}\`` });
-								}
-							} else {
-								const text = m.text ?? m.content ?? "";
-								if (text.length > 0 && !isImplicitContinuation(text)) {
-									simplified.push({ id: m.id, role: m.role, text });
-								}
-							}
-						}
-					}
-					response.data.messages = simplified;
-				}
-				return response;
+				default:
+					return { id, type: "response", command: command.type, success: false, error: "Read-only observer mode" };
 			}
-
-			return innerHandler.handleCommand(command);
 		},
+
 		subscribe(listener: (event: any) => void): () => void {
-			return innerHandler.subscribe((event: any) => {
-				const simplified = simplifyEvent(event);
-				if (simplified) listener(simplified);
-			});
+			wsListeners.add(listener);
+			return () => wsListeners.delete(listener);
 		},
-		dispose: innerHandler.dispose.bind(innerHandler),
+
+		async dispose(): Promise<void> {
+			watcher.stop();
+			wsListeners.clear();
+		},
 	};
 
-	// Hash PIN and start server
+	// Start server
 	const pinHash = await hashPin(pin);
-	const _server = await startServer({ port, host, pinHash, rpcHandler });
+	const _server = await startServer({
+		port,
+		host,
+		pinHash,
+		rpcHandler,
+		drainInput: () => pendingInput.splice(0),
+	});
 
 	// Show connection info
 	console.log(`\npimote server on http://${host}:${port}`);
-	console.log(`Session: ${runtime.session.sessionId} (${runtime.session.messages.length} msgs)`);
+	console.log(`Messages: ${currentMessages.length}`);
 
 	// Show local network IPs
 	const { networkInterfaces } = await import("node:os");
@@ -295,7 +335,7 @@ async function main() {
 		}
 	}
 
-	// Try cloudflared tunnel for external access
+	// Try cloudflared tunnel
 	try {
 		const tunnel = await startTunnel(port);
 		console.log(`\nTunnel (external access): ${tunnel.url}`);
