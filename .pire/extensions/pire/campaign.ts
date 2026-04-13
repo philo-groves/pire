@@ -710,7 +710,12 @@ export function buildCampaignPromptSummary(ledger: CampaignLedger, tracker?: Fin
 	if (activeOpen.length > 0) {
 		lines.push("Current campaign leads:");
 		for (const record of activeOpen) {
-			lines.push(`- ${record.id} [${record.status}] ${record.title}`);
+			// Show both campaign and tracker status when they differ (campaign collapses active→lead, report-candidate→confirmed)
+			const trackerFinding = tracker?.findings.find((f) => f.id === record.id || f.title.startsWith(record.id));
+			const trackerLabel = trackerFinding && trackerFinding.status !== record.status
+				? ` (tracker: ${trackerFinding.status}/${trackerFinding.reproStatus})`
+				: "";
+			lines.push(`- ${record.id} [${record.status}${trackerLabel}] ${record.title}`);
 		}
 	}
 	const activeChains = ledger.chains

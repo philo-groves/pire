@@ -122,6 +122,7 @@ import {
 	updateCampaignFindingStatus,
 	validateCampaignStatusNote,
 } from "./campaign.js";
+import { autoFixInvariants, formatDriftReport, runDriftCheck } from "./drift.js";
 import {
 	runPlatformHyperv,
 	runPlatformMacos,
@@ -3492,6 +3493,20 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			const inventory = await collectEnvironmentInventory(ctx.cwd, (command, args) => pi.exec(command, args, { cwd: ctx.cwd }));
 			persistInventory(inventory, "auto");
 		}
+
+		// Run state integrity check — auto-fix first, then check post-fix state
+		const fixCount = autoFixInvariants(findingsTracker);
+		if (fixCount > 0) {
+			await persistTracker();
+		}
+		const driftReport = await runDriftCheck(ctx.cwd, findingsTracker, campaignLedger);
+		const driftPrompt = formatDriftReport(driftReport);
+		const driftErrors = driftReport.entries.filter((e) => e.severity === "error").length;
+		const driftWarnings = driftReport.entries.filter((e) => e.severity === "warning").length;
+		if (driftErrors > 0 || driftWarnings > 0) {
+			ctx.ui.notify(`state integrity: ${driftErrors} errors, ${driftWarnings} warnings — see prompt context`, driftErrors > 0 ? "error" : "warning");
+		}
+
 		return {
 			message: {
 				customType: "pire-mode-context",
@@ -3508,6 +3523,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						activeFindingIds: currentFocus.findingIds,
 						activeQuestionIds: currentFocus.questionIds,
 					}),
+					driftPrompt || undefined,
 				]
 					.filter((value): value is string => value !== undefined)
 					.join("\n\n"),

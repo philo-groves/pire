@@ -34,8 +34,8 @@ function parseSections(content: string): ParsedSection[] {
 	for (const rawLine of content.split("\n")) {
 		const line = rawLine.trimEnd();
 
-		// Match ### ID — title  (supports both em-dash and double-hyphen)
-		const headingMatch = line.match(/^###\s+(\S+)\s+(?:—|--)\s+(.+)$/);
+		// Match ##+ ID — title  (supports ## and ###, em-dash and double-hyphen)
+		const headingMatch = line.match(/^#{2,3}\s+(\S+)\s+(?:—|--)\s+(.+)$/);
 		if (headingMatch) {
 			if (current) sections.push(current);
 			current = {
