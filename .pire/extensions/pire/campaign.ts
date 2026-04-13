@@ -38,7 +38,7 @@ export interface CampaignJournalEntry {
 	timestamp: string;
 	findingId?: string;
 	chainId?: string;
-	action: "create" | "sync" | "status" | "report" | "chain";
+	action: "create" | "sync" | "status" | "report" | "chain" | "hypothesis" | "finding" | "dead-end";
 	summary: string;
 	details?: string;
 }

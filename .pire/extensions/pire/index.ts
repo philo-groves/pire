@@ -873,19 +873,24 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		if (!finding) {
 			return;
 		}
+		const previousRecord = campaignLedger.findings.find((record) => record.id === findingId);
+		const previousStatus = previousRecord?.status;
 		const result = upsertCampaignFinding(campaignLedger, {
 			finding,
 			tracker: findingsTracker,
 			artifacts: artifactManifest.artifacts,
 		});
-		await appendCampaignJournalEntry(currentCwd, campaignLedger, {
-			findingId: result.record.id,
-			action: result.created ? "create" : "sync",
-			summary,
-			details: result.created
-				? `created campaign record ${result.record.id} with status ${result.record.status}`
-				: `synced campaign record ${result.record.id} with status ${result.record.status}`,
-		});
+		const statusChanged = result.created || result.record.status !== previousStatus;
+		if (statusChanged) {
+			await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+				findingId: result.record.id,
+				action: result.created ? "create" : "sync",
+				summary,
+				details: result.created
+					? `created campaign record ${result.record.id} with status ${result.record.status}`
+					: `synced campaign record ${result.record.id}: ${previousStatus} → ${result.record.status}`,
+			});
+		}
 		await persistCampaign();
 		syncCampaignUI(ctx);
 	};
@@ -1368,6 +1373,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						{ hypothesisIds: [record.id], findingIds: [], questionIds: record.relatedQuestionIds },
 						{ notify: false },
 					);
+					await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+						action: "hypothesis",
+						summary: `New hypothesis ${record.id}: ${record.title}`,
+						details: `confidence=${record.confidence}, claim: ${record.claim.slice(0, 200)}`,
+					});
+					await persistCampaign();
 					resultText = `Added hypothesis ${record.id}: ${record.title}`;
 					break;
 				}
@@ -1376,6 +1387,8 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						resultText = "research_tracker update_hypothesis requires id.";
 						break;
 					}
+					const previousHyp = findingsTracker.hypotheses.find((h) => h.id === params.id);
+					const previousHypStatus = previousHyp?.status;
 					const status =
 						params.status === "open" || params.status === "supported" || params.status === "refuted" || params.status === "needs-more-evidence"
 							? (params.status as HypothesisStatus)
@@ -1398,6 +1411,14 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					await persistTracker();
 					syncTrackerUI(ctx);
 					applyFocus(ctx, { hypothesisIds: [record.id] }, { notify: false });
+					if (status && status !== previousHypStatus) {
+						await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+							action: "hypothesis",
+							summary: `Hypothesis ${record.id} ${previousHypStatus} → ${record.status}: ${record.title}`,
+							details: record.rationale?.slice(0, 300),
+						});
+						await persistCampaign();
+					}
 					resultText = `Updated hypothesis ${record.id}: ${record.status}`;
 					break;
 				}
@@ -1423,6 +1444,13 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						keyArtifacts: params.keyArtifacts,
 					});
 					await persistTracker();
+					await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+						findingId: record.id,
+						action: "finding",
+						summary: `New finding ${record.id} [${record.status}]: ${record.title}`,
+						details: `severity=${record.severity}, statement: ${record.statement.slice(0, 200)}`,
+					});
+					await persistCampaign();
 					await syncCampaignFinding(ctx, record.id, `Synced ${record.id} into the campaign ledger from research_tracker add_finding.`);
 					syncTrackerUI(ctx);
 					applyFocus(ctx, { findingIds: [record.id] }, { notify: false });
@@ -1434,6 +1462,9 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						resultText = "research_tracker update_finding requires id.";
 						break;
 					}
+					const previousFind = findingsTracker.findings.find((f) => f.id === params.id);
+					const previousFindStatus = previousFind?.status;
+					const previousReproStatus = previousFind?.reproStatus;
 					const record = updateFinding(findingsTracker, {
 						id: params.id,
 						title: params.title,
@@ -1456,6 +1487,20 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					if (!record) {
 						resultText = `Unknown finding: ${params.id}`;
 						break;
+					}
+					const findingStatusChanged = record.status !== previousFindStatus;
+					const reproChanged = record.reproStatus !== previousReproStatus;
+					if (findingStatusChanged || reproChanged) {
+						const changes: string[] = [];
+						if (findingStatusChanged) changes.push(`status: ${previousFindStatus} → ${record.status}`);
+						if (reproChanged) changes.push(`repro: ${previousReproStatus} → ${record.reproStatus}`);
+						await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+							findingId: record.id,
+							action: "finding",
+							summary: `Finding ${record.id} updated: ${changes.join(", ")}`,
+							details: record.title,
+						});
+						await persistCampaign();
 					}
 					await persistTracker();
 					await syncCampaignFinding(ctx, record.id, `Synced ${record.id} into the campaign ledger from research_tracker update_finding.`);
@@ -1545,6 +1590,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 					});
 					await persistTracker();
 					syncTrackerUI(ctx);
+					await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+						action: "dead-end",
+						summary: `Dead end ${record.id}: ${record.summary.slice(0, 150)}`,
+						details: record.whyItFailed?.slice(0, 300),
+					});
+					await persistCampaign();
 					resultText = `Added dead end ${record.id}: ${record.summary}`;
 					break;
 				}
@@ -3002,6 +3053,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			await persistTracker();
 			syncTrackerUI(ctx);
 			applyFocus(ctx, { hypothesisIds: [record.id] }, { notify: false });
+			await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+				action: "hypothesis",
+				summary: `Hypothesis ${record.id} supported: ${record.title}`,
+				details: `evidence: ${evidenceIds.join(", ")}`,
+			});
+			await persistCampaign();
 			ctx.ui.notify(`Supported ${record.id}`, "info");
 		},
 	});
@@ -3023,6 +3080,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			await persistTracker();
 			syncTrackerUI(ctx);
 			applyFocus(ctx, { hypothesisIds: [record.id] }, { notify: false });
+			await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+				action: "hypothesis",
+				summary: `Hypothesis ${record.id} refuted: ${record.title}`,
+				details: `evidence: ${evidenceIds.join(", ")}`,
+			});
+			await persistCampaign();
 			ctx.ui.notify(`Refuted ${record.id}`, "info");
 		},
 	});
@@ -3065,6 +3128,13 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				relatedArtifactIds: hypothesis.relatedArtifactIds,
 			});
 			await persistTracker();
+			await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+				findingId: finding.id,
+				action: "finding",
+				summary: `Promoted ${hypothesis.id} → finding ${finding.id}: ${title}`,
+				details: `from hypothesis: ${hypothesis.title}`,
+			});
+			await persistCampaign();
 			await syncCampaignFinding(ctx, finding.id, `Synced ${finding.id} into the campaign ledger from /promote-finding.`);
 			syncTrackerUI(ctx);
 			applyFocus(ctx, { hypothesisIds: [hypothesis.id], findingIds: [finding.id] }, { notify: false });
@@ -3142,6 +3212,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			});
 			await persistTracker();
 			syncTrackerUI(ctx);
+			await appendCampaignJournalEntry(currentCwd, campaignLedger, {
+				action: "dead-end",
+				summary: `Dead end ${record.id}: ${record.summary.slice(0, 150)}`,
+				details: record.whyItFailed?.slice(0, 300),
+			});
+			await persistCampaign();
 			ctx.ui.notify(`Recorded dead end ${record.id}`, "info");
 		},
 	});
