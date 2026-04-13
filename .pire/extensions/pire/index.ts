@@ -962,6 +962,18 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		const focus = getEvidenceLinkFocus();
 		const isRuntimeEvidence = toolName !== undefined && RUNTIME_EVIDENCE_TOOLS.has(toolName);
 		let changed = false;
+
+		// Back-populate the evidence record's supports array with focused hypothesis/finding IDs
+		const evidence = findingsTracker.evidence.find((e) => e.id === evidenceId);
+		if (evidence) {
+			const supportIds = [...focus.hypothesisIds, ...focus.findingIds];
+			for (const id of supportIds) {
+				if (!evidence.supports.includes(id)) {
+					evidence.supports.push(id);
+				}
+			}
+		}
+
 		for (const id of focus.hypothesisIds) {
 			if (updateHypothesis(findingsTracker, { id, addEvidenceIds: [evidenceId], addArtifactIds: artifactIds })) {
 				changed = true;
@@ -3490,7 +3502,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						currentRole ? formatRolePrompt(currentRole) : undefined,
 						buildSafetyPrompt(currentSafety),
 						buildInventoryPromptSummary(currentInventory),
-						buildCampaignPromptSummary(campaignLedger),
+						buildCampaignPromptSummary(campaignLedger, findingsTracker),
 						buildFindingsPromptSummary(findingsTracker, {
 						activeHypothesisIds: currentFocus.hypothesisIds,
 						activeFindingIds: currentFocus.findingIds,
@@ -3597,8 +3609,40 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		}
 	});
 
+	// Patterns in tool output that suggest a hard blocker worth flagging
+	const DEAD_END_PATTERNS = [
+		{ pattern: /lacks? ["']?[\w.]+["']? entitlement/i, tag: "entitlement-gate" },
+		{ pattern: /kMissingEntitlementErr/i, tag: "entitlement-gate" },
+		{ pattern: /kSecurityRequiredErr/i, tag: "entitlement-gate" },
+		{ pattern: /pre-flight check failed/i, tag: "pre-flight-failure" },
+		{ pattern: /No such file or directory/i, tag: "missing-target" },
+		{ pattern: /error:.*expected ['}\]]/i, tag: "compilation-error" },
+		{ pattern: /fatal error:/i, tag: "compilation-error" },
+		{ pattern: /linker command failed/i, tag: "compilation-error" },
+	];
+
+	function detectDeadEndSignal(text: string): { tag: string; match: string } | undefined {
+		for (const { pattern, tag } of DEAD_END_PATTERNS) {
+			const m = text.match(pattern);
+			if (m) return { tag, match: m[0] };
+		}
+		return undefined;
+	}
+
 	(pi as ExtensionAPI).on("tool_result", async (event, ctx) => {
 		if (event.isError) {
+			// Record error evidence so failed attempts are visible in the trajectory
+			const focus = getEvidenceLinkFocus();
+			if (focus.hypothesisIds.length > 0 || focus.findingIds.length > 0) {
+				const firstLine = summarizeToolResult(event);
+				const evidence = addEvidence(findingsTracker, {
+					kind: "observation",
+					summary: `${event.toolName} error: ${firstLine}`,
+					commandId: `tool:${event.toolName}:${event.toolCallId}`,
+				});
+				linkEvidenceToActiveFocus(evidence.id, []);
+				await persistTracker();
+			}
 			return;
 		}
 
@@ -3638,6 +3682,22 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				artifactIds,
 			});
 			linkEvidenceToActiveFocus(evidence.id, artifactIds, event.toolName);
+
+			// Detect dead-end signals in tool output (entitlement gates, missing targets, compile errors)
+			const fullText = event.content
+				.filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
+				.map((part) => part.text)
+				.join("\n");
+			const deadEndSignal = detectDeadEndSignal(fullText);
+			if (deadEndSignal) {
+				evidence.kind = "observation";
+				const focus = getEvidenceLinkFocus();
+				const focusContext = [...focus.hypothesisIds, ...focus.findingIds].join(", ");
+				if (focusContext) {
+					evidence.summary = `${event.toolName} [${deadEndSignal.tag}]: ${firstLine}`;
+				}
+			}
+
 			await persistTracker();
 			syncTrackerUI(ctx);
 			if (event.toolName !== "read" && event.toolName !== "write" && event.toolName !== "edit" && event.toolName !== "bash") {

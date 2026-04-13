@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { ArtifactRecord } from "./artifacts.js";
-import type { FindingRecord, FindingsTracker } from "./findings.js";
+import type { FindingRecord, FindingsTracker, FindingStatus } from "./findings.js";
 
 export type CampaignFindingStatus = "lead" | "confirmed" | "submitted" | "de-escalated" | "blocked";
 export type CampaignChainStatus = "active" | "parked" | "closed";
@@ -609,7 +609,81 @@ export function renderCampaignChainDetail(ledger: CampaignLedger, id: string): s
 	return lines.join("\n");
 }
 
-export function buildCampaignPromptSummary(ledger: CampaignLedger): string | undefined {
+/**
+ * Extract a short subsystem tag from a finding title.
+ * e.g. "KERNEL-NCTRL-002 — SO_FLOW_DIVERT_TOKEN ..." → "KERNEL-NCTRL-002"
+ */
+function extractSubsystemTag(title: string): string | undefined {
+	const match = title.match(/^([A-Z][\w-]+-\d{3})\b/);
+	return match?.[1];
+}
+
+/** Scan findings for cross-references (by ID or subsystem tag) and suggest unchained pairs. */
+export function detectUnchainedCrossRefs(
+	ledger: CampaignLedger,
+	tracker: FindingsTracker,
+): Array<{ from: string; to: string; context: string }> {
+	const chainedPairs = new Set<string>();
+	for (const chain of ledger.chains) {
+		const ids = chain.findingIds;
+		for (let i = 0; i < ids.length; i++) {
+			for (let j = i + 1; j < ids.length; j++) {
+				chainedPairs.add(`${ids[i]}:${ids[j]}`);
+				chainedPairs.add(`${ids[j]}:${ids[i]}`);
+			}
+		}
+	}
+
+	// Build lookup maps: finding ID and subsystem tag → finding ID
+	const findingIds = new Set(tracker.findings.map((f) => f.id));
+	const tagToId = new Map<string, string>();
+	for (const f of tracker.findings) {
+		const tag = extractSubsystemTag(f.title);
+		if (tag) tagToId.set(tag, f.id);
+	}
+
+	const FINDING_ID_PATTERN = /\bfind-\d{3}\b/g;
+	const SUBSYSTEM_TAG_PATTERN = /\b([A-Z][\w-]+-\d{3})\b/g;
+	const CHAINABLE_STATUSES: Set<FindingStatus> = new Set(["lead", "active", "confirmed", "report-candidate"]);
+	const suggestions: Array<{ from: string; to: string; context: string }> = [];
+	const seen = new Set<string>();
+
+	const tryAdd = (fromId: string, toId: string, fieldName: string): void => {
+		if (toId === fromId || !findingIds.has(toId)) return;
+		const refFinding = tracker.findings.find((f) => f.id === toId);
+		if (refFinding && !CHAINABLE_STATUSES.has(refFinding.status)) return;
+		const pairKey = [fromId, toId].sort().join(":");
+		if (chainedPairs.has(`${fromId}:${toId}`) || seen.has(pairKey)) return;
+		seen.add(pairKey);
+		suggestions.push({ from: fromId, to: toId, context: fieldName });
+	};
+
+	for (const finding of tracker.findings) {
+		if (!CHAINABLE_STATUSES.has(finding.status)) continue;
+		const ownTag = extractSubsystemTag(finding.title);
+		const fields: Array<[string, string | undefined]> = [
+			["nextStep", finding.nextStep],
+			["statement", finding.statement],
+		];
+		for (const [fieldName, text] of fields) {
+			if (!text) continue;
+			// Match by finding ID (find-NNN)
+			for (const match of text.matchAll(FINDING_ID_PATTERN)) {
+				tryAdd(finding.id, match[0], fieldName);
+			}
+			// Match by subsystem tag (KERNEL-NCTRL-002, COMMS-RAPPORT-001, etc.)
+			for (const match of text.matchAll(SUBSYSTEM_TAG_PATTERN)) {
+				const tag = match[1];
+				if (tag === ownTag) continue; // skip self-references
+				const refId = tagToId.get(tag);
+				if (refId) tryAdd(finding.id, refId, fieldName);
+			}
+		}
+	}
+	return suggestions;
+}
+
+export function buildCampaignPromptSummary(ledger: CampaignLedger, tracker?: FindingsTracker): string | undefined {
 	if (ledger.findings.length === 0 && ledger.chains.length === 0) {
 		return undefined;
 	}
@@ -647,6 +721,15 @@ export function buildCampaignPromptSummary(ledger: CampaignLedger): string | und
 		lines.push("Current chains:");
 		for (const record of activeChains) {
 			lines.push(`- ${record.id} [${record.status}] ${record.title} (${record.findingIds.join(", ") || "no findings linked"})`);
+		}
+	}
+	if (tracker) {
+		const crossRefs = detectUnchainedCrossRefs(ledger, tracker);
+		if (crossRefs.length > 0) {
+			lines.push("Unchained cross-references detected — consider /chain-create:");
+			for (const ref of crossRefs.slice(0, 5)) {
+				lines.push(`- ${ref.from} ↔ ${ref.to} (referenced in ${ref.context})`);
+			}
 		}
 	}
 	return lines.join("\n");

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { ExecResult } from "@mariozechner/pi-coding-agent";
@@ -55,6 +56,14 @@ function truncateOutput(text: string, maxLines = PREVIEW_LINE_LIMIT): string {
 	return `${lines.slice(0, maxLines).join("\n")}\n... ${lines.length - maxLines} more lines`;
 }
 
+/** Pre-flight check: verify the target binary exists before invoking a debugger. */
+function validateTargetPath(targetPath: string): string | undefined {
+	if (!existsSync(targetPath)) {
+		return `target does not exist: ${targetPath}`;
+	}
+	return undefined;
+}
+
 async function runTool(
 	exec: ExecFn,
 	command: string,
@@ -64,6 +73,22 @@ async function runTool(
 	artifacts: DebugArtifactObservation[],
 	signal?: AbortSignal,
 ): Promise<ToolExecResult> {
+	const preflightError = validateTargetPath(targetPath);
+	if (preflightError) {
+		const commandString = commandToString(command, args);
+		return {
+			tool: toolName,
+			targetPath,
+			command: [command, ...args],
+			commandString,
+			exitCode: 1,
+			killed: false,
+			stdoutPreview: "",
+			stderrPreview: `pre-flight check failed: ${preflightError}`,
+			summary: `${toolName}: pre-flight failed\n${preflightError}`,
+			artifacts: [],
+		};
+	}
 	const result = await exec(command, args, { signal });
 	const commandString = commandToString(command, args);
 	const stdoutPreview = truncateOutput(result.stdout);
