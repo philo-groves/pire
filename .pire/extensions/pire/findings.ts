@@ -1018,6 +1018,28 @@ export function buildFindingsPromptSummary(
 		}
 	}
 
+	// Detect stale open hypotheses that should be resolved based on finding status
+	const confirmedStatuses = new Set(["confirmed", "report-candidate", "reported"]);
+	const staleHypotheses = tracker.hypotheses.filter((hyp) => {
+		if (hyp.status !== "open") return false;
+		// Check if any confirmed/report-candidate finding shares evidence or subsystem
+		return tracker.findings.some((f) => {
+			if (!confirmedStatuses.has(f.status)) return false;
+			const sharedEvidence = f.relatedEvidenceIds.some((eid) => hyp.relatedEvidenceIds.includes(eid));
+			if (sharedEvidence) return true;
+			// Check subsystem prefix match
+			const hypTag = hyp.title.match(/^([A-Z][\w-]+)-\d{3}\b/)?.[1];
+			const findTag = f.title.match(/^([A-Z][\w-]+)-\d{3}\b/)?.[1];
+			return hypTag && findTag && hypTag === findTag;
+		});
+	});
+	if (staleHypotheses.length > 0) {
+		lines.push("Stale open hypotheses — related findings are confirmed, update via /support-hypothesis or /refute-hypothesis:");
+		for (const hyp of staleHypotheses) {
+			lines.push(`- ${hyp.id}: ${hyp.title}`);
+		}
+	}
+
 	return lines.join("\n");
 }
 

@@ -81,7 +81,6 @@ import {
 	getCandidateFindingQueue,
 	buildFindingsPromptSummary,
 	buildFindingsTrackerSummary,
-	buildFindingsWidgetLines,
 	loadFindingsTracker,
 	saveFindingsTracker,
 	summarizeCandidateFindings,
@@ -228,12 +227,25 @@ const CAMPAIGN_ENTRY_TYPE = "pire-campaign";
 const MODE_FLAG = "pire-mode";
 const ROLE_FLAG = "pire-role";
 const SESSION_TYPE_FLAG = "pire-session";
+const COMMON_TOOLS = [
+	"research_tracker",
+	"read",
+	"bash",
+	"environment_inventory",
+	"spawn_agent",
+	"send_input",
+	"wait_agent",
+	"close_agent",
+	"start_background_task",
+	"wait_background_task",
+	"cancel_background_task",
+];
 const MODE_TOOLS: Record<PireMode, string[]> = {
-	recon: ["research_tracker", "read", "bash", "environment_inventory"],
-	triage: ["research_tracker", "read", "bash", "environment_inventory"],
-	dynamic: ["research_tracker", "read", "bash", "environment_inventory"],
-	proofing: ["research_tracker", "read", "bash", "edit", "write", "environment_inventory"],
-	report: ["research_tracker", "read", "bash", "edit", "write", "environment_inventory"],
+	recon: [...COMMON_TOOLS],
+	triage: [...COMMON_TOOLS],
+	dynamic: [...COMMON_TOOLS, "edit", "write"],
+	proofing: [...COMMON_TOOLS, "edit", "write"],
+	report: [...COMMON_TOOLS, "edit", "write"],
 };
 const SESSION_TYPE_TOOLS: Partial<Record<PireSessionType, string[]>> = {
 	"web-security-review": ["net_curl_head", "web_cdp_discover", "web_cdp_runtime_eval"],
@@ -328,6 +340,16 @@ function formatModePrompt(mode: PireMode): string {
 		"- You have completed a proof and documented it in the tracker",
 		"- You have exhausted all promising leads and need new direction",
 	];
+
+	lines.push("");
+	lines.push("[PARALLEL WORK]");
+	lines.push("Maximize throughput by issuing multiple independent tool calls in a single message. The system executes them concurrently.");
+	lines.push("The parallel-work skill at .pire/skills/parallel-work/SKILL.md has detailed patterns.");
+	lines.push("Key rules:");
+	lines.push("- When you need to read 2+ files, grep 2+ paths, or run 2+ independent bash commands: issue ALL of them in the same response.");
+	lines.push("- When a session brief lists independent tasks, identify the dependency graph and batch non-dependent work into single messages.");
+	lines.push("- For long-running bash commands (VM boot, large compile): append `&` and issue other tool calls in the same message while it runs in the shell background.");
+	lines.push("- NEVER issue a single read or single bash when you could batch 3-4 independent calls together.");
 
 	// Always allowed regardless of mode
 	lines.push("Infrastructure commands (pimote, serve-session, cloudflared, curl to 127.0.0.1:19836) are always permitted.");
@@ -452,16 +474,9 @@ function updateSafetyStatus(ctx: ExtensionContext, posture: PireSafetyPosture): 
 	ctx.ui.setStatus("pire-safety", ctx.ui.theme.fg("accent", `safety:${posture.scope}/${posture.intent}${suffix}`));
 }
 
-function updateTrackerStatus(ctx: ExtensionContext, tracker: FindingsTracker): void {
-	const summary = buildFindingsTrackerSummary(tracker);
-	ctx.ui.setStatus(
-		"pire-tracker",
-		ctx.ui.theme.fg(
-			"accent",
-			`tracker:h${summary.openHypotheses}/c${summary.candidateFindings}/f${summary.confirmedFindings}/q${summary.blockedQuestions}`,
-		),
-	);
-	ctx.ui.setWidget("pire-tracker", buildFindingsWidgetLines(tracker), { placement: "belowEditor" });
+function updateTrackerStatus(_ctx: ExtensionContext, _tracker: FindingsTracker): void {
+	// Tracker widget and status line removed — fields are still tracked internally
+	// and surfaced in the prompt context for the agent, but not shown in the UI.
 }
 
 function updateCampaignStatus(ctx: ExtensionContext, ledger: CampaignLedger): void {

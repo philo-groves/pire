@@ -248,6 +248,7 @@ export class InteractiveMode {
 	// Extension widgets (components rendered above/below the editor)
 	private extensionWidgetsAbove = new Map<string, Component & { dispose?(): void }>();
 	private extensionWidgetsBelow = new Map<string, Component & { dispose?(): void }>();
+	private activityContainer!: Container;
 	private widgetContainerAbove!: Container;
 	private widgetContainerBelow!: Container;
 
@@ -289,6 +290,7 @@ export class InteractiveMode {
 		this.chatContainer = new Container();
 		this.pendingMessagesContainer = new Container();
 		this.statusContainer = new Container();
+		this.activityContainer = new Container();
 		this.widgetContainerAbove = new Container();
 		this.widgetContainerBelow = new Container();
 		this.keybindings = KeybindingsManager.create();
@@ -544,6 +546,7 @@ export class InteractiveMode {
 		this.ui.addChild(this.chatContainer);
 		this.ui.addChild(this.pendingMessagesContainer);
 		this.ui.addChild(this.statusContainer);
+		this.ui.addChild(this.activityContainer);
 		this.renderWidgets(); // Initialize with default spacer
 		this.ui.addChild(this.widgetContainerAbove);
 		this.ui.addChild(this.editorContainer);
@@ -2383,10 +2386,21 @@ export class InteractiveMode {
 				this.ui.requestRender();
 				break;
 
-			case "subagent_end":
-				this.ensureSubagentActivity(event.subagent).applyEnd(event.subagent);
+			case "subagent_end": {
+				const subComp = this.ensureSubagentActivity(event.subagent);
+				subComp.applyEnd(event.subagent);
 				this.ui.requestRender();
+				// Remove from pinned activity area after a short delay
+				setTimeout(() => {
+					this.activityContainer.removeChild(subComp);
+					this.subagentComponents.delete(event.subagent.id);
+					this.activityOrder = this.activityOrder.filter(
+						(a) => !(a.kind === "subagent" && a.id === event.subagent.id),
+					);
+					this.ui.requestRender();
+				}, 3000);
 				break;
+			}
 
 			case "background_task_start":
 				this.ensureBackgroundTaskActivity(event.task).applyStart(event.task);
@@ -2398,10 +2412,21 @@ export class InteractiveMode {
 				this.ui.requestRender();
 				break;
 
-			case "background_task_end":
-				this.ensureBackgroundTaskActivity(event.task).applyEnd(event.task);
+			case "background_task_end": {
+				const bgComp = this.ensureBackgroundTaskActivity(event.task);
+				bgComp.applyEnd(event.task);
 				this.ui.requestRender();
+				// Remove from pinned activity area after a short delay
+				setTimeout(() => {
+					this.activityContainer.removeChild(bgComp);
+					this.backgroundTaskComponents.delete(event.task.id);
+					this.activityOrder = this.activityOrder.filter(
+						(a) => !(a.kind === "backgroundTask" && a.id === event.task.id),
+					);
+					this.ui.requestRender();
+				}, 3000);
 				break;
+			}
 
 			case "message_start":
 				if (event.message.role === "custom") {
@@ -2703,7 +2728,7 @@ export class InteractiveMode {
 		let component = this.subagentComponents.get(subagent.id);
 		if (!component) {
 			component = new SubagentActivityComponent(subagent, this.toolOutputExpanded);
-			this.chatContainer.addChild(component);
+			this.activityContainer.addChild(component);
 			this.subagentComponents.set(subagent.id, component);
 			this.activityOrder.push({ kind: "subagent", id: subagent.id });
 			if (!this.selectedActivity) {
@@ -2718,7 +2743,7 @@ export class InteractiveMode {
 		let component = this.backgroundTaskComponents.get(task.id);
 		if (!component) {
 			component = new BackgroundTaskActivityComponent(task, this.toolOutputExpanded);
-			this.chatContainer.addChild(component);
+			this.activityContainer.addChild(component);
 			this.backgroundTaskComponents.set(task.id, component);
 			this.activityOrder.push({ kind: "backgroundTask", id: task.id });
 			if (!this.selectedActivity) {

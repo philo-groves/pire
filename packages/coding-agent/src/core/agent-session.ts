@@ -316,8 +316,9 @@ export type BackgroundTaskSessionEvent = Extract<
 >;
 
 const SUBAGENT_MAX_DEPTH = 2;
-const SUBAGENT_DEFAULT_MAX_TURNS = 6;
-const SUBAGENT_MAX_TURNS = 12;
+const SUBAGENT_DEFAULT_MAX_TURNS = 12;
+const SUBAGENT_MAX_TURNS = 30;
+const SUBAGENT_WRAP_UP_THRESHOLD = 0.75;
 
 const spawnAgentSchema = Type.Object({
 	task: Type.String({ description: "Bounded task for the subagent to complete" }),
@@ -1352,20 +1353,36 @@ export class AgentSession {
 	}
 
 	private _buildSubagentPrompt(input: SpawnAgentToolInput): string {
+		const maxTurns = Math.max(
+			1,
+			Math.min(Math.floor(input.maxTurns ?? SUBAGENT_DEFAULT_MAX_TURNS), SUBAGENT_MAX_TURNS),
+		);
+		const readBudget = Math.max(1, Math.floor(maxTurns * 0.4));
+		const actBudget = Math.max(1, Math.floor(maxTurns * 0.4));
 		const sections = [
-			"You are a delegated subagent working for another Pi agent.",
-			"Do the task independently, use tools when needed, and finish with a concise report containing summary, evidence, and next steps.",
+			`BUDGET: ${maxTurns} turns total. Plan your work to fit.`,
 			"",
-			`Task:\n${input.task.trim()}`,
+			"EXECUTION PHASES — follow this order strictly:",
+			`1. READ (turns 1-${readBudget}): Gather information. Batch 3-6 tool calls per turn. Read only what the task requires.`,
+			`2. ACT (turns ${readBudget + 1}-${readBudget + actBudget}): Write files, create directories, build artifacts. Use bash and write tools.`,
+			`3. REPORT (final turn): Output a plain text summary. This is the ONLY thing the parent agent receives.`,
+			"",
+			"RULES:",
+			"- Batch multiple tool calls in every response. Never issue just one read or one bash when you could issue 3+.",
+			"- Your final assistant message MUST be plain text (no tool calls). It is the only output returned to the parent.",
+			"- If you have files to create, create them BEFORE your final text report.",
+			"- If you run low on turns, skip to REPORT immediately — a partial text report is better than no report.",
+			"",
+			`TASK:\n${input.task.trim()}`,
 		];
 
 		if (input.context?.trim()) {
-			sections.push("", `Provided context:\n${input.context.trim()}`);
+			sections.push("", `CONTEXT:\n${input.context.trim()}`);
 		}
 
 		const recentContext = this._getRecentSubagentContext();
 		if (recentContext) {
-			sections.push("", `Recent parent context:\n${recentContext}`);
+			sections.push("", `PARENT CONTEXT:\n${recentContext}`);
 		}
 
 		return sections.join("\n");
@@ -1446,12 +1463,19 @@ export class AgentSession {
 			resourceLoader: this._createSubagentResourceLoader(),
 			customTools: [],
 			modelRegistry: this._modelRegistry,
-			initialActiveToolNames: this.getActiveToolNames().filter((name) => this._baseToolDefinitions.has(name)),
+			initialActiveToolNames: [
+				...new Set([
+					...this.getActiveToolNames().filter((name) => this._baseToolDefinitions.has(name)),
+					// Subagents always get write/edit so they can create files regardless of parent mode
+					"write",
+					"edit",
+				]),
+			],
 			extensionRunnerRef,
 			sessionStartEvent: { type: "session_start", reason: "startup" },
 		});
 
-		childSession.agent.state.systemPrompt = `${childSession.systemPrompt}\n\nYou are a delegated subagent. Work on the assigned task only and return a compact report for the parent agent.`;
+		childSession.agent.state.systemPrompt = `${childSession.systemPrompt}\n\nYou are a subagent. You have a limited turn budget. Work efficiently: batch reads, act quickly, and always end with a plain text report (not a tool call). Your final text message is all the parent sees.`;
 		return childSession;
 	}
 
@@ -1483,6 +1507,16 @@ export class AgentSession {
 				});
 				if (nextTurns >= maxTurns && record.session.isStreaming) {
 					void record.session.abort().catch(() => {});
+				} else if (nextTurns >= Math.floor(maxTurns * SUBAGENT_WRAP_UP_THRESHOLD) && nextTurns < maxTurns) {
+					// Inject wrap-up warnings every turn from 75% onward
+					const remaining = maxTurns - nextTurns;
+					const urgency =
+						remaining <= 1
+							? "FINAL TURN. You MUST output your complete text report NOW. No more tool calls."
+							: remaining <= 2
+								? `URGENT: ${remaining} turns left. Output your text report in this response.`
+								: `${remaining} turns remaining. Start wrapping up — produce your text report soon.`;
+					void record.session.sendUserMessage(`[SYSTEM] ${urgency}`, { deliverAs: "followUp" }).catch(() => {});
 				}
 				return;
 			}
@@ -1870,11 +1904,14 @@ export class AgentSession {
 			name: "spawn_agent",
 			label: "spawn_agent",
 			description:
-				"Delegate a bounded side task to a subagent with its own isolated context. Use this for focused research, tool use, or exploration that should return a concise summary to the main agent.",
-			promptSnippet: "Delegate a bounded side task to an isolated subagent",
+				"Delegate a bounded side task to a subagent with its own isolated context. " +
+				"The subagent runs independently and returns a text report when done. " +
+				"After spawning, continue your own work, then call wait_agent (no timeout) when you need the result.",
+			promptSnippet: "Delegate a side task to a subagent. Continue your work, then wait_agent to collect.",
 			promptGuidelines: [
-				"Use spawn_agent for bounded side tasks that benefit from independent tool use and a separate context.",
-				"Give the subagent a concrete task and only the context it actually needs.",
+				"Spawn → do your own work → wait_agent (no timeout). Do NOT poll with short timeouts.",
+				"Give the subagent a concrete, bounded task. Avoid open-ended exploration tasks.",
+				"Set maxTurns=8 for simple reads, maxTurns=15 for multi-step work, maxTurns=20 for packaging tasks.",
 			],
 			parameters: spawnAgentSchema,
 			execute: async (_toolCallId, input, _signal, onUpdate) => {
@@ -1922,10 +1959,15 @@ export class AgentSession {
 		return {
 			name: "wait_agent",
 			label: "wait_agent",
-			description: "Wait for a subagent to finish its current run and return its latest report.",
-			promptSnippet: "Wait for a subagent to finish and return its latest report",
+			description:
+				"Wait for a subagent to finish its current run and return its latest report. " +
+				"Call WITHOUT timeoutMs to block until the subagent completes — this is the normal usage. " +
+				"Do NOT poll with short timeouts; instead, do your own work first and then call wait_agent without a timeout when you are ready for the result.",
+			promptSnippet: "Block until a subagent finishes and return its report. Do not poll with short timeouts.",
 			promptGuidelines: [
-				"After spawning a subagent, use wait_agent when you need its report before continuing the main task.",
+				"Call wait_agent WITHOUT timeoutMs to block until the subagent is done. This is the correct pattern.",
+				"Do NOT poll with short timeouts like timeoutMs=1 or timeoutMs=2000 — this wastes turns and never gets results.",
+				"Instead: spawn the subagent, do your own work, then call wait_agent (no timeout) when you need the result.",
 			],
 			parameters: waitAgentSchema,
 			execute: async (_toolCallId, input: WaitAgentToolInput) => {

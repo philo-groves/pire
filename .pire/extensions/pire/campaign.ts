@@ -736,6 +736,27 @@ export function buildCampaignPromptSummary(ledger: CampaignLedger, tracker?: Fin
 				lines.push(`- ${ref.from} ↔ ${ref.to} (referenced in ${ref.context})`);
 			}
 		}
+
+		// Also detect unchained findings that share the same subsystem prefix (e.g., both KERNEL-NCTRL-*)
+		const chainedIds = new Set(ledger.chains.flatMap((c) => c.findingIds));
+		const CHAINABLE: Set<FindingStatus> = new Set(["lead", "active", "confirmed", "report-candidate"]);
+		const byPrefix = new Map<string, string[]>();
+		for (const f of tracker.findings) {
+			if (!CHAINABLE.has(f.status) || chainedIds.has(f.id)) continue;
+			const tag = extractSubsystemTag(f.title);
+			if (!tag) continue;
+			const prefix = tag.replace(/-\d{3}$/, "");
+			const list = byPrefix.get(prefix) ?? [];
+			list.push(f.id);
+			byPrefix.set(prefix, list);
+		}
+		const colocated = [...byPrefix.entries()].filter(([, ids]) => ids.length >= 2);
+		if (colocated.length > 0 && crossRefs.length === 0) {
+			lines.push("Multiple unchained findings share the same subsystem — consider /chain-create:");
+			for (const [prefix, ids] of colocated.slice(0, 3)) {
+				lines.push(`- ${prefix}: ${ids.join(", ")}`);
+			}
+		}
 	}
 	return lines.join("\n");
 }
