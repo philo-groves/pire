@@ -593,6 +593,15 @@ export function updateFinding(tracker: FindingsTracker, input: UpdateFindingInpu
 	if (input.severity !== undefined) finding.severity = input.severity;
 	if (input.status !== undefined) finding.status = input.status;
 	if (input.reproStatus !== undefined) finding.reproStatus = input.reproStatus;
+
+	// Auto-promote reproStatus when status implies runtime validation
+	if (input.reproStatus === undefined && finding.reproStatus === "not-reproduced") {
+		const impliesRuntime = finding.status === "confirmed" || finding.status === "report-candidate" || finding.status === "reported";
+		if (impliesRuntime) {
+			finding.reproStatus = "partial";
+		}
+	}
+
 	finding.basis = dedupe([...finding.basis, ...(input.addBasis ?? [])]);
 	finding.relatedEvidenceIds = dedupe([...finding.relatedEvidenceIds, ...(input.addEvidenceIds ?? [])]);
 	finding.relatedArtifactIds = dedupe([...finding.relatedArtifactIds, ...(input.addArtifactIds ?? [])]);

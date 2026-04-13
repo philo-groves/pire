@@ -349,11 +349,21 @@ function formatModePrompt(mode: PireMode): string {
 		lines.push("[DYNAMIC PERMISSIONS]");
 		lines.push("ALLOWED: everything. No restrictions. File edits, new code, debuggers, tracers, probes, network access — all permitted.");
 		lines.push("Focus: whatever is needed to validate hypotheses. Use debuggers, build harnesses, edit files, run probes freely.");
+		lines.push("");
+		lines.push("[REPRO STATUS]");
+		lines.push("When you obtain runtime evidence (debugger output, trace logs, PoC execution) that confirms a finding's claim, update its reproStatus via research_tracker update_finding.");
+		lines.push("- 'partial': runtime evidence supports the claim but end-to-end proof is incomplete (e.g. breakpoint hit, log confirms path reached, but no full exploit chain).");
+		lines.push("- 'reproduced': end-to-end proof captured — PoC triggers the bug and the proof artifact is recorded.");
+		lines.push("Debug tool evidence is auto-promoted to 'partial' when linked to focused findings, but you should explicitly set 'reproduced' when the full proof is in hand.");
 	} else if (mode === "proofing") {
 		lines.push("");
 		lines.push("[PROOFING PERMISSIONS]");
 		lines.push("ALLOWED: everything. Mutation, new code, tightly scoped PoC work.");
 		lines.push("GUIDANCE: keep modifications narrow and evidence-driven. Only build code to test a hypothesis you have already articulated. Prefer 30-line PoC over 300-line harness.");
+		lines.push("");
+		lines.push("[REPRO STATUS]");
+		lines.push("When your PoC successfully triggers the bug end-to-end, immediately update reproStatus to 'reproduced' via research_tracker update_finding.");
+		lines.push("Debug tool evidence is auto-promoted to 'partial' when linked to focused findings, but you must explicitly set 'reproduced' when the full proof is captured.");
 	} else {
 		lines.push("");
 		lines.push("[REPORT PERMISSIONS]");
@@ -943,8 +953,14 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		};
 	};
 
-	const linkEvidenceToActiveFocus = (evidenceId: string, artifactIds: string[]): boolean => {
+	const RUNTIME_EVIDENCE_TOOLS = new Set([
+		"debug_gdb", "debug_gdb_commands", "debug_gdb_script",
+		"debug_lldb", "debug_strace", "debug_ltrace",
+	]);
+
+	const linkEvidenceToActiveFocus = (evidenceId: string, artifactIds: string[], toolName?: string): boolean => {
 		const focus = getEvidenceLinkFocus();
+		const isRuntimeEvidence = toolName !== undefined && RUNTIME_EVIDENCE_TOOLS.has(toolName);
 		let changed = false;
 		for (const id of focus.hypothesisIds) {
 			if (updateHypothesis(findingsTracker, { id, addEvidenceIds: [evidenceId], addArtifactIds: artifactIds })) {
@@ -952,7 +968,14 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			}
 		}
 		for (const id of focus.findingIds) {
-			if (updateFinding(findingsTracker, { id, addEvidenceIds: [evidenceId], addArtifactIds: artifactIds, addBasis: [evidenceId] })) {
+			const reproPromotion: { reproStatus?: "partial" } = {};
+			if (isRuntimeEvidence) {
+				const finding = findingsTracker.findings.find((f) => f.id === id);
+				if (finding && finding.reproStatus === "not-reproduced") {
+					reproPromotion.reproStatus = "partial";
+				}
+			}
+			if (updateFinding(findingsTracker, { id, addEvidenceIds: [evidenceId], addArtifactIds: artifactIds, addBasis: [evidenceId], ...reproPromotion })) {
 				changed = true;
 			}
 		}
@@ -3614,7 +3637,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				commandId: `tool:${event.toolName}:${event.toolCallId}`,
 				artifactIds,
 			});
-			linkEvidenceToActiveFocus(evidence.id, artifactIds);
+			linkEvidenceToActiveFocus(evidence.id, artifactIds, event.toolName);
 			await persistTracker();
 			syncTrackerUI(ctx);
 			if (event.toolName !== "read" && event.toolName !== "write" && event.toolName !== "edit" && event.toolName !== "bash") {
