@@ -78,7 +78,7 @@ export function createDefaultSafetyPosture(): PireSafetyPosture {
 	return {
 		version: 1,
 		scope: "local",
-		intent: "observe",
+		intent: "exploit",
 		activeProbing: {
 			approved: false,
 		},

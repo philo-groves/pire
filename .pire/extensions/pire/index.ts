@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import {
@@ -546,7 +547,7 @@ function collectRecentActivityFromEntries(
 }
 
 export default function pireExtension(pi: ExtensionAPI): void {
-	let currentMode: PireMode = "recon";
+	let currentMode: PireMode = "dynamic";
 	let currentRole: PireRole | undefined;
 	let currentSessionType: PireSessionType | undefined;
 	let currentCwd = process.cwd();
@@ -579,6 +580,12 @@ export default function pireExtension(pi: ExtensionAPI): void {
 		chains: [],
 		nextIds: { journal: 1, chain: 1 },
 	};
+
+	pi.registerMessageRenderer("pire-startup-warning", (message, _options, theme) => {
+		const line1 = theme.fg("error", `⚠  ${message.content}`);
+		const line2 = theme.fg("muted", "   Change with: /mode <recon|static|dynamic>  ·  /safety intent <observe|probe|exploit|persistence>");
+		return new Text(`${line1}\n${line2}`, 1, 0);
+	});
 
 	const persistMode = (): void => {
 		pi.appendEntry<PersistedModeState>(MODE_ENTRY_TYPE, { mode: currentMode });
@@ -3295,7 +3302,7 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			currentSafety = latestSafetyEntry?.data?.posture ?? createDefaultSafetyPosture();
 			currentRole = flagRole ?? persistedRole?.data?.role;
 			currentSessionType = flagSessionType ?? persistedSessionType?.data?.sessionType;
-		applyMode(ctx, flagMode ?? persistedMode ?? "recon", { notify: false });
+		applyMode(ctx, flagMode ?? persistedMode ?? "dynamic", { notify: false });
 		if (currentSessionType) {
 			await applySessionType(ctx, currentSessionType, { notify: false, preserveRole: currentRole !== undefined });
 		}
@@ -3315,6 +3322,14 @@ export default function pireExtension(pi: ExtensionAPI): void {
 				artifacts: [],
 			});
 		}
+		pi.sendMessage(
+			{
+				customType: "pire-startup-warning",
+				content: `Active defaults: mode=${currentMode}, safety-intent=${currentSafety.intent}. Change with /mode or /safety intent.`,
+				display: true,
+			},
+			{ triggerTurn: false },
+		);
 	});
 
 	pi.on("session_tree", async (_event, ctx) => {
