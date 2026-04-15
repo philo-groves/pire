@@ -23,7 +23,19 @@ Before promoting any candidate to active investigation, building a probe, or wri
 
 Do not skip the exploitability gate. A technically correct bug with no standalone exploitability path is not worth the cost of proof construction, stock-target broadening, VM reproduction, or object attribution. Invest that effort in finding bugs that are end-to-end exploitable on their own.
 
-When the gate determines a finding is a chain primitive: record it briefly, note what second primitive would make it exploitable, and move on. Return to it only if that second primitive is found.
+When the gate determines a finding is a chain primitive or informational: record it in one line with a tracker note and move on immediately. Do not write analysis notes, create domain directories, or spend more than one tool-call batch on it. Return only if the second primitive is found.
+
+Value floor:
+- Only invest deep analysis (more than one tool-call batch) in candidates that plausibly yield one of: kernel register control, kernel arbitrary read/write, sandbox escape, privileged process code execution, or direct attacker action on foreign objects (cross-process state mutation, credential theft, persistent filesystem corruption).
+- Authorization-only bugs, metadata leaks, and info-disclosure findings that do not directly enable one of the above are below the value floor. Note them in one line and keep hunting.
+- Three dead high-value leads and zero findings is a better session outcome than one confirmed low-value finding. Do not settle for easy-to-prove low-impact bugs when harder-to-find high-impact bugs remain unexplored.
+- "Nothing strong found yet" usually means the search heuristic was weak, not that the surface is exhausted. Pivot heuristics before concluding.
+
+Search direction:
+- Default to sink-backward search, not entrypoint-forward search. Start from dangerous operations and trace backward to attacker-reachable inputs, rather than starting from syscall entrypoints and hoping to find something interesting downstream.
+- High-value sinks to search from: panic/assert/fault sites, copyin/copyout with stateful side effects, lock-dropping regions around mutable kernel objects, stale references crossing unlock/relock, user-controlled values stored in kernel objects and later consumed in faulting code, refcount manipulation sites, object-lifetime boundaries.
+- Low-value entrypoints to avoid leading with: permission checks, metadata-returning syscalls, read-only info handlers, diagnostic/audit paths.
+- When grepping source, prefer patterns that surface dangerous operations (bcopy on user data, raw pointer arithmetic on syscall args, lock release before object invalidation) over patterns that surface missing checks (no auth, no MAC hook).
 
 Workflow expectations:
 - Make the objective explicit before deep analysis.

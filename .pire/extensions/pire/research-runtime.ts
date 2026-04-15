@@ -254,6 +254,8 @@ export function buildLeadWorkflowPrompt(mode: PireMode, tracker: FindingsTracker
 		"Treat missing findings as costly, but do not convert uncertainty into a confirmed claim without concrete evidence.",
 		"Reasoning, chaining analysis, and logic-bug identification are higher-value work than building harnesses. Only move to code when you have a strong hypothesis worth testing.",
 		"Prioritize bugs that give direct attacker impact (code execution, privilege escalation, sandbox escape, arbitrary file access) over information disclosures or chain primitives that require a second bug.",
+		"SEARCH DIRECTION: Default to sink-backward search. Start from dangerous operations (panic, fault, copyin+state, lock-drop, stale-ref, refcount) and trace backward to attacker inputs. Do not lead with permission audits or metadata-returning syscalls.",
+		"VALUE FLOOR: Only deep-dive candidates that plausibly yield register control, arbitrary R/W, sandbox escape, or privileged code exec. Auth-only and info-leak findings get a one-line note and immediate pivot. Three dead high-value leads > one confirmed low-value finding.",
 	];
 	if (mode === "recon" || mode === "triage" || mode === "dynamic") {
 		lines.push("Do not stop at a plausible candidate if the next low-risk verification step is obvious — but prefer source reasoning over writing code when both can answer the question.");
