@@ -246,12 +246,14 @@ export function buildLeadWorkflowPrompt(mode: PireMode, tracker: FindingsTracker
 	const queue = getCandidateFindingQueue(tracker).slice(0, 3);
 	const lines = [
 		"[PIRE LEAD WORKFLOW]",
-		"Work the loop in order: sweep for candidates, reason about exploitability from source, verify or kill the best lead, then report only what survives evidence review.",
-		"Use diverse entrypoints during sweep so the search does not collapse onto one comfortable explanation.",
+		"Work the loop in order: sweep for candidates, apply the exploitability gate, verify or kill the best lead, then report only what survives evidence review.",
+		"EXPLOITABILITY GATE (mandatory before any probe or finding promotion): Answer in plain text: (1) What can an attacker achieve with this bug alone, end-to-end? (2) Would a bounty program pay for this as a standalone submission? (3) Does this require a second hypothetical bug to be useful? If the answer to (3) is yes, label it a chain primitive, record it briefly, and move to higher-value leads.",
+		"Use diverse entrypoints during sweep so the search does not collapse onto one comfortable explanation. After finding one bug class in a subsystem, explicitly switch to a different bug class or subsystem. If the sweep keeps producing the same class (e.g., info-disclosure after info-disclosure), stop and force a different entry point.",
 		"Before building any harness or probe, answer: (1) what specific hypothesis does it test, (2) why can source reasoning alone not resolve this, (3) what concrete outcome would the code produce. If you cannot answer all three, keep reading and reasoning.",
 		"During verification, look for disconfirming evidence and alternate explanations before you strengthen the claim.",
 		"Treat missing findings as costly, but do not convert uncertainty into a confirmed claim without concrete evidence.",
 		"Reasoning, chaining analysis, and logic-bug identification are higher-value work than building harnesses. Only move to code when you have a strong hypothesis worth testing.",
+		"Prioritize bugs that give direct attacker impact (code execution, privilege escalation, sandbox escape, arbitrary file access) over information disclosures or chain primitives that require a second bug.",
 	];
 	if (mode === "recon" || mode === "triage" || mode === "dynamic") {
 		lines.push("Do not stop at a plausible candidate if the next low-risk verification step is obvious — but prefer source reasoning over writing code when both can answer the question.");
@@ -268,7 +270,7 @@ export function buildLeadWorkflowPrompt(mode: PireMode, tracker: FindingsTracker
 	if (queue.length > 0) {
 		lines.push("Top leads to follow now:");
 		for (const record of queue) {
-			lines.push(`- ${record.id} [${record.severity}/${record.reproStatus}] ${record.title} -> ${record.nextStep}`);
+			lines.push(`- ${record.id} [${record.severity}/${record.exploitability}/${record.reproStatus}] ${record.title} -> ${record.nextStep}`);
 		}
 	}
 	return lines.join("\n");

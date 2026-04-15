@@ -34,11 +34,14 @@ export interface HypothesisRecord {
 	updatedAt: string;
 }
 
+export type Exploitability = "standalone-exploitable" | "chain-primitive" | "informational" | "not-assessed";
+
 export interface FindingRecord {
 	id: string;
 	title: string;
 	status: FindingStatus;
 	severity: Severity;
+	exploitability: Exploitability;
 	statement: string;
 	basis: string[];
 	relatedEvidenceIds: string[];
@@ -46,12 +49,20 @@ export interface FindingRecord {
 	reproStatus: ReproStatus;
 	createdAt: string;
 	updatedAt: string;
+	/** Top-level domain directory (e.g., "kernel", "sandbox", "webkit"). Required for domain-partitioned FINDINGS.md. */
+	domain?: string;
+	/** Subsystem directory within the domain (e.g., "pid-authz", "coalition-info"). Required for domain-partitioned FINDINGS.md. */
+	subsystem?: string;
 	surface?: string;
 	sourceRefs?: string[];
 	reachability?: string;
 	validationStatus?: string;
 	nextStep?: string;
 	keyArtifacts?: string[];
+	/** For chain-primitive findings: what second primitive would make this exploitable */
+	chainRequires?: string;
+	/** End-to-end attacker impact if standalone-exploitable */
+	standaloneImpact?: string;
 }
 
 export interface QuestionRecord {
@@ -154,18 +165,23 @@ export interface AddFindingInput {
 	title: string;
 	statement: string;
 	severity?: Severity;
+	exploitability?: Exploitability;
 	status?: FindingStatus;
 	basis?: string[];
 	relatedEvidenceIds?: string[];
 	relatedArtifactIds?: string[];
 	reproStatus?: ReproStatus;
 	timestamp?: string;
+	domain?: string;
+	subsystem?: string;
 	surface?: string;
 	sourceRefs?: string[];
 	reachability?: string;
 	validationStatus?: string;
 	nextStep?: string;
 	keyArtifacts?: string[];
+	chainRequires?: string;
+	standaloneImpact?: string;
 }
 
 export interface UpdateFindingInput {
@@ -173,12 +189,15 @@ export interface UpdateFindingInput {
 	title?: string;
 	statement?: string;
 	severity?: Severity;
+	exploitability?: Exploitability;
 	status?: FindingStatus;
 	reproStatus?: ReproStatus;
 	addBasis?: string[];
 	addEvidenceIds?: string[];
 	addArtifactIds?: string[];
 	timestamp?: string;
+	domain?: string;
+	subsystem?: string;
 	surface?: string;
 	sourceRefs?: string[];
 	addSourceRefs?: string[];
@@ -187,6 +206,8 @@ export interface UpdateFindingInput {
 	nextStep?: string;
 	keyArtifacts?: string[];
 	addKeyArtifacts?: string[];
+	chainRequires?: string;
+	standaloneImpact?: string;
 }
 
 export interface AddQuestionInput {
@@ -228,6 +249,7 @@ export interface CandidateFindingQueueEntry {
 	id: string;
 	title: string;
 	severity: Severity;
+	exploitability: Exploitability;
 	reproStatus: ReproStatus;
 	evidenceCount: number;
 	artifactCount: number;
@@ -319,12 +341,17 @@ function normalizeFinding(value: unknown): FindingRecord | undefined {
 		return undefined;
 	}
 
+	const VALID_EXPLOITABILITY = new Set(["standalone-exploitable", "chain-primitive", "informational", "not-assessed"]);
 	return {
 		id: value.id,
 		title: value.title,
 		status: normalizeFindingStatus(value.status),
 		severity:
 			value.severity === "low" || value.severity === "medium" || value.severity === "critical" ? value.severity : "high",
+		exploitability:
+			typeof value.exploitability === "string" && VALID_EXPLOITABILITY.has(value.exploitability)
+				? (value.exploitability as Exploitability)
+				: "not-assessed",
 		statement: value.statement,
 		basis: dedupe(toStringArray(value.basis)),
 		relatedEvidenceIds: dedupe(toStringArray(value.relatedEvidenceIds)),
@@ -339,6 +366,10 @@ function normalizeFinding(value: unknown): FindingRecord | undefined {
 		validationStatus: typeof value.validationStatus === "string" ? value.validationStatus : undefined,
 		nextStep: typeof value.nextStep === "string" ? value.nextStep : undefined,
 		keyArtifacts: Array.isArray(value.keyArtifacts) ? dedupe(toStringArray(value.keyArtifacts)) : undefined,
+		chainRequires: typeof value.chainRequires === "string" ? value.chainRequires : undefined,
+		standaloneImpact: typeof value.standaloneImpact === "string" ? value.standaloneImpact : undefined,
+		domain: typeof value.domain === "string" ? value.domain.trim().toLowerCase() : undefined,
+		subsystem: typeof value.subsystem === "string" ? value.subsystem.trim().toLowerCase() : undefined,
 	};
 }
 
@@ -453,6 +484,10 @@ export interface FindingsTrackerLoadOptions {
 }
 
 export interface FindingsTrackerSaveOptions {
+	/**
+	 * @deprecated Use domain-partitioned FINDINGS.md instead. When set, also writes a flat
+	 * root FINDINGS.md for backward compatibility, but only for findings without domain/subsystem.
+	 */
 	findingsMdPath?: string;
 	findingsMdName?: string;
 }
@@ -471,6 +506,7 @@ export async function loadFindingsTracker(cwd: string, options?: FindingsTracker
 		}
 	}
 
+	// Merge from root FINDINGS.md (legacy / unrouted findings)
 	const mdPath = options?.findingsMdPath;
 	if (mdPath && existsSync(mdPath)) {
 		try {
@@ -483,9 +519,47 @@ export async function loadFindingsTracker(cwd: string, options?: FindingsTracker
 		}
 	}
 
+	// Merge from domain-partitioned FINDINGS.md files
+	try {
+		const domainsDir = join(cwd, "domains");
+		if (existsSync(domainsDir)) {
+			const { parseFindingsMd, mergeFindingsFromMd } = await import("./findings-md.js");
+			const { readdir } = await import("node:fs/promises");
+			const domains = await readdir(domainsDir, { withFileTypes: true });
+			for (const domain of domains) {
+				if (!domain.isDirectory()) continue;
+				const domainPath = join(domainsDir, domain.name);
+				const subsystems = await readdir(domainPath, { withFileTypes: true });
+				for (const subsystem of subsystems) {
+					if (!subsystem.isDirectory()) continue;
+					const findingsPath = join(domainPath, subsystem.name, "FINDINGS.md");
+					if (!existsSync(findingsPath)) continue;
+					try {
+						const content = await readFile(findingsPath, "utf-8");
+						const mdFindings = parseFindingsMd(content);
+						// Stamp domain/subsystem from the file path onto parsed findings
+						for (const f of mdFindings) {
+							if (!f.domain) f.domain = domain.name.toLowerCase();
+							if (!f.subsystem) f.subsystem = subsystem.name.toLowerCase();
+						}
+						mergeFindingsFromMd(tracker, mdFindings);
+					} catch {
+						// Per-domain parse failure is non-fatal
+					}
+				}
+			}
+		}
+	} catch {
+		// Domain scan failure is non-fatal
+	}
+
 	return tracker;
 }
 
+/**
+ * Partition findings by domain/subsystem and write per-domain FINDINGS.md files.
+ * Also writes a root FINDINGS.md as a summary index pointing to domain files.
+ */
 export async function saveFindingsTracker(
 	cwd: string,
 	tracker: FindingsTracker,
@@ -498,17 +572,77 @@ export async function saveFindingsTracker(
 	await writeFile(jsonPath, `${JSON.stringify(tracker, null, 2)}\n`, "utf-8");
 	await writeFile(markdownPath, renderFindingsMarkdown(tracker), "utf-8");
 
-	if (options?.findingsMdPath && tracker.findings.length > 0) {
+	if (tracker.findings.length > 0) {
 		try {
 			const { renderFindingsMd } = await import("./findings-md.js");
-			const subsystemName = options.findingsMdName ?? basename(cwd);
-			await writeFile(options.findingsMdPath, renderFindingsMd(subsystemName, tracker.findings), "utf-8");
+
+			// Partition findings by domain/subsystem
+			const routed = new Map<string, FindingRecord[]>();
+			const unrouted: FindingRecord[] = [];
+			for (const f of tracker.findings) {
+				if (f.domain && f.subsystem) {
+					const key = `${f.domain}/${f.subsystem}`;
+					let bucket = routed.get(key);
+					if (!bucket) {
+						bucket = [];
+						routed.set(key, bucket);
+					}
+					bucket.push(f);
+				} else {
+					unrouted.push(f);
+				}
+			}
+
+			// Write per-domain FINDINGS.md files
+			for (const [key, findings] of Array.from(routed.entries())) {
+				const domainDir = join(cwd, "domains", key);
+				await mkdir(domainDir, { recursive: true });
+				const domainFindingsPath = join(domainDir, "FINDINGS.md");
+				const subsystemName = key.split("/").pop() ?? key;
+				await writeFile(domainFindingsPath, renderFindingsMd(subsystemName, findings), "utf-8");
+			}
+
+			// Write root FINDINGS.md as a summary index
+			const rootFindingsPath = options?.findingsMdPath ?? join(cwd, "FINDINGS.md");
+			await writeFile(rootFindingsPath, renderFindingsIndex(tracker.findings, routed, unrouted), "utf-8");
 		} catch {
 			// FINDINGS.md write failure is non-fatal; session JSON is the primary store
 		}
 	}
 
 	return { jsonPath, markdownPath };
+}
+
+/** Render the root FINDINGS.md as a summary index that points to domain files. */
+function renderFindingsIndex(
+	allFindings: FindingRecord[],
+	routed: Map<string, FindingRecord[]>,
+	unrouted: FindingRecord[],
+): string {
+	const lines = [
+		"# Findings Index",
+		"",
+		"Summary of all findings. Per-domain details live in `domains/{domain}/{subsystem}/FINDINGS.md`.",
+		"",
+		"| ID | Domain | Status | Exploitability | Severity | Title |",
+		"|----|--------|--------|----------------|----------|-------|",
+	];
+
+	const sorted = [...allFindings].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+	for (const f of sorted) {
+		const domain = f.domain && f.subsystem ? `${f.domain}/${f.subsystem}` : "—";
+		const title = f.title.replace(/\|/g, "\\|");
+		lines.push(`| ${f.id} | ${domain} | ${f.status} | ${f.exploitability} | ${f.severity} | ${title} |`);
+	}
+
+	if (unrouted.length > 0) {
+		lines.push(
+			"",
+			`> **${unrouted.length} finding(s) have no domain/subsystem set.** Set \`domain\` and \`subsystem\` via \`research_tracker update_finding\` to route them to per-domain FINDINGS.md files.`,
+		);
+	}
+
+	return `${lines.join("\n").trimEnd()}\n`;
 }
 
 export function buildArtifactRef(path: string): string {
@@ -562,6 +696,7 @@ export function addFinding(tracker: FindingsTracker, input: AddFindingInput): Fi
 		title: input.title.trim(),
 		status: input.status ?? "lead",
 		severity: input.severity ?? "medium",
+		exploitability: input.exploitability ?? "not-assessed",
 		statement: input.statement.trim(),
 		basis: dedupe(input.basis ?? []),
 		relatedEvidenceIds: dedupe(input.relatedEvidenceIds ?? []),
@@ -573,8 +708,12 @@ export function addFinding(tracker: FindingsTracker, input: AddFindingInput): Fi
 		sourceRefs: input.sourceRefs ? dedupe(input.sourceRefs) : undefined,
 		reachability: input.reachability?.trim() || undefined,
 		validationStatus: input.validationStatus?.trim() || undefined,
+		domain: input.domain?.trim().toLowerCase() || undefined,
+		subsystem: input.subsystem?.trim().toLowerCase() || undefined,
 		nextStep: input.nextStep?.trim() || undefined,
 		keyArtifacts: input.keyArtifacts ? dedupe(input.keyArtifacts) : undefined,
+		chainRequires: input.chainRequires?.trim() || undefined,
+		standaloneImpact: input.standaloneImpact?.trim() || undefined,
 	};
 	tracker.findings.push(record);
 	touchTracker(tracker, timestamp);
@@ -591,8 +730,13 @@ export function updateFinding(tracker: FindingsTracker, input: UpdateFindingInpu
 	if (input.title !== undefined) finding.title = input.title.trim();
 	if (input.statement !== undefined) finding.statement = input.statement.trim();
 	if (input.severity !== undefined) finding.severity = input.severity;
+	if (input.exploitability !== undefined) finding.exploitability = input.exploitability;
 	if (input.status !== undefined) finding.status = input.status;
 	if (input.reproStatus !== undefined) finding.reproStatus = input.reproStatus;
+	if (input.chainRequires !== undefined) finding.chainRequires = input.chainRequires.trim() || undefined;
+	if (input.standaloneImpact !== undefined) finding.standaloneImpact = input.standaloneImpact.trim() || undefined;
+	if (input.domain !== undefined) finding.domain = input.domain.trim().toLowerCase() || undefined;
+	if (input.subsystem !== undefined) finding.subsystem = input.subsystem.trim().toLowerCase() || undefined;
 
 	// Auto-promote reproStatus when status implies runtime validation
 	if (input.reproStatus === undefined && finding.reproStatus === "not-reproduced") {
@@ -740,6 +884,7 @@ export function getCandidateFindingQueue(tracker: FindingsTracker): CandidateFin
 			id: record.id,
 			title: record.title,
 			severity: record.severity,
+			exploitability: record.exploitability,
 			reproStatus: record.reproStatus,
 			evidenceCount: record.relatedEvidenceIds.length,
 			artifactCount: record.relatedArtifactIds.length,
@@ -748,6 +893,12 @@ export function getCandidateFindingQueue(tracker: FindingsTracker): CandidateFin
 			nextStep: inferCandidateNextStep(record),
 		}))
 		.sort((left, right) => {
+			// Standalone-exploitable findings always rank above chain-primitives and not-assessed
+			const exploitRank = (e: Exploitability): number =>
+				e === "standalone-exploitable" ? 3 : e === "not-assessed" ? 1 : e === "chain-primitive" ? 0 : 0;
+			const exploitDelta = exploitRank(right.exploitability) - exploitRank(left.exploitability);
+			if (exploitDelta !== 0) return exploitDelta;
+
 			const scoreDelta =
 				severityRank(right.severity) * 100 +
 				reproRank(right.reproStatus) * 10 +
@@ -782,7 +933,7 @@ export function summarizeCandidateFindings(tracker: FindingsTracker, filterText?
 	}
 	for (const record of queue.slice(0, 8)) {
 		lines.push(
-			`- ${record.id} [${record.severity}/${record.reproStatus}] ${record.title} (evidence:${record.evidenceCount}, basis:${record.basisCount}, artifacts:${record.artifactCount})`,
+			`- ${record.id} [${record.severity}/${record.exploitability}/${record.reproStatus}] ${record.title} (evidence:${record.evidenceCount}, basis:${record.basisCount}, artifacts:${record.artifactCount})`,
 		);
 		lines.push(`  next: ${record.nextStep}`);
 	}

@@ -378,6 +378,20 @@ function formatModePrompt(mode: PireMode): string {
 		lines.push("- 'partial': runtime evidence supports the claim but end-to-end proof is incomplete (e.g. breakpoint hit, log confirms path reached, but no full exploit chain).");
 		lines.push("- 'reproduced': end-to-end proof captured — PoC triggers the bug and the proof artifact is recorded.");
 		lines.push("Debug tool evidence is auto-promoted to 'partial' when linked to focused findings, but you should explicitly set 'reproduced' when the full proof is in hand.");
+		lines.push("");
+		lines.push("[EXPLOITABILITY GATE]");
+		lines.push("Before promoting any candidate to active, building a probe, or writing a finding, answer in plain text:");
+		lines.push("1. What can an attacker achieve with this bug alone, end-to-end?");
+		lines.push("2. Would a bounty program pay for this as a standalone submission?");
+		lines.push("3. Does this require a second bug to be useful? If yes, label it chain-primitive and deprioritize.");
+		lines.push("Set the exploitability field on every finding: standalone-exploitable, chain-primitive, or informational.");
+		lines.push("Do not invest in proof strengthening (stock-target broadening, VM repro, object attribution) for chain-primitives unless you already have the second bug.");
+		lines.push("");
+		lines.push("[WORKSPACE STRUCTURE]");
+		lines.push("Always set domain and subsystem when creating findings via research_tracker add_finding.");
+		lines.push("domain = broad target category (kernel, sandbox, webkit, comms). subsystem = specific component (pid-authz, coalition-info, fecolormatrix).");
+		lines.push("This routes findings to domains/{domain}/{subsystem}/FINDINGS.md automatically. Findings without domain/subsystem are flagged as unrouted.");
+		lines.push("Place PoCs and analysis under the same domains/{domain}/{subsystem}/ directory.");
 	} else if (mode === "proofing") {
 		lines.push("");
 		lines.push("[PROOFING PERMISSIONS]");
@@ -1394,6 +1408,18 @@ export default function pireExtension(pi: ExtensionAPI): void {
 			nextStep: Type.Optional(Type.String()),
 			keyArtifacts: Type.Optional(Type.Array(Type.String())),
 			addKeyArtifacts: Type.Optional(Type.Array(Type.String())),
+			exploitability: Type.Optional(
+				Type.Union([
+					Type.Literal("standalone-exploitable"),
+					Type.Literal("chain-primitive"),
+					Type.Literal("informational"),
+					Type.Literal("not-assessed"),
+				]),
+			),
+			chainRequires: Type.Optional(Type.String()),
+			standaloneImpact: Type.Optional(Type.String()),
+			domain: Type.Optional(Type.String({ description: "Top-level domain directory, e.g. 'kernel', 'sandbox', 'webkit'. Used to route finding to domains/{domain}/{subsystem}/FINDINGS.md." })),
+			subsystem: Type.Optional(Type.String({ description: "Subsystem directory within domain, e.g. 'pid-authz', 'coalition-info'. Used with domain to route finding to domains/{domain}/{subsystem}/FINDINGS.md." })),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			let resultText = "";
@@ -1482,30 +1508,38 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						title: params.title,
 						statement: params.statement,
 						severity: params.severity,
+						exploitability: params.exploitability,
 						status: params.status as FindingStatus | undefined,
 						basis: params.basis,
 						relatedEvidenceIds: params.relatedEvidenceIds,
 						relatedArtifactIds: params.relatedArtifactIds,
 						reproStatus: params.reproStatus,
+						domain: params.domain,
+						subsystem: params.subsystem,
 						surface: params.surface,
 						sourceRefs: params.sourceRefs,
 						reachability: params.reachability,
 						validationStatus: params.validationStatus,
 						nextStep: params.nextStep,
 						keyArtifacts: params.keyArtifacts,
+						chainRequires: params.chainRequires,
+						standaloneImpact: params.standaloneImpact,
 					});
 					await persistTracker();
 					await appendCampaignJournalEntry(currentCwd, campaignLedger, {
 						findingId: record.id,
 						action: "finding",
 						summary: `New finding ${record.id} [${record.status}]: ${record.title}`,
-						details: `severity=${record.severity}, statement: ${record.statement.slice(0, 200)}`,
+						details: `severity=${record.severity}, exploitability=${record.exploitability}, statement: ${record.statement.slice(0, 200)}`,
 					});
 					await persistCampaign();
 					await syncCampaignFinding(ctx, record.id, `Synced ${record.id} into the campaign ledger from research_tracker add_finding.`);
 					syncTrackerUI(ctx);
 					applyFocus(ctx, { findingIds: [record.id] }, { notify: false });
-					resultText = `Added finding ${record.id}: ${record.title}`;
+					const routeInfo = record.domain && record.subsystem
+						? ` → domains/${record.domain}/${record.subsystem}/FINDINGS.md`
+						: " (WARNING: no domain/subsystem set — finding will not be routed to a domain FINDINGS.md)";
+					resultText = `Added finding ${record.id}: ${record.title}${routeInfo}`;
 					break;
 				}
 				case "update_finding": {
@@ -1521,11 +1555,14 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						title: params.title,
 						statement: params.statement,
 						severity: params.severity,
+						exploitability: params.exploitability,
 						status: params.status as FindingStatus | undefined,
 						reproStatus: params.reproStatus as ReproStatus | undefined,
 						addBasis: params.addBasis,
 						addEvidenceIds: params.addEvidenceIds,
 						addArtifactIds: params.addArtifactIds,
+						domain: params.domain,
+						subsystem: params.subsystem,
 						surface: params.surface,
 						sourceRefs: params.sourceRefs,
 						addSourceRefs: params.addSourceRefs,
@@ -1534,6 +1571,8 @@ export default function pireExtension(pi: ExtensionAPI): void {
 						nextStep: params.nextStep,
 						keyArtifacts: params.keyArtifacts,
 						addKeyArtifacts: params.addKeyArtifacts,
+						chainRequires: params.chainRequires,
+						standaloneImpact: params.standaloneImpact,
 					});
 					if (!record) {
 						resultText = `Unknown finding: ${params.id}`;
