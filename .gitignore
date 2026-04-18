@@ -9,10 +9,6 @@ packages/*/dist-chrome/
 packages/*/dist-firefox/
 *.cpuprofile
 
-# Temp Files
-**/tmp/
-**/.build
-
 # Environment
 .env
 
@@ -40,4 +36,13 @@ packages/coding-agent/binaries/
 todo.md
 plans/
 .pi/hf-sessions/
+.pi/hf-sessions-backup/
 collect.sh
+
+# PiRE
+.pire/
+validation-benchmarks/
+pire-eval/node_modules/
+.pire-eval-sessions/
+
+**/.cybergym*

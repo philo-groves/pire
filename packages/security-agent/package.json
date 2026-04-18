@@ -12,10 +12,15 @@
 		".": {
 			"types": "./dist/index.d.ts",
 			"import": "./dist/index.js"
+		},
+		"./run-cli": {
+			"types": "./src/run-cli.ts",
+			"import": "./dist/run-cli.js"
 		}
 	},
 	"files": [
 		"dist",
+		"src/run-cli.ts",
 		"README.md",
 		"CHANGELOG.md"
 	],

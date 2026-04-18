@@ -4,6 +4,7 @@ export * from "./logic-map/store.js";
 export * from "./models.js";
 export * from "./notebook/store.js";
 export * from "./prompt.js";
+export * from "./run-cli.js";
 export * from "./runtime.js";
 export * from "./surface-map/seed.js";
 export * from "./surface-map/store.js";

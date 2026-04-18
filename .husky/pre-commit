@@ -1,16 +1,5 @@
 #!/bin/sh
 
-# Ensure node/npm are on PATH when invoked from GUI apps (e.g. VSCode)
-if ! command -v npm >/dev/null 2>&1; then
-  export NVM_DIR="$HOME/.nvm"
-  [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-  if ! command -v npm >/dev/null 2>&1; then
-    for dir in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
-      [ -x "$dir/npm" ] && export PATH="$dir:$PATH" && break
-    done
-  fi
-fi
-
 # Get list of staged files before running check
 STAGED_FILES=$(git diff --cached --name-only)
 
