@@ -1,7 +1,6 @@
 // UI Components for extensions
 export { ArminComponent } from "./armin.js";
 export { AssistantMessageComponent } from "./assistant-message.js";
-export { BackgroundTaskActivityComponent } from "./background-task-activity.js";
 export { BashExecutionComponent } from "./bash-execution.js";
 export { BorderedLoader } from "./bordered-loader.js";
 export { BranchSummaryMessageComponent } from "./branch-summary-message.js";

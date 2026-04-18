@@ -1,2 +1,0 @@
-token=samedit-token-3156
-receipt=0e3418d6

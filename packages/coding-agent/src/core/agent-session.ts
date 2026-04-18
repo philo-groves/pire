@@ -13,30 +13,23 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
-import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import {
+import type {
 	Agent,
-	type AgentEvent,
-	type AgentMessage,
-	type AgentState,
-	type AgentTool,
-	type ThinkingLevel,
+	AgentEvent,
+	AgentMessage,
+	AgentState,
+	AgentTool,
+	ThinkingLevel,
 } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, TextContent } from "@mariozechner/pi-ai";
-import { isContextOverflow, modelsAreEqual, resetApiProviders, streamSimple, supportsXhigh } from "@mariozechner/pi-ai";
-import { type Static, Type } from "@sinclair/typebox";
+import { isContextOverflow, modelsAreEqual, resetApiProviders, supportsXhigh } from "@mariozechner/pi-ai";
 import { getDocsPath } from "../config.js";
 import { theme } from "../modes/interactive/theme/theme.js";
 import { stripFrontmatter } from "../utils/frontmatter.js";
 import { sleep } from "../utils/sleep.js";
-import {
-	type BackgroundBashTask,
-	type BashResult,
-	executeBashWithOperations,
-	startBackgroundBash,
-} from "./bash-executor.js";
+import { type BashResult, executeBashWithOperations } from "./bash-executor.js";
 import {
 	type CompactionResult,
 	calculateContextTokens,
@@ -74,17 +67,12 @@ import {
 	type TurnStartEvent,
 	wrapRegisteredTools,
 } from "./extensions/index.js";
-import { type BashExecutionMessage, type CustomMessage, convertToLlm } from "./messages.js";
+import type { BashExecutionMessage, CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
-import type { BranchSummaryEntry, CompactionEntry, SessionEntry } from "./session-manager.js";
-import {
-	CURRENT_SESSION_VERSION,
-	getLatestCompactionEntry,
-	type SessionHeader,
-	SessionManager,
-} from "./session-manager.js";
+import type { BranchSummaryEntry, CompactionEntry, SessionManager } from "./session-manager.js";
+import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader } from "./session-manager.js";
 import type { SettingsManager } from "./settings-manager.js";
 import type { SlashCommandInfo } from "./slash-commands.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
@@ -128,51 +116,6 @@ export type AgentSessionEvent =
 			steering: readonly string[];
 			followUp: readonly string[];
 	  }
-	| {
-			type: "subagent_start";
-			subagent: SubagentInfo;
-	  }
-	| {
-			type: "subagent_update";
-			subagent: SubagentInfo;
-			eventType:
-				| "agent_start"
-				| "agent_end"
-				| "turn_start"
-				| "turn_end"
-				| "message_start"
-				| "message_update"
-				| "message_end"
-				| "tool_execution_start"
-				| "tool_execution_update"
-				| "tool_execution_end";
-			assistantEventType?: string;
-			messageRole?: AgentMessage["role"];
-			text?: string;
-			delta?: string;
-			toolName?: string;
-			toolCallId?: string;
-			isError?: boolean;
-	  }
-	| {
-			type: "subagent_end";
-			subagent: SubagentInfo;
-	  }
-	| {
-			type: "background_task_start";
-			task: BackgroundTaskInfo;
-	  }
-	| {
-			type: "background_task_update";
-			task: BackgroundTaskInfo;
-			eventType: "output" | "exit" | "cancel_requested";
-			delta?: string;
-			text?: string;
-	  }
-	| {
-			type: "background_task_end";
-			task: BackgroundTaskInfo;
-	  }
 	| { type: "compaction_start"; reason: "manual" | "threshold" | "overflow" }
 	| {
 			type: "compaction_end";
@@ -197,8 +140,6 @@ export interface AgentSessionConfig {
 	sessionManager: SessionManager;
 	settingsManager: SettingsManager;
 	cwd: string;
-	/** Current subagent nesting depth. Root sessions start at 0. */
-	subagentDepth?: number;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	/** Resource loader for skills, prompts, themes, context files, system prompt */
@@ -207,7 +148,7 @@ export interface AgentSessionConfig {
 	customTools?: ToolDefinition[];
 	/** Model registry for API key resolution and model discovery */
 	modelRegistry: ModelRegistry;
-	/** Initial active built-in tool names. Default: [read, webfetch, bash, edit, write] */
+	/** Initial active built-in tool names. Default: [read, bash, edit, write] */
 	initialActiveToolNames?: string[];
 	/**
 	 * Override base tools (useful for custom runtimes).
@@ -239,6 +180,8 @@ export interface PromptOptions {
 	streamingBehavior?: "steer" | "followUp";
 	/** Source of input for extension input event handlers. Defaults to "interactive". */
 	source?: InputSource;
+	/** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
+	preflightResult?: (success: boolean) => void;
 }
 
 /** Result from cycleModel() */
@@ -274,131 +217,6 @@ interface ToolDefinitionEntry {
 	sourceInfo: SourceInfo;
 }
 
-export type SubagentStatus = "running" | "idle" | "failed" | "closed";
-
-export interface SubagentInfo {
-	id: string;
-	status: SubagentStatus;
-	depth: number;
-	parentDepth: number;
-	task: string;
-	turns: number;
-	maxTurns: number;
-	lastAssistantText?: string;
-	errorMessage?: string;
-	createdAt: number;
-	updatedAt: number;
-}
-
-export type SubagentSessionEvent = Extract<
-	AgentSessionEvent,
-	{ type: "subagent_start" | "subagent_update" | "subagent_end" }
->;
-
-export type BackgroundTaskStatus = "running" | "completed" | "failed" | "cancelled";
-
-export interface BackgroundTaskInfo {
-	id: string;
-	status: BackgroundTaskStatus;
-	command: string;
-	pid?: number;
-	exitCode?: number;
-	lastOutput?: string;
-	errorMessage?: string;
-	fullOutputPath?: string;
-	createdAt: number;
-	updatedAt: number;
-}
-
-export type BackgroundTaskSessionEvent = Extract<
-	AgentSessionEvent,
-	{ type: "background_task_start" | "background_task_update" | "background_task_end" }
->;
-
-const SUBAGENT_MAX_DEPTH = 2;
-const SUBAGENT_DEFAULT_MAX_TURNS = 12;
-const SUBAGENT_MAX_TURNS = 30;
-const SUBAGENT_WRAP_UP_THRESHOLD = 0.75;
-
-const spawnAgentSchema = Type.Object({
-	task: Type.String({ description: "Bounded task for the subagent to complete" }),
-	context: Type.Optional(Type.String({ description: "Additional context the subagent should use" })),
-	maxTurns: Type.Optional(
-		Type.Number({
-			description: `Maximum turns for the subagent before it is aborted (default ${SUBAGENT_DEFAULT_MAX_TURNS})`,
-		}),
-	),
-});
-
-type SpawnAgentToolInput = Static<typeof spawnAgentSchema>;
-
-interface SpawnAgentToolDetails {
-	subagentId: string;
-	status: SubagentStatus;
-	depth: number;
-	parentDepth: number;
-	maxTurns: number;
-	turns: number;
-	stopReason?: AssistantMessage["stopReason"] | "no_response";
-	model?: { provider: string; id: string };
-}
-
-const sendInputSchema = Type.Object({
-	agentId: Type.String({ description: "The subagent id returned by spawn_agent" }),
-	message: Type.String({ description: "The follow-up instruction for the subagent" }),
-});
-
-type SendInputToolInput = Static<typeof sendInputSchema>;
-
-const waitAgentSchema = Type.Object({
-	agentId: Type.String({ description: "The subagent id returned by spawn_agent" }),
-	timeoutMs: Type.Optional(Type.Number({ description: "Optional wait timeout in milliseconds" })),
-});
-
-type WaitAgentToolInput = Static<typeof waitAgentSchema>;
-
-const closeAgentSchema = Type.Object({
-	agentId: Type.String({ description: "The subagent id returned by spawn_agent" }),
-});
-
-type CloseAgentToolInput = Static<typeof closeAgentSchema>;
-
-const startBackgroundTaskSchema = Type.Object({
-	command: Type.String({ description: "Shell command to launch in the background" }),
-});
-
-type StartBackgroundTaskToolInput = Static<typeof startBackgroundTaskSchema>;
-
-const waitBackgroundTaskSchema = Type.Object({
-	taskId: Type.String({ description: "The background task id returned by start_background_task" }),
-	timeoutMs: Type.Optional(Type.Number({ description: "Optional wait timeout in milliseconds" })),
-});
-
-type WaitBackgroundTaskToolInput = Static<typeof waitBackgroundTaskSchema>;
-
-const cancelBackgroundTaskSchema = Type.Object({
-	taskId: Type.String({ description: "The background task id returned by start_background_task" }),
-});
-
-type CancelBackgroundTaskToolInput = Static<typeof cancelBackgroundTaskSchema>;
-
-interface ManagedSubagent {
-	info: SubagentInfo;
-	session: AgentSession;
-	initialTask: string;
-	lastStopReason?: AssistantMessage["stopReason"] | "no_response";
-	unsubscribe: () => void;
-	activeRun?: Promise<void>;
-	resolveRun?: () => void;
-}
-
-interface ManagedBackgroundTask {
-	info: BackgroundTaskInfo;
-	handle: BackgroundBashTask;
-	waitPromise: Promise<BashResult>;
-	result?: BashResult;
-}
-
 // ============================================================================
 // Constants
 // ============================================================================
@@ -408,31 +226,6 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 
 /** Thinking levels including xhigh (for supported models) */
 const THINKING_LEVELS_WITH_XHIGH: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
-
-const MAX_IMPLICIT_CONTINUATIONS_PER_PROMPT = 8;
-const IMPLICIT_CONTINUATION_PREFIX =
-	/^(?:let me|i(?:'ll| will)\b|i am going to\b|next,?\s+i(?:'ll| will)\b|first,?\s+i(?:'ll| will)\b)/i;
-const IMPLICIT_CONTINUATION_MESSAGE = "Continue with the next concrete step. Do not stop after announcing intent.";
-
-export function extractTextContent(content: string | Array<{ type: string; text?: string }> | undefined): string {
-	if (content === undefined) return "";
-	if (typeof content === "string") return content;
-	return content
-		.filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
-		.map((part) => part.text)
-		.join("\n");
-}
-
-export function isImplicitContinuationUserMessage(message: {
-	role: string;
-	content?: string | Array<{ type: string; text?: string }>;
-}): boolean {
-	return message.role === "user" && extractTextContent(message.content).trim() === IMPLICIT_CONTINUATION_MESSAGE;
-}
-
-export function isImplicitContinuationEntry(entry: SessionEntry): boolean {
-	return entry.type === "message" && isImplicitContinuationUserMessage(entry.message);
-}
 
 // ============================================================================
 // AgentSession Class
@@ -470,9 +263,6 @@ export class AgentSession {
 	private _retryAttempt = 0;
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
-	private _implicitContinuationPromise: Promise<void> | undefined = undefined;
-	private _implicitContinuationResolve: (() => void) | undefined = undefined;
-	private _implicitContinuationCount = 0;
 
 	// Bash execution state
 	private _bashAbortController: AbortController | undefined = undefined;
@@ -507,9 +297,6 @@ export class AgentSession {
 
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
-	private _subagentDepth: number;
-	private _subagents: Map<string, ManagedSubagent> = new Map();
-	private _backgroundTasks: Map<string, ManagedBackgroundTask> = new Map();
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -519,7 +306,6 @@ export class AgentSession {
 		this._resourceLoader = config.resourceLoader;
 		this._customTools = config.customTools ?? [];
 		this._cwd = config.cwd;
-		this._subagentDepth = config.subagentDepth ?? 0;
 		this._modelRegistry = config.modelRegistry;
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
@@ -612,17 +398,18 @@ export class AgentSession {
 				toolCallId: toolCall.id,
 				input: args as Record<string, unknown>,
 				content: result.content,
-				details: isError ? undefined : result.details,
+				details: result.details,
 				isError,
 			});
 
-			if (!hookResult || isError) {
+			if (!hookResult) {
 				return undefined;
 			}
 
 			return {
 				content: hookResult.content,
 				details: hookResult.details,
+				isError: hookResult.isError ?? isError,
 			};
 		};
 	}
@@ -643,56 +430,6 @@ export class AgentSession {
 			type: "queue_update",
 			steering: [...this._steeringMessages],
 			followUp: [...this._followUpMessages],
-		});
-	}
-
-	private _emitSubagentStart(record: ManagedSubagent): void {
-		this._emit({
-			type: "subagent_start",
-			subagent: { ...record.info },
-		});
-	}
-
-	private _emitSubagentUpdate(
-		record: ManagedSubagent,
-		update: Omit<Extract<AgentSessionEvent, { type: "subagent_update" }>, "type" | "subagent">,
-	): void {
-		this._emit({
-			type: "subagent_update",
-			subagent: { ...record.info },
-			...update,
-		});
-	}
-
-	private _emitSubagentEnd(record: ManagedSubagent): void {
-		this._emit({
-			type: "subagent_end",
-			subagent: { ...record.info },
-		});
-	}
-
-	private _emitBackgroundTaskStart(record: ManagedBackgroundTask): void {
-		this._emit({
-			type: "background_task_start",
-			task: { ...record.info },
-		});
-	}
-
-	private _emitBackgroundTaskUpdate(
-		record: ManagedBackgroundTask,
-		update: Omit<Extract<AgentSessionEvent, { type: "background_task_update" }>, "type" | "task">,
-	): void {
-		this._emit({
-			type: "background_task_update",
-			task: { ...record.info },
-			...update,
-		});
-	}
-
-	private _emitBackgroundTaskEnd(record: ManagedBackgroundTask): void {
-		this._emit({
-			type: "background_task_end",
-			task: { ...record.info },
 		});
 	}
 
@@ -832,7 +569,6 @@ export class AgentSession {
 
 			this._resolveRetry();
 			await this._checkCompaction(msg);
-			await this._maybeStartImplicitContinuation(msg);
 		}
 	}
 
@@ -845,108 +581,13 @@ export class AgentSession {
 		}
 	}
 
-	private _resolveImplicitContinuation(): void {
-		if (this._implicitContinuationResolve) {
-			this._implicitContinuationResolve();
-			this._implicitContinuationResolve = undefined;
-			this._implicitContinuationPromise = undefined;
-		}
-	}
-
 	/** Extract text content from a message */
 	private _getUserMessageText(message: Message): string {
 		if (message.role !== "user") return "";
-		return extractTextContent(message.content);
-	}
-
-	private _getAssistantText(message: AssistantMessage): string {
-		return message.content
-			.filter((content): content is TextContent => content.type === "text")
-			.map((content) => content.text)
-			.join("\n")
-			.trim();
-	}
-
-	private _getMessageText(message: AgentMessage): string | undefined {
-		if (message.role === "assistant") {
-			const text = this._getAssistantText(message);
-			return text.length > 0 ? text : undefined;
-		}
-		if (message.role === "user") {
-			const text = this._getUserMessageText(message).trim();
-			return text.length > 0 ? text : undefined;
-		}
-		if (message.role === "toolResult") {
-			const text = extractTextContent(message.content).trim();
-			return text.length > 0 ? text : undefined;
-		}
-		if (message.role === "custom") {
-			if (typeof message.content === "string") {
-				const text = message.content.trim();
-				return text.length > 0 ? text : undefined;
-			}
-			const text = extractTextContent(message.content).trim();
-			return text.length > 0 ? text : undefined;
-		}
-		return undefined;
-	}
-
-	private _shouldImplicitlyContinue(message: AssistantMessage): boolean {
-		if (this._implicitContinuationCount >= MAX_IMPLICIT_CONTINUATIONS_PER_PROMPT) {
-			return false;
-		}
-		if (this._retryPromise || this.agent.hasQueuedMessages()) {
-			return false;
-		}
-		if (message.stopReason === "error" || message.stopReason === "aborted" || message.stopReason === "toolUse") {
-			return false;
-		}
-		if (message.content.some((content) => content.type === "toolCall")) {
-			return false;
-		}
-		if (message.stopReason === "length") {
-			return true;
-		}
-
-		const text = this._getAssistantText(message).replace(/\s+/g, " ").trim();
-		if (text.length === 0 || text.length > 160) {
-			return false;
-		}
-		if (text.endsWith("?")) {
-			return false;
-		}
-
-		return IMPLICIT_CONTINUATION_PREFIX.test(text);
-	}
-
-	private async _maybeStartImplicitContinuation(message: AssistantMessage): Promise<void> {
-		if (!this._shouldImplicitlyContinue(message)) {
-			return;
-		}
-		if (this._implicitContinuationPromise) {
-			return;
-		}
-
-		this._implicitContinuationCount++;
-		this.agent.followUp({
-			role: "user",
-			content: [{ type: "text", text: IMPLICIT_CONTINUATION_MESSAGE }],
-			timestamp: Date.now(),
-		});
-		this._implicitContinuationPromise = new Promise((resolve) => {
-			this._implicitContinuationResolve = resolve;
-		});
-
-		setTimeout(() => {
-			this.agent
-				.continue()
-				.catch(() => {
-					// Failure is surfaced by the follow-on run itself.
-				})
-				.finally(() => {
-					this._resolveImplicitContinuation();
-				});
-		}, 0);
+		const content = message.content;
+		if (typeof content === "string") return content;
+		const textBlocks = content.filter((c) => c.type === "text");
+		return textBlocks.map((c) => (c as TextContent).text).join("");
 	}
 
 	/** Find the last assistant message in agent state (including aborted ones) */
@@ -1077,17 +718,6 @@ export class AgentSession {
 	 * Call this when completely done with the session.
 	 */
 	dispose(): void {
-		for (const record of this._backgroundTasks.values()) {
-			if (record.info.status === "running") {
-				record.handle.cancel();
-			}
-		}
-		for (const record of this._subagents.values()) {
-			record.unsubscribe();
-			record.session.dispose();
-		}
-		this._backgroundTasks.clear();
-		this._subagents.clear();
 		this._disconnectFromAgent();
 		this._eventListeners = [];
 	}
@@ -1227,18 +857,6 @@ export class AgentSession {
 		return this._resourceLoader.getPrompts().prompts;
 	}
 
-	get subagentDepth(): number {
-		return this._subagentDepth;
-	}
-
-	listSubagents(): SubagentInfo[] {
-		return Array.from(this._subagents.values()).map((record) => ({ ...record.info }));
-	}
-
-	listBackgroundTasks(): BackgroundTaskInfo[] {
-		return Array.from(this._backgroundTasks.values()).map((record) => ({ ...record.info }));
-	}
-
 	private _normalizePromptSnippet(text: string | undefined): string | undefined {
 		if (!text) return undefined;
 		const oneLine = text
@@ -1298,797 +916,6 @@ export class AgentSession {
 		});
 	}
 
-	private _getRecentSubagentContext(): string {
-		const lines: string[] = [];
-		for (let i = this.agent.state.messages.length - 1; i >= 0 && lines.length < 6; i--) {
-			const message = this.agent.state.messages[i];
-			if (message.role === "assistant") {
-				const text = this._getAssistantText(message).trim();
-				if (text) {
-					lines.unshift(`assistant: ${text}`);
-				}
-				continue;
-			}
-			if (message.role === "user") {
-				const text = this._getUserMessageText(message).trim();
-				if (text && !isImplicitContinuationUserMessage(message)) {
-					lines.unshift(`user: ${text}`);
-				}
-				continue;
-			}
-			if (message.role === "custom") {
-				const text =
-					typeof message.content === "string"
-						? message.content
-						: message.content
-								.filter((part): part is TextContent => part.type === "text")
-								.map((part) => part.text)
-								.join("\n");
-				if (text.trim()) {
-					lines.unshift(`context: ${text.trim()}`);
-				}
-			}
-		}
-
-		return lines.join("\n").slice(-4000);
-	}
-
-	private _createSubagentResourceLoader(): ResourceLoader {
-		const base = this._resourceLoader;
-		return {
-			getExtensions: () => ({
-				extensions: [],
-				errors: [],
-				runtime: base.getExtensions().runtime,
-			}),
-			getSkills: () => base.getSkills(),
-			getPrompts: () => base.getPrompts(),
-			getThemes: () => base.getThemes(),
-			getAgentsFiles: () => base.getAgentsFiles(),
-			getSystemPrompt: () => base.getSystemPrompt(),
-			getAppendSystemPrompt: () => base.getAppendSystemPrompt(),
-			extendResources: () => {},
-			reload: async () => {},
-		};
-	}
-
-	private _buildSubagentPrompt(input: SpawnAgentToolInput): string {
-		const maxTurns = Math.max(
-			1,
-			Math.min(Math.floor(input.maxTurns ?? SUBAGENT_DEFAULT_MAX_TURNS), SUBAGENT_MAX_TURNS),
-		);
-		const readBudget = Math.max(1, Math.floor(maxTurns * 0.4));
-		const actBudget = Math.max(1, Math.floor(maxTurns * 0.4));
-		const sections = [
-			`BUDGET: ${maxTurns} turns total. Plan your work to fit.`,
-			"",
-			"EXECUTION PHASES — follow this order strictly:",
-			`1. READ (turns 1-${readBudget}): Gather information. Batch 3-6 tool calls per turn. Read only what the task requires.`,
-			`2. ACT (turns ${readBudget + 1}-${readBudget + actBudget}): Write files, create directories, build artifacts. Use bash and write tools.`,
-			`3. REPORT (final turn): Output a plain text summary. This is the ONLY thing the parent agent receives.`,
-			"",
-			"RULES:",
-			"- Batch multiple tool calls in every response. Never issue just one read or one bash when you could issue 3+.",
-			"- Your final assistant message MUST be plain text (no tool calls). It is the only output returned to the parent.",
-			"- If you have files to create, create them BEFORE your final text report.",
-			"- If you run low on turns, skip to REPORT immediately — a partial text report is better than no report.",
-			"",
-			`TASK:\n${input.task.trim()}`,
-		];
-
-		if (input.context?.trim()) {
-			sections.push("", `CONTEXT:\n${input.context.trim()}`);
-		}
-
-		const recentContext = this._getRecentSubagentContext();
-		if (recentContext) {
-			sections.push("", `PARENT CONTEXT:\n${recentContext}`);
-		}
-
-		return sections.join("\n");
-	}
-
-	private _getSubagentRecord(agentId: string): ManagedSubagent {
-		const record = this._subagents.get(agentId);
-		if (!record) {
-			throw new Error(`Unknown subagent: ${agentId}`);
-		}
-		if (record.info.status === "closed") {
-			throw new Error(`Subagent ${agentId} is closed`);
-		}
-		return record;
-	}
-
-	private _setSubagentStatus(
-		record: ManagedSubagent,
-		status: SubagentStatus,
-		updates: Partial<Pick<SubagentInfo, "lastAssistantText" | "errorMessage" | "turns">> = {},
-	): void {
-		record.info = {
-			...record.info,
-			...updates,
-			status,
-			updatedAt: Date.now(),
-		};
-	}
-
-	private async _createSubagentSession(): Promise<AgentSession> {
-		const extensionRunnerRef: { current?: ExtensionRunner } = {};
-		const childAgent = new Agent({
-			initialState: {
-				systemPrompt: "",
-				model: this.model,
-				thinkingLevel: this.thinkingLevel,
-				tools: [],
-			},
-			convertToLlm,
-			streamFn: async (model, context, options) => {
-				const auth = await this._modelRegistry.getApiKeyAndHeaders(model);
-				if (!auth.ok) {
-					throw new Error(auth.error);
-				}
-				return streamSimple(model, context, {
-					...options,
-					apiKey: auth.apiKey,
-					headers: auth.headers || options?.headers ? { ...auth.headers, ...options?.headers } : undefined,
-				});
-			},
-			onPayload: async (payload) => {
-				const runner = extensionRunnerRef.current;
-				if (!runner?.hasHandlers("before_provider_request")) {
-					return payload;
-				}
-				return runner.emitBeforeProviderRequest(payload);
-			},
-			sessionId: `${this.sessionId}:subagent:${Date.now()}`,
-			transformContext: async (messages) => {
-				const runner = extensionRunnerRef.current;
-				if (!runner) return messages;
-				return runner.emitContext(messages);
-			},
-			steeringMode: this.steeringMode,
-			followUpMode: this.followUpMode,
-			transport: this.agent.transport,
-			thinkingBudgets: this.agent.thinkingBudgets,
-			maxRetryDelayMs: this.settingsManager.getRetrySettings().maxDelayMs,
-		});
-
-		const childSession = new AgentSession({
-			agent: childAgent,
-			sessionManager: SessionManager.inMemory(this._cwd),
-			settingsManager: this.settingsManager,
-			cwd: this._cwd,
-			subagentDepth: this._subagentDepth + 1,
-			scopedModels: [...this._scopedModels],
-			resourceLoader: this._createSubagentResourceLoader(),
-			customTools: [],
-			modelRegistry: this._modelRegistry,
-			initialActiveToolNames: [
-				...new Set([
-					...this.getActiveToolNames().filter((name) => this._baseToolDefinitions.has(name)),
-					// Subagents always get write/edit so they can create files regardless of parent mode
-					"write",
-					"edit",
-				]),
-			],
-			extensionRunnerRef,
-			sessionStartEvent: { type: "session_start", reason: "startup" },
-		});
-
-		childSession.agent.state.systemPrompt = `${childSession.systemPrompt}\n\nYou are a subagent. You have a limited turn budget. Work efficiently: batch reads, act quickly, and always end with a plain text report (not a tool call). Your final text message is all the parent sees.`;
-		return childSession;
-	}
-
-	private _attachSubagent(record: ManagedSubagent, maxTurns: number): void {
-		record.unsubscribe = record.session.subscribe((event) => {
-			if (record.info.status === "closed") {
-				return;
-			}
-
-			if (event.type === "agent_start") {
-				this._emitSubagentStart(record);
-				return;
-			}
-
-			if (event.type === "agent_end") {
-				this._emitSubagentUpdate(record, { eventType: "agent_end" });
-				return;
-			}
-
-			if (event.type === "turn_end") {
-				const nextTurns = record.info.turns + 1;
-				this._setSubagentStatus(record, "running", { turns: nextTurns });
-				this._emitSubagentUpdate(record, {
-					eventType: "turn_end",
-					text:
-						event.message.role === "assistant"
-							? this._getAssistantText(event.message).trim() || undefined
-							: undefined,
-				});
-				if (nextTurns >= maxTurns && record.session.isStreaming) {
-					void record.session.abort().catch(() => {});
-				} else if (nextTurns >= Math.floor(maxTurns * SUBAGENT_WRAP_UP_THRESHOLD) && nextTurns < maxTurns) {
-					// Inject wrap-up warnings every turn from 75% onward
-					const remaining = maxTurns - nextTurns;
-					const urgency =
-						remaining <= 1
-							? "FINAL TURN. You MUST output your complete text report NOW. No more tool calls."
-							: remaining <= 2
-								? `URGENT: ${remaining} turns left. Output your text report in this response.`
-								: `${remaining} turns remaining. Start wrapping up — produce your text report soon.`;
-					void record.session.sendUserMessage(`[SYSTEM] ${urgency}`, { deliverAs: "followUp" }).catch(() => {});
-				}
-				return;
-			}
-
-			if (event.type === "turn_start") {
-				this._emitSubagentUpdate(record, { eventType: "turn_start" });
-				return;
-			}
-
-			if (event.type === "message_start") {
-				this._emitSubagentUpdate(record, {
-					eventType: "message_start",
-					messageRole: event.message.role,
-					text: this._getMessageText(event.message),
-				});
-				return;
-			}
-
-			if (event.type === "message_update") {
-				const update: Omit<Extract<AgentSessionEvent, { type: "subagent_update" }>, "type" | "subagent"> = {
-					eventType: "message_update",
-					messageRole: event.message.role,
-					assistantEventType: event.assistantMessageEvent.type,
-				};
-				if (
-					event.assistantMessageEvent.type === "text_delta" ||
-					event.assistantMessageEvent.type === "thinking_delta" ||
-					event.assistantMessageEvent.type === "toolcall_delta"
-				) {
-					update.delta = event.assistantMessageEvent.delta;
-				}
-				if (
-					event.assistantMessageEvent.type === "text_end" ||
-					event.assistantMessageEvent.type === "thinking_end"
-				) {
-					update.text = event.assistantMessageEvent.content;
-				}
-				if (event.assistantMessageEvent.type === "toolcall_end") {
-					update.toolName = event.assistantMessageEvent.toolCall.name;
-					update.toolCallId = event.assistantMessageEvent.toolCall.id;
-				}
-				this._emitSubagentUpdate(record, update);
-				return;
-			}
-
-			if (event.type === "message_end" && event.message.role === "assistant") {
-				record.lastStopReason = event.message.stopReason;
-				this._setSubagentStatus(record, "running", {
-					lastAssistantText: this._getAssistantText(event.message).trim() || record.info.lastAssistantText,
-					errorMessage: event.message.stopReason === "error" ? event.message.errorMessage : undefined,
-				});
-				this._emitSubagentUpdate(record, {
-					eventType: "message_end",
-					messageRole: event.message.role,
-					text: this._getAssistantText(event.message).trim() || undefined,
-					isError: event.message.stopReason === "error",
-				});
-				return;
-			}
-
-			if (event.type === "message_end") {
-				this._emitSubagentUpdate(record, {
-					eventType: "message_end",
-					messageRole: event.message.role,
-					text: this._getMessageText(event.message),
-				});
-				return;
-			}
-
-			if (event.type === "tool_execution_start") {
-				this._emitSubagentUpdate(record, {
-					eventType: "tool_execution_start",
-					toolName: event.toolName,
-					toolCallId: event.toolCallId,
-				});
-				return;
-			}
-
-			if (event.type === "tool_execution_update") {
-				this._emitSubagentUpdate(record, {
-					eventType: "tool_execution_update",
-					toolName: event.toolName,
-					toolCallId: event.toolCallId,
-				});
-				return;
-			}
-
-			if (event.type === "tool_execution_end") {
-				this._emitSubagentUpdate(record, {
-					eventType: "tool_execution_end",
-					toolName: event.toolName,
-					toolCallId: event.toolCallId,
-					isError: event.isError,
-				});
-			}
-		});
-	}
-
-	private _startSubagentRun(record: ManagedSubagent, start: () => Promise<void>): Promise<void> {
-		if (record.info.status === "closed") {
-			throw new Error(`Subagent ${record.info.id} is closed`);
-		}
-		if (record.activeRun) {
-			return record.activeRun;
-		}
-
-		record.info.turns = 0;
-		record.info.errorMessage = undefined;
-		record.lastStopReason = undefined;
-		this._setSubagentStatus(record, "running");
-		record.activeRun = new Promise<void>((resolve) => {
-			record.resolveRun = resolve;
-		});
-
-		void start()
-			.then(() => {
-				const nextStatus = record.info.errorMessage ? "failed" : "idle";
-				this._setSubagentStatus(record, nextStatus);
-				this._emitSubagentEnd(record);
-			})
-			.catch((error) => {
-				this._setSubagentStatus(record, "failed", {
-					errorMessage: error instanceof Error ? error.message : String(error),
-				});
-				this._emitSubagentEnd(record);
-			})
-			.finally(() => {
-				record.resolveRun?.();
-				record.resolveRun = undefined;
-				record.activeRun = undefined;
-			});
-
-		return record.activeRun;
-	}
-
-	async spawnSubagent(input: SpawnAgentToolInput): Promise<SubagentInfo> {
-		if (this._subagentDepth >= SUBAGENT_MAX_DEPTH) {
-			throw new Error(`Maximum subagent depth of ${SUBAGENT_MAX_DEPTH} reached`);
-		}
-		if (!this.model) {
-			throw new Error("No model selected for subagent");
-		}
-
-		const maxTurns = Math.max(
-			1,
-			Math.min(Math.floor(input.maxTurns ?? SUBAGENT_DEFAULT_MAX_TURNS), SUBAGENT_MAX_TURNS),
-		);
-		const childSession = await this._createSubagentSession();
-		const now = Date.now();
-		const record: ManagedSubagent = {
-			info: {
-				id: childSession.sessionId,
-				status: "idle",
-				depth: childSession.subagentDepth,
-				parentDepth: this._subagentDepth,
-				task: input.task.trim(),
-				turns: 0,
-				maxTurns,
-				createdAt: now,
-				updatedAt: now,
-			},
-			session: childSession,
-			initialTask: this._buildSubagentPrompt(input),
-			unsubscribe: () => {},
-		};
-		this._attachSubagent(record, maxTurns);
-		this._subagents.set(record.info.id, record);
-		this._startSubagentRun(record, () =>
-			record.session.prompt(record.initialTask, {
-				expandPromptTemplates: false,
-				source: "extension",
-			}),
-		);
-		return { ...record.info };
-	}
-
-	async sendSubagentInput(agentId: string, message: string): Promise<SubagentInfo> {
-		const record = this._getSubagentRecord(agentId);
-		const trimmed = message.trim();
-		if (!trimmed) {
-			throw new Error("Subagent input cannot be empty");
-		}
-
-		if (record.info.status === "running") {
-			await record.session.sendUserMessage(trimmed, { deliverAs: "followUp" });
-			this._setSubagentStatus(record, "running");
-			return { ...record.info };
-		}
-
-		this._startSubagentRun(record, () => record.session.sendUserMessage(trimmed));
-		return { ...record.info };
-	}
-
-	async waitForSubagent(agentId: string, timeoutMs?: number): Promise<SubagentInfo> {
-		const record = this._getSubagentRecord(agentId);
-		if (!record.activeRun) {
-			return { ...record.info };
-		}
-		if (timeoutMs === undefined || timeoutMs < 0) {
-			await record.activeRun;
-			return { ...record.info };
-		}
-
-		await Promise.race([
-			record.activeRun,
-			new Promise<void>((resolve) => {
-				setTimeout(resolve, timeoutMs);
-			}),
-		]);
-		return { ...record.info };
-	}
-
-	async closeSubagent(agentId: string): Promise<SubagentInfo> {
-		const record = this._getSubagentRecord(agentId);
-		if (record.activeRun) {
-			await record.session.abort().catch(() => {});
-		}
-		this._setSubagentStatus(record, "closed");
-		this._emitSubagentEnd(record);
-		record.unsubscribe();
-		record.session.dispose();
-		return { ...record.info };
-	}
-
-	private _getBackgroundTaskRecord(taskId: string): ManagedBackgroundTask {
-		const record = this._backgroundTasks.get(taskId);
-		if (!record) {
-			throw new Error(`Unknown background task: ${taskId}`);
-		}
-		return record;
-	}
-
-	private _setBackgroundTaskInfo(
-		record: ManagedBackgroundTask,
-		update: Partial<Omit<BackgroundTaskInfo, "id" | "command" | "createdAt">>,
-	): void {
-		record.info = {
-			...record.info,
-			...update,
-			updatedAt: Date.now(),
-		};
-	}
-
-	private _formatBackgroundOutput(text: string | undefined): string | undefined {
-		if (!text) {
-			return undefined;
-		}
-		const preview = text.replace(/\s+/g, " ").trim();
-		return preview.length > 0 ? preview.slice(-240) : undefined;
-	}
-
-	async startBackgroundTask(input: StartBackgroundTaskToolInput): Promise<BackgroundTaskInfo> {
-		const command = input.command.trim();
-		if (!command) {
-			throw new Error("Background task command cannot be empty");
-		}
-
-		const prefix = this.settingsManager.getShellCommandPrefix();
-		const resolvedCommand = prefix ? `${prefix}\n${command}` : command;
-		const now = Date.now();
-		const id = `task-${randomBytes(6).toString("hex")}`;
-		const handle = startBackgroundBash(resolvedCommand, this.sessionManager.getCwd(), {
-			onChunk: (chunk) => {
-				const record = this._backgroundTasks.get(id);
-				if (!record) {
-					return;
-				}
-				const nextOutput = `${record.info.lastOutput ?? ""}${chunk}`;
-				this._setBackgroundTaskInfo(record, {
-					lastOutput: this._formatBackgroundOutput(nextOutput),
-				});
-				this._emitBackgroundTaskUpdate(record, {
-					eventType: "output",
-					delta: chunk,
-					text: record.info.lastOutput,
-				});
-			},
-		});
-
-		const record: ManagedBackgroundTask = {
-			info: {
-				id,
-				status: "running",
-				command,
-				pid: handle.pid,
-				createdAt: now,
-				updatedAt: now,
-			},
-			handle,
-			waitPromise: Promise.resolve({
-				output: "",
-				exitCode: undefined,
-				cancelled: false,
-				truncated: false,
-			}),
-		};
-		this._backgroundTasks.set(id, record);
-		record.waitPromise = handle
-			.wait()
-			.then((result) => {
-				record.result = result;
-				const status: BackgroundTaskStatus = result.cancelled
-					? "cancelled"
-					: result.exitCode !== undefined && result.exitCode !== 0
-						? "failed"
-						: "completed";
-				this._setBackgroundTaskInfo(record, {
-					status,
-					exitCode: result.exitCode,
-					lastOutput: this._formatBackgroundOutput(result.output) ?? record.info.lastOutput,
-					fullOutputPath: result.fullOutputPath,
-					errorMessage:
-						status === "failed" && result.exitCode !== undefined
-							? `Command exited with code ${result.exitCode}`
-							: undefined,
-				});
-				this._emitBackgroundTaskUpdate(record, {
-					eventType: "exit",
-					text: result.output || record.info.lastOutput,
-				});
-				this._emitBackgroundTaskEnd(record);
-				return result;
-			})
-			.catch((error) => {
-				record.result = {
-					output: "",
-					exitCode: undefined,
-					cancelled: false,
-					truncated: false,
-				};
-				this._setBackgroundTaskInfo(record, {
-					status: "failed",
-					errorMessage: error instanceof Error ? error.message : String(error),
-				});
-				this._emitBackgroundTaskEnd(record);
-				return record.result;
-			});
-
-		this._emitBackgroundTaskStart(record);
-		return { ...record.info };
-	}
-
-	async waitForBackgroundTask(taskId: string, timeoutMs?: number): Promise<BackgroundTaskInfo> {
-		const record = this._getBackgroundTaskRecord(taskId);
-		if (record.info.status !== "running") {
-			return { ...record.info };
-		}
-		if (timeoutMs === undefined || timeoutMs < 0) {
-			await record.waitPromise;
-			return { ...record.info };
-		}
-		await Promise.race([
-			record.waitPromise,
-			new Promise<void>((resolve) => {
-				setTimeout(resolve, timeoutMs);
-			}),
-		]);
-		return { ...record.info };
-	}
-
-	async cancelBackgroundTask(taskId: string): Promise<BackgroundTaskInfo> {
-		const record = this._getBackgroundTaskRecord(taskId);
-		if (record.info.status !== "running") {
-			return { ...record.info };
-		}
-		record.handle.cancel();
-		this._emitBackgroundTaskUpdate(record, {
-			eventType: "cancel_requested",
-			text: record.info.lastOutput,
-		});
-		await record.waitPromise.catch(() => {});
-		return { ...record.info };
-	}
-
-	getBackgroundTaskReport(taskId: string): { task: BackgroundTaskInfo; text: string | null } {
-		const record = this._getBackgroundTaskRecord(taskId);
-		return {
-			task: { ...record.info },
-			text: record.result?.output ?? record.info.lastOutput ?? null,
-		};
-	}
-
-	private _createSpawnAgentToolDefinition(): ToolDefinition<typeof spawnAgentSchema, SpawnAgentToolDetails> {
-		return {
-			name: "spawn_agent",
-			label: "spawn_agent",
-			description:
-				"Delegate a bounded side task to a subagent with its own isolated context. " +
-				"The subagent runs independently and returns a text report when done. " +
-				"After spawning, continue your own work, then call wait_agent (no timeout) when you need the result.",
-			promptSnippet: "Delegate a side task to a subagent. Continue your work, then wait_agent to collect.",
-			promptGuidelines: [
-				"Spawn → do your own work → wait_agent (no timeout). Do NOT poll with short timeouts.",
-				"Give the subagent a concrete, bounded task. Avoid open-ended exploration tasks.",
-				"Set maxTurns=8 for simple reads, maxTurns=15 for multi-step work, maxTurns=20 for packaging tasks.",
-			],
-			parameters: spawnAgentSchema,
-			execute: async (_toolCallId, input, _signal, onUpdate) => {
-				const info = await this.spawnSubagent(input);
-				const text = `Spawned subagent ${info.id} for task: ${info.task}`;
-				const details: SpawnAgentToolDetails = {
-					subagentId: info.id,
-					status: info.status,
-					depth: info.depth,
-					parentDepth: info.parentDepth,
-					maxTurns: info.maxTurns,
-					turns: info.turns,
-					model: this.model ? { provider: this.model.provider, id: this.model.id } : undefined,
-				};
-				onUpdate?.({ content: [{ type: "text", text }], details });
-				return { content: [{ type: "text", text }], details };
-			},
-		};
-	}
-
-	private _createSendInputToolDefinition(): ToolDefinition<
-		typeof sendInputSchema,
-		{ agentId: string; status: SubagentStatus }
-	> {
-		return {
-			name: "send_input",
-			label: "send_input",
-			description: "Send follow-up input to a running or idle subagent.",
-			promptSnippet: "Send a follow-up instruction to an existing subagent",
-			promptGuidelines: [
-				"Use send_input when a spawned subagent needs clarification, more context, or a follow-up task.",
-			],
-			parameters: sendInputSchema,
-			execute: async (_toolCallId, input: SendInputToolInput) => {
-				const info = await this.sendSubagentInput(input.agentId, input.message);
-				return {
-					content: [{ type: "text", text: `Sent input to subagent ${info.id}. Status: ${info.status}.` }],
-					details: { agentId: info.id, status: info.status },
-				};
-			},
-		};
-	}
-
-	private _createWaitAgentToolDefinition(): ToolDefinition<typeof waitAgentSchema, SubagentInfo> {
-		return {
-			name: "wait_agent",
-			label: "wait_agent",
-			description:
-				"Wait for a subagent to finish its current run and return its latest report. " +
-				"Call WITHOUT timeoutMs to block until the subagent completes — this is the normal usage. " +
-				"Do NOT poll with short timeouts; instead, do your own work first and then call wait_agent without a timeout when you are ready for the result.",
-			promptSnippet: "Block until a subagent finishes and return its report. Do not poll with short timeouts.",
-			promptGuidelines: [
-				"Call wait_agent WITHOUT timeoutMs to block until the subagent is done. This is the correct pattern.",
-				"Do NOT poll with short timeouts like timeoutMs=1 or timeoutMs=2000 — this wastes turns and never gets results.",
-				"Instead: spawn the subagent, do your own work, then call wait_agent (no timeout) when you need the result.",
-			],
-			parameters: waitAgentSchema,
-			execute: async (_toolCallId, input: WaitAgentToolInput) => {
-				const info = await this.waitForSubagent(input.agentId, input.timeoutMs);
-				return {
-					content: [
-						{
-							type: "text",
-							text:
-								info.lastAssistantText ??
-								(info.status === "running"
-									? `Subagent ${info.id} is still running.`
-									: (info.errorMessage ?? `Subagent ${info.id} has no report yet.`)),
-						},
-					],
-					details: info,
-				};
-			},
-		};
-	}
-
-	private _createCloseAgentToolDefinition(): ToolDefinition<typeof closeAgentSchema, SubagentInfo> {
-		return {
-			name: "close_agent",
-			label: "close_agent",
-			description: "Close a subagent and release its resources.",
-			promptSnippet: "Close a subagent and release its resources",
-			promptGuidelines: [
-				"Use close_agent after a subagent is no longer needed so it does not linger unnecessarily.",
-			],
-			parameters: closeAgentSchema,
-			execute: async (_toolCallId, input: CloseAgentToolInput) => {
-				const info = await this.closeSubagent(input.agentId);
-				return {
-					content: [{ type: "text", text: `Closed subagent ${info.id}.` }],
-					details: info,
-				};
-			},
-		};
-	}
-
-	private _createStartBackgroundTaskToolDefinition(): ToolDefinition<
-		typeof startBackgroundTaskSchema,
-		{ taskId: string; status: BackgroundTaskStatus; pid?: number }
-	> {
-		return {
-			name: "start_background_task",
-			label: "start_background_task",
-			description: "Launch a detached shell command that can be tracked or cancelled later.",
-			promptSnippet: "Launch a detached background shell command with a persistent handle",
-			promptGuidelines: [
-				"Use start_background_task for long-running shell work that should continue while you do other tasks.",
-				"Keep the command bounded and use wait_background_task or cancel_background_task later if needed.",
-			],
-			parameters: startBackgroundTaskSchema,
-			execute: async (_toolCallId, input: StartBackgroundTaskToolInput) => {
-				const info = await this.startBackgroundTask(input);
-				return {
-					content: [{ type: "text", text: `Started background task ${info.id} for command: ${info.command}` }],
-					details: { taskId: info.id, status: info.status, pid: info.pid },
-				};
-			},
-		};
-	}
-
-	private _createWaitBackgroundTaskToolDefinition(): ToolDefinition<
-		typeof waitBackgroundTaskSchema,
-		BackgroundTaskInfo
-	> {
-		return {
-			name: "wait_background_task",
-			label: "wait_background_task",
-			description: "Wait for a tracked background task to finish and return its latest output.",
-			promptSnippet: "Wait for a background task and inspect its latest output",
-			promptGuidelines: [
-				"After starting a background task, use wait_background_task when you need its output or completion status.",
-			],
-			parameters: waitBackgroundTaskSchema,
-			execute: async (_toolCallId, input: WaitBackgroundTaskToolInput) => {
-				const info = await this.waitForBackgroundTask(input.taskId, input.timeoutMs);
-				const report = this.getBackgroundTaskReport(info.id);
-				return {
-					content: [
-						{
-							type: "text",
-							text:
-								report.text ??
-								(info.status === "running"
-									? `Background task ${info.id} is still running.`
-									: (info.errorMessage ?? `Background task ${info.id} has no output yet.`)),
-						},
-					],
-					details: info,
-				};
-			},
-		};
-	}
-
-	private _createCancelBackgroundTaskToolDefinition(): ToolDefinition<
-		typeof cancelBackgroundTaskSchema,
-		BackgroundTaskInfo
-	> {
-		return {
-			name: "cancel_background_task",
-			label: "cancel_background_task",
-			description: "Cancel a tracked background task.",
-			promptSnippet: "Cancel a tracked background task",
-			promptGuidelines: [
-				"Use cancel_background_task if a background task is no longer useful, is taking too long, or is producing the wrong work.",
-			],
-			parameters: cancelBackgroundTaskSchema,
-			execute: async (_toolCallId, input: CancelBackgroundTaskToolInput) => {
-				const info = await this.cancelBackgroundTask(input.taskId);
-				return {
-					content: [{ type: "text", text: `Cancelled background task ${info.id}.` }],
-					details: info,
-				};
-			},
-		};
-	}
-
 	// =========================================================================
 	// Prompting
 	// =========================================================================
@@ -2103,143 +930,157 @@ export class AgentSession {
 	 * @throws Error if no model selected or no API key available (when not streaming)
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
-		this._implicitContinuationCount = 0;
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
+		const preflightResult = options?.preflightResult;
+		let messages: AgentMessage[] | undefined;
 
-		// Handle extension commands first (execute immediately, even during streaming)
-		// Extension commands manage their own LLM interaction via pi.sendMessage()
-		if (expandPromptTemplates && text.startsWith("/")) {
-			const handled = await this._tryExecuteExtensionCommand(text);
-			if (handled) {
-				// Extension command executed, no prompt to send
+		try {
+			// Handle extension commands first (execute immediately, even during streaming)
+			// Extension commands manage their own LLM interaction via pi.sendMessage()
+			if (expandPromptTemplates && text.startsWith("/")) {
+				const handled = await this._tryExecuteExtensionCommand(text);
+				if (handled) {
+					// Extension command executed, no prompt to send
+					preflightResult?.(true);
+					return;
+				}
+			}
+
+			// Emit input event for extension interception (before skill/template expansion)
+			let currentText = text;
+			let currentImages = options?.images;
+			if (this._extensionRunner?.hasHandlers("input")) {
+				const inputResult = await this._extensionRunner.emitInput(
+					currentText,
+					currentImages,
+					options?.source ?? "interactive",
+				);
+				if (inputResult.action === "handled") {
+					preflightResult?.(true);
+					return;
+				}
+				if (inputResult.action === "transform") {
+					currentText = inputResult.text;
+					currentImages = inputResult.images ?? currentImages;
+				}
+			}
+
+			// Expand skill commands (/skill:name args) and prompt templates (/template args)
+			let expandedText = currentText;
+			if (expandPromptTemplates) {
+				expandedText = this._expandSkillCommand(expandedText);
+				expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
+			}
+
+			// If streaming, queue via steer() or followUp() based on option
+			if (this.isStreaming) {
+				if (!options?.streamingBehavior) {
+					throw new Error(
+						"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
+					);
+				}
+				if (options.streamingBehavior === "followUp") {
+					await this._queueFollowUp(expandedText, currentImages);
+				} else {
+					await this._queueSteer(expandedText, currentImages);
+				}
+				preflightResult?.(true);
 				return;
 			}
-		}
 
-		// Emit input event for extension interception (before skill/template expansion)
-		let currentText = text;
-		let currentImages = options?.images;
-		if (this._extensionRunner?.hasHandlers("input")) {
-			const inputResult = await this._extensionRunner.emitInput(
-				currentText,
-				currentImages,
-				options?.source ?? "interactive",
-			);
-			if (inputResult.action === "handled") {
-				return;
-			}
-			if (inputResult.action === "transform") {
-				currentText = inputResult.text;
-				currentImages = inputResult.images ?? currentImages;
-			}
-		}
+			// Flush any pending bash messages before the new prompt
+			this._flushPendingBashMessages();
 
-		// Expand skill commands (/skill:name args) and prompt templates (/template args)
-		let expandedText = currentText;
-		if (expandPromptTemplates) {
-			expandedText = this._expandSkillCommand(expandedText);
-			expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
-		}
-
-		// If streaming, queue via steer() or followUp() based on option
-		if (this.isStreaming) {
-			if (!options?.streamingBehavior) {
+			// Validate model
+			if (!this.model) {
 				throw new Error(
-					"Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.",
+					"No model selected.\n\n" +
+						`Use /login or set an API key environment variable. See ${join(getDocsPath(), "providers.md")}\n\n` +
+						"Then use /model to select a model.",
 				);
 			}
-			if (options.streamingBehavior === "followUp") {
-				await this._queueFollowUp(expandedText, currentImages);
-			} else {
-				await this._queueSteer(expandedText, currentImages);
+
+			if (!this._modelRegistry.hasConfiguredAuth(this.model)) {
+				const isOAuth = this._modelRegistry.isUsingOAuth(this.model);
+				if (isOAuth) {
+					throw new Error(
+						`Authentication failed for "${this.model.provider}". ` +
+							`Credentials may have expired or network is unavailable. ` +
+							`Run '/login ${this.model.provider}' to re-authenticate.`,
+					);
+				}
+				throw new Error(
+					`No API key found for ${this.model.provider}.\n\n` +
+						`Use /login or set an API key environment variable. See ${join(getDocsPath(), "providers.md")}`,
+				);
 			}
+
+			// Check if we need to compact before sending (catches aborted responses)
+			const lastAssistant = this._findLastAssistantMessage();
+			if (lastAssistant) {
+				await this._checkCompaction(lastAssistant, false);
+			}
+
+			// Build messages array (custom message if any, then user message)
+			messages = [];
+
+			// Add user message
+			const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
+			if (currentImages) {
+				userContent.push(...currentImages);
+			}
+			messages.push({
+				role: "user",
+				content: userContent,
+				timestamp: Date.now(),
+			});
+
+			// Inject any pending "nextTurn" messages as context alongside the user message
+			for (const msg of this._pendingNextTurnMessages) {
+				messages.push(msg);
+			}
+			this._pendingNextTurnMessages = [];
+
+			// Emit before_agent_start extension event
+			if (this._extensionRunner) {
+				const result = await this._extensionRunner.emitBeforeAgentStart(
+					expandedText,
+					currentImages,
+					this._baseSystemPrompt,
+				);
+				// Add all custom messages from extensions
+				if (result?.messages) {
+					for (const msg of result.messages) {
+						messages.push({
+							role: "custom",
+							customType: msg.customType,
+							content: msg.content,
+							display: msg.display,
+							details: msg.details,
+							timestamp: Date.now(),
+						});
+					}
+				}
+				// Apply extension-modified system prompt, or reset to base
+				if (result?.systemPrompt) {
+					this.agent.state.systemPrompt = result.systemPrompt;
+				} else {
+					// Ensure we're using the base prompt (in case previous turn had modifications)
+					this.agent.state.systemPrompt = this._baseSystemPrompt;
+				}
+			}
+		} catch (error) {
+			preflightResult?.(false);
+			throw error;
+		}
+
+		if (!messages) {
 			return;
 		}
 
-		// Flush any pending bash messages before the new prompt
-		this._flushPendingBashMessages();
-
-		// Validate model
-		if (!this.model) {
-			throw new Error(
-				"No model selected.\n\n" +
-					`Use /login or set an API key environment variable. See ${join(getDocsPath(), "providers.md")}\n\n` +
-					"Then use /model to select a model.",
-			);
-		}
-
-		if (!this._modelRegistry.hasConfiguredAuth(this.model)) {
-			const isOAuth = this._modelRegistry.isUsingOAuth(this.model);
-			if (isOAuth) {
-				throw new Error(
-					`Authentication failed for "${this.model.provider}". ` +
-						`Credentials may have expired or network is unavailable. ` +
-						`Run '/login ${this.model.provider}' to re-authenticate.`,
-				);
-			}
-			throw new Error(
-				`No API key found for ${this.model.provider}.\n\n` +
-					`Use /login or set an API key environment variable. See ${join(getDocsPath(), "providers.md")}`,
-			);
-		}
-
-		// Check if we need to compact before sending (catches aborted responses)
-		const lastAssistant = this._findLastAssistantMessage();
-		if (lastAssistant) {
-			await this._checkCompaction(lastAssistant, false);
-		}
-
-		// Build messages array (custom message if any, then user message)
-		const messages: AgentMessage[] = [];
-
-		// Add user message
-		const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
-		if (currentImages) {
-			userContent.push(...currentImages);
-		}
-		messages.push({
-			role: "user",
-			content: userContent,
-			timestamp: Date.now(),
-		});
-
-		// Inject any pending "nextTurn" messages as context alongside the user message
-		for (const msg of this._pendingNextTurnMessages) {
-			messages.push(msg);
-		}
-		this._pendingNextTurnMessages = [];
-
-		// Emit before_agent_start extension event
-		if (this._extensionRunner) {
-			const result = await this._extensionRunner.emitBeforeAgentStart(
-				expandedText,
-				currentImages,
-				this._baseSystemPrompt,
-			);
-			// Add all custom messages from extensions
-			if (result?.messages) {
-				for (const msg of result.messages) {
-					messages.push({
-						role: "custom",
-						customType: msg.customType,
-						content: msg.content,
-						display: msg.display,
-						details: msg.details,
-						timestamp: Date.now(),
-					});
-				}
-			}
-			// Apply extension-modified system prompt, or reset to base
-			if (result?.systemPrompt) {
-				this.agent.state.systemPrompt = result.systemPrompt;
-			} else {
-				// Ensure we're using the base prompt (in case previous turn had modifications)
-				this.agent.state.systemPrompt = this._baseSystemPrompt;
-			}
-		}
-
+		preflightResult?.(true);
 		await this.agent.prompt(messages);
-		await this._waitForFollowOnWork();
+		await this.waitForRetry();
 	}
 
 	/**
@@ -3471,7 +2312,7 @@ export class AgentSession {
 	}): void {
 		const autoResizeImages = this.settingsManager.getImageAutoResize();
 		const shellCommandPrefix = this.settingsManager.getShellCommandPrefix();
-		const baseToolDefinitions: Record<string, ToolDefinition<any, any>> = this._baseToolsOverride
+		const baseToolDefinitions = this._baseToolsOverride
 			? Object.fromEntries(
 					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
 						name,
@@ -3482,13 +2323,6 @@ export class AgentSession {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix },
 				});
-		baseToolDefinitions.spawn_agent = this._createSpawnAgentToolDefinition();
-		baseToolDefinitions.send_input = this._createSendInputToolDefinition();
-		baseToolDefinitions.wait_agent = this._createWaitAgentToolDefinition();
-		baseToolDefinitions.close_agent = this._createCloseAgentToolDefinition();
-		baseToolDefinitions.start_background_task = this._createStartBackgroundTaskToolDefinition();
-		baseToolDefinitions.wait_background_task = this._createWaitBackgroundTaskToolDefinition();
-		baseToolDefinitions.cancel_background_task = this._createCancelBackgroundTaskToolDefinition();
 
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
@@ -3523,20 +2357,7 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolsOverride
 			? Object.keys(this._baseToolsOverride)
-			: [
-					"read",
-					"webfetch",
-					"bash",
-					"edit",
-					"write",
-					"spawn_agent",
-					"send_input",
-					"wait_agent",
-					"close_agent",
-					"start_background_task",
-					"wait_background_task",
-					"cancel_background_task",
-				];
+			: ["read", "bash", "edit", "write"];
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		this._refreshToolRegistry({
 			activeToolNames: baseActiveToolNames,
@@ -3583,8 +2404,8 @@ export class AgentSession {
 		if (isContextOverflow(message, contextWindow)) return false;
 
 		const err = message.errorMessage;
-		// Match: overloaded_error, provider returned error, rate limit, 429, 500, 502, 503, 504, service unavailable, network/connection errors, fetch failed, terminated, retry delay exceeded
-		return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|timed? out|timeout|terminated|retry delay/i.test(
+		// Match: overloaded_error, provider returned error, rate limit, 429, 500, 502, 503, 504, service unavailable, network/connection errors, fetch failed, request ended without sending chunks, terminated, retry delay exceeded
+		return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|timed? out|timeout|terminated|retry delay/i.test(
 			err,
 		);
 	}
@@ -3689,16 +2510,6 @@ export class AgentSession {
 
 		await this._retryPromise;
 		await this.agent.waitForIdle();
-	}
-
-	private async _waitForFollowOnWork(): Promise<void> {
-		while (true) {
-			await this.waitForRetry();
-			if (!this._implicitContinuationPromise) {
-				return;
-			}
-			await this._implicitContinuationPromise;
-		}
 	}
 
 	/** Whether auto-retry is currently in progress */
@@ -4040,7 +2851,6 @@ export class AgentSession {
 		for (const entry of entries) {
 			if (entry.type !== "message") continue;
 			if (entry.message.role !== "user") continue;
-			if (isImplicitContinuationUserMessage(entry.message)) continue;
 
 			const text = this._extractUserMessageText(entry.message.content);
 			if (text) {
@@ -4067,9 +2877,7 @@ export class AgentSession {
 	 */
 	getSessionStats(): SessionStats {
 		const state = this.state;
-		const userMessages = state.messages.filter(
-			(m) => m.role === "user" && !isImplicitContinuationUserMessage(m),
-		).length;
+		const userMessages = state.messages.filter((m) => m.role === "user").length;
 		const assistantMessages = state.messages.filter((m) => m.role === "assistant").length;
 		const toolResults = state.messages.filter((m) => m.role === "toolResult").length;
 

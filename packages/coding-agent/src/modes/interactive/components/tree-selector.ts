@@ -10,7 +10,6 @@ import {
 	TruncatedText,
 	truncateToWidth,
 } from "@mariozechner/pi-tui";
-import { isImplicitContinuationUserMessage } from "../../../core/agent-session.js";
 import type { SessionTreeNode } from "../../../core/session-manager.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
@@ -284,14 +283,6 @@ class TreeList implements Component {
 		this.filteredNodes = this.flatNodes.filter((flatNode) => {
 			const entry = flatNode.node.entry;
 			const isCurrentLeaf = entry.id === this.currentLeafId;
-
-			if (
-				entry.type === "message" &&
-				entry.message.role === "user" &&
-				isImplicitContinuationUserMessage(entry.message)
-			) {
-				return false;
-			}
 
 			// Skip assistant messages with only tool calls (no text) unless error/aborted
 			// Always show current leaf so active position is visible

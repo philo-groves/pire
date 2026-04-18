@@ -1,2 +1,0 @@
-token=dns-token-44
-receipt=01c61f31

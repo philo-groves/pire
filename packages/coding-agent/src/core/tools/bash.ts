@@ -10,14 +10,14 @@ import { keyHint } from "../../modes/interactive/components/keybinding-hints.js"
 import { truncateToVisualLines } from "../../modes/interactive/components/visual-truncate.js";
 import { theme } from "../../modes/interactive/theme/theme.js";
 import { waitForChildProcess } from "../../utils/child-process.js";
-import { getShellConfig, getShellEnv, killProcessTree } from "../../utils/shell.js";
-import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
 import {
-	getToolBashBlockedCommands,
-	getToolForbiddenPaths,
-	getToolWorkspaceRoot,
-	isPathWithinRoot,
-} from "./path-utils.js";
+	getShellConfig,
+	getShellEnv,
+	killProcessTree,
+	trackDetachedChildPid,
+	untrackDetachedChildPid,
+} from "../../utils/shell.js";
+import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
 import { getTextOutput, invalidArgText, str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, type TruncationResult, truncateTail } from "./truncate.js";
@@ -87,6 +87,7 @@ export function createLocalBashOperations(): BashOperations {
 					env: env ?? getShellEnv(),
 					stdio: ["ignore", "pipe", "pipe"],
 				});
+				if (child.pid) trackDetachedChildPid(child.pid);
 				let timedOut = false;
 				let timeoutHandle: NodeJS.Timeout | undefined;
 				// Set timeout if provided.
@@ -111,6 +112,7 @@ export function createLocalBashOperations(): BashOperations {
 				// on inherited stdio handles held by detached descendants.
 				waitForChildProcess(child)
 					.then((code) => {
+						if (child.pid) untrackDetachedChildPid(child.pid);
 						if (timeoutHandle) clearTimeout(timeoutHandle);
 						if (signal) signal.removeEventListener("abort", onAbort);
 						if (signal?.aborted) {
@@ -124,6 +126,7 @@ export function createLocalBashOperations(): BashOperations {
 						resolve({ exitCode: code });
 					})
 					.catch((err) => {
+						if (child.pid) untrackDetachedChildPid(child.pid);
 						if (timeoutHandle) clearTimeout(timeoutHandle);
 						if (signal) signal.removeEventListener("abort", onAbort);
 						reject(err);
@@ -144,57 +147,6 @@ export type BashSpawnHook = (context: BashSpawnContext) => BashSpawnContext;
 function resolveSpawnContext(command: string, cwd: string, spawnHook?: BashSpawnHook): BashSpawnContext {
 	const baseContext: BashSpawnContext = { command, cwd, env: { ...getShellEnv() } };
 	return spawnHook ? spawnHook(baseContext) : baseContext;
-}
-
-function extractCommandPathCandidates(command: string): string[] {
-	return Array.from(command.matchAll(/(^|[\s"'=])((?:\/|\.{1,2}\/|~\/)[^\s"'`;|&<>]+)/g), (match) => match[2] ?? "");
-}
-
-function assertCommandWithinWorkspace(command: string, cwd: string): void {
-	const workspaceRoot = getToolWorkspaceRoot(cwd);
-	const forbiddenPaths = getToolForbiddenPaths(cwd);
-	const blockedCommands = getToolBashBlockedCommands();
-	if (!workspaceRoot) {
-		if (forbiddenPaths.length === 0 && blockedCommands.length === 0) {
-			return;
-		}
-	}
-	if (workspaceRoot) {
-		for (const candidate of extractCommandPathCandidates(command)) {
-			try {
-				const resolved = candidate.startsWith("~/")
-					? join(process.env.HOME ?? "", candidate.slice(2))
-					: candidate.startsWith("/")
-						? candidate
-						: join(cwd, candidate);
-				if (!isPathWithinRoot(resolved, workspaceRoot)) {
-					throw new Error(`Command references path outside audited workspace root: ${candidate}`);
-				}
-			} catch (error) {
-				if (error instanceof Error) {
-					throw error;
-				}
-				throw new Error(`Command references path outside audited workspace root: ${candidate}`);
-			}
-		}
-	}
-	for (const forbiddenPath of forbiddenPaths) {
-		const relativeForbiddenPath = forbiddenPath.startsWith(cwd) ? forbiddenPath.slice(cwd.length + 1) : undefined;
-		if (
-			command.includes(forbiddenPath) ||
-			(relativeForbiddenPath !== undefined && command.includes(relativeForbiddenPath))
-		) {
-			throw new Error(`Command references forbidden audited path: ${relativeForbiddenPath ?? forbiddenPath}`);
-		}
-	}
-	for (const blockedCommand of blockedCommands) {
-		const commandPattern = new RegExp(
-			`(^|[^A-Za-z0-9_-])${blockedCommand.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?=\\s|$)`,
-		);
-		if (commandPattern.test(command)) {
-			throw new Error(`Command references blocked runtime-analysis tool: ${blockedCommand}`);
-		}
-	}
 }
 
 export interface BashToolOptions {
@@ -337,7 +289,6 @@ export function createBashToolDefinition(
 			_ctx?,
 		) {
 			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
-			assertCommandWithinWorkspace(resolvedCommand, cwd);
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
 			if (onUpdate) {
 				onUpdate({ content: [], details: undefined });

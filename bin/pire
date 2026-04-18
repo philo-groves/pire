@@ -1,0 +1,3 @@
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec npx tsx "$SCRIPT_DIR/packages/security-agent/src/cli.ts" "$@"

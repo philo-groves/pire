@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { PromptTemplate } from "../../src/core/prompt-templates.js";
 import { createSyntheticSourceInfo } from "../../src/core/source-info.js";
 import { createTestResourceLoader } from "../utilities.js";
-import { createHarness, getAssistantTexts, getMessageText, getUserTexts, type Harness } from "./harness.js";
+import { createHarness, getMessageText, type Harness } from "./harness.js";
 
 describe("AgentSession prompt characterization", () => {
 	const harnesses: Harness[] = [];
@@ -74,39 +74,6 @@ describe("AgentSession prompt characterization", () => {
 		]);
 		expect(harness.session.messages[2]?.role).toBe("toolResult");
 		expect(harness.session.messages[3]?.role).toBe("assistant");
-	});
-
-	it('runs one implicit "let me" continuation when the assistant announces work but stops', async () => {
-		const harness = await createHarness();
-		harnesses.push(harness);
-
-		harness.setResponses([
-			fauxAssistantMessage("Let me inspect the files."),
-			fauxAssistantMessage("Found the issue."),
-		]);
-
-		await harness.session.prompt("inspect");
-
-		expect(getAssistantTexts(harness)).toEqual(["Let me inspect the files.", "Found the issue."]);
-		expect(getUserTexts(harness)).toEqual(["inspect"]);
-		expect(harness.getPendingResponseCount()).toBe(0);
-	});
-
-	it('bounds implicit "let me" continuation to one extra turn per prompt', async () => {
-		const harness = await createHarness();
-		harnesses.push(harness);
-
-		harness.setResponses([
-			fauxAssistantMessage("Let me inspect the files."),
-			fauxAssistantMessage("Let me check one more thing."),
-			fauxAssistantMessage("Done."),
-		]);
-
-		await harness.session.prompt("inspect");
-
-		expect(getAssistantTexts(harness)).toEqual(["Let me inspect the files.", "Let me check one more thing."]);
-		expect(getUserTexts(harness)).toEqual(["inspect"]);
-		expect(harness.getPendingResponseCount()).toBe(1);
 	});
 
 	it("executes multiple tool calls from one response and continues with a single follow-up response", async () => {

@@ -8,7 +8,7 @@ import path from "path";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import { ensureTool } from "../../utils/tools-manager.js";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.js";
-import { enforceToolWorkspaceRoot, resolveToCwd } from "./path-utils.js";
+import { resolveToCwd } from "./path-utils.js";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
 import {
@@ -187,28 +187,26 @@ export function createGrepToolDefinition(
 						const contextValue = context && context > 0 ? context : 0;
 						const effectiveLimit = Math.max(1, limit ?? DEFAULT_LIMIT);
 						const formatPath = (filePath: string): string => {
-							const safePath = enforceToolWorkspaceRoot(filePath, cwd);
 							if (isDirectory) {
-								const relative = path.relative(searchPath, safePath);
+								const relative = path.relative(searchPath, filePath);
 								if (relative && !relative.startsWith("..")) {
 									return relative.replace(/\\/g, "/");
 								}
 							}
-							return path.basename(safePath);
+							return path.basename(filePath);
 						};
 
 						const fileCache = new Map<string, string[]>();
 						const getFileLines = async (filePath: string): Promise<string[]> => {
-							const safePath = enforceToolWorkspaceRoot(filePath, cwd);
-							let lines = fileCache.get(safePath);
+							let lines = fileCache.get(filePath);
 							if (!lines) {
 								try {
-									const content = await ops.readFile(safePath);
+									const content = await ops.readFile(filePath);
 									lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 								} catch {
 									lines = [];
 								}
-								fileCache.set(safePath, lines);
+								fileCache.set(filePath, lines);
 							}
 							return lines;
 						};
@@ -269,7 +267,7 @@ export function createGrepToolDefinition(
 						};
 
 						// Collect matches during streaming, then format them after rg exits.
-						const matches: Array<{ filePath: string; lineNumber: number }> = [];
+						const matches: Array<{ filePath: string; lineNumber: number; lineText?: string }> = [];
 						rl.on("line", (line) => {
 							if (!line.trim() || matchCount >= effectiveLimit) return;
 							let event: any;
@@ -282,7 +280,9 @@ export function createGrepToolDefinition(
 								matchCount++;
 								const filePath = event.data?.path?.text;
 								const lineNumber = event.data?.line_number;
-								if (filePath && typeof lineNumber === "number") matches.push({ filePath, lineNumber });
+								const lineText = event.data?.lines?.text;
+								if (filePath && typeof lineNumber === "number")
+									matches.push({ filePath, lineNumber, lineText });
 								if (matchCount >= effectiveLimit) {
 									matchLimitReached = true;
 									stopChild(true);
@@ -314,8 +314,19 @@ export function createGrepToolDefinition(
 
 							// Format matches after streaming finishes so custom readFile() backends can be async.
 							for (const match of matches) {
-								const block = await formatBlock(match.filePath, match.lineNumber);
-								outputLines.push(...block);
+								if (contextValue === 0 && match.lineText !== undefined) {
+									const relativePath = formatPath(match.filePath);
+									const sanitized = match.lineText
+										.replace(/\r\n/g, "\n")
+										.replace(/\r/g, "")
+										.replace(/\n$/, "");
+									const { text: truncatedText, wasTruncated } = truncateLine(sanitized);
+									if (wasTruncated) linesTruncated = true;
+									outputLines.push(`${relativePath}:${match.lineNumber}: ${truncatedText}`);
+								} else {
+									const block = await formatBlock(match.filePath, match.lineNumber);
+									outputLines.push(...block);
+								}
 							}
 
 							const rawOutput = outputLines.join("\n");

@@ -1,8 +1,0 @@
-{
-  "title": "Regression fixture: impossible heap threshold",
-  "expectation": {
-    "minNormalized": 0.99,
-    "maxIssues": 0,
-    "maxRank": 1
-  }
-}

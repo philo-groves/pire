@@ -5,13 +5,13 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
+import type { AgentEvent, AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { ImageContent } from "@mariozechner/pi-ai";
-import type { BackgroundTaskInfo, SessionStats, SubagentInfo } from "../../core/agent-session.js";
+import type { SessionStats } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
-import type { RpcCommand, RpcEvent, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.js";
+import type { RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.js";
 
 // ============================================================================
 // Types
@@ -45,7 +45,7 @@ export interface ModelInfo {
 	reasoning: boolean;
 }
 
-export type RpcEventListener = (event: RpcEvent) => void;
+export type RpcEventListener = (event: AgentEvent) => void;
 
 // ============================================================================
 // RPC Client
@@ -365,66 +365,6 @@ export class RpcClient {
 		await this.send({ type: "set_session_name", name });
 	}
 
-	async spawnSubagent(task: string, options?: { context?: string; maxTurns?: number }): Promise<SubagentInfo> {
-		const response = await this.send({
-			type: "spawn_subagent",
-			task,
-			context: options?.context,
-			maxTurns: options?.maxTurns,
-		});
-		return this.getData(response);
-	}
-
-	async sendSubagentInput(agentId: string, message: string): Promise<SubagentInfo> {
-		const response = await this.send({ type: "send_subagent_input", agentId, message });
-		return this.getData(response);
-	}
-
-	async waitSubagent(agentId: string, timeoutMs?: number): Promise<SubagentInfo> {
-		const response = await this.send({ type: "wait_subagent", agentId, timeoutMs });
-		return this.getData(response);
-	}
-
-	async closeSubagent(agentId: string): Promise<SubagentInfo> {
-		const response = await this.send({ type: "close_subagent", agentId });
-		return this.getData(response);
-	}
-
-	async getSubagentReport(agentId: string): Promise<{ subagent: SubagentInfo; text: string | null }> {
-		const response = await this.send({ type: "get_subagent_report", agentId });
-		return this.getData(response);
-	}
-
-	async listSubagents(): Promise<SubagentInfo[]> {
-		const response = await this.send({ type: "list_subagents" });
-		return this.getData<{ agents: SubagentInfo[] }>(response).agents;
-	}
-
-	async startBackgroundTask(command: string): Promise<BackgroundTaskInfo> {
-		const response = await this.send({ type: "start_background_task", command });
-		return this.getData(response);
-	}
-
-	async waitBackgroundTask(taskId: string, timeoutMs?: number): Promise<BackgroundTaskInfo> {
-		const response = await this.send({ type: "wait_background_task", taskId, timeoutMs });
-		return this.getData(response);
-	}
-
-	async cancelBackgroundTask(taskId: string): Promise<BackgroundTaskInfo> {
-		const response = await this.send({ type: "cancel_background_task", taskId });
-		return this.getData(response);
-	}
-
-	async getBackgroundTaskReport(taskId: string): Promise<{ task: BackgroundTaskInfo; text: string | null }> {
-		const response = await this.send({ type: "get_background_task_report", taskId });
-		return this.getData(response);
-	}
-
-	async listBackgroundTasks(): Promise<BackgroundTaskInfo[]> {
-		const response = await this.send({ type: "list_background_tasks" });
-		return this.getData<{ tasks: BackgroundTaskInfo[] }>(response).tasks;
-	}
-
 	/**
 	 * Get all messages in the session.
 	 */
@@ -469,9 +409,9 @@ export class RpcClient {
 	/**
 	 * Collect events until agent becomes idle.
 	 */
-	collectEvents(timeout = 60000): Promise<RpcEvent[]> {
+	collectEvents(timeout = 60000): Promise<AgentEvent[]> {
 		return new Promise((resolve, reject) => {
-			const events: RpcEvent[] = [];
+			const events: AgentEvent[] = [];
 			const timer = setTimeout(() => {
 				unsubscribe();
 				reject(new Error(`Timeout collecting events. Stderr: ${this.stderr}`));
@@ -491,7 +431,7 @@ export class RpcClient {
 	/**
 	 * Send prompt and wait for completion, returning all events.
 	 */
-	async promptAndWait(message: string, images?: ImageContent[], timeout = 60000): Promise<RpcEvent[]> {
+	async promptAndWait(message: string, images?: ImageContent[], timeout = 60000): Promise<AgentEvent[]> {
 		const eventsPromise = this.collectEvents(timeout);
 		await this.prompt(message, images);
 		return eventsPromise;
@@ -515,7 +455,7 @@ export class RpcClient {
 
 			// Otherwise it's an event
 			for (const listener of this.eventListeners) {
-				listener(data as RpcEvent);
+				listener(data as AgentEvent);
 			}
 		} catch {
 			// Ignore non-JSON lines

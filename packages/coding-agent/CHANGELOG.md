@@ -2,62 +2,203 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed git package dependency installation to use production installs (`npm install --omit=dev`) during both install and update flows, so extension runtime dependencies must come from `dependencies` and not `devDependencies` ([#3009](https://github.com/badlogic/pi-mono/issues/3009))
+- Fixed `tool_result` / `afterToolCall` extension handling for error results by forwarding `details` and `isError` overrides through `AgentSession` instead of dropping them when `isError` was already true ([#3051](https://github.com/badlogic/pi-mono/issues/3051))
+- Fixed missing root exports for `RpcClient` and RPC protocol types from `@mariozechner/pi-coding-agent`, so ESM consumers can import them from the main package entrypoint ([#3275](https://github.com/badlogic/pi-mono/issues/3275))
+- Fixed Bun binary asset path resolution to honor `PI_PACKAGE_DIR` for built-in themes, HTML export templates, and interactive bundled assets ([#3074](https://github.com/badlogic/pi-mono/issues/3074))
+- Fixed user-message turn spacing in interactive mode by restoring an inter-message spacer before user turns (except the first user message), preventing assistant and user blocks from rendering flush together.
+- Fixed interactive `/import` handling to route missing JSONL files through the non-fatal `SessionImportFileNotFoundError` path, and documented the `importFromJsonl()` exceptions (`SessionImportFileNotFoundError`, `MissingSessionCwdError`).
+
+## [0.67.6] - 2026-04-16
+
+### New Features
+
+- Prompt templates support an `argument-hint` frontmatter field that renders before the description in the `/` autocomplete dropdown, using `<angle>` for required and `[square]` for optional arguments. See [docs/prompt-templates.md#argument-hints](docs/prompt-templates.md#argument-hints).
+- New `after_provider_response` extension hook lets extensions inspect provider HTTP status codes and headers immediately after each response is received and before stream consumption begins. See [docs/extensions.md](docs/extensions.md).
+- Compact interactive startup header with a comma-separated view of loaded AGENTS.md files, prompt templates, skills, and extensions. Press `Ctrl+O` to toggle the expanded listing.
+- Markdown links in assistant output now render as OSC 8 hyperlinks on terminals that advertise support; unknown terminals and tmux/screen default to plain text so URLs are never silently dropped.
+
 ### Added
 
-- Added built-in `spawn_agent`, `send_input`, `wait_agent`, and `close_agent` tools plus matching SDK/RPC subagent lifecycle APIs, allowing bounded background delegation with isolated child contexts and a maximum nesting depth of 2.
-- Added interactive subagent activity rendering so delegated child progress appears as distinct live rows instead of being buried in the parent event stream, with keyboard selection plus direct wait / close / copy actions for the active child row and unified activity navigation across subagents and background tasks.
-- Added an RPC `get_subagent_report` command and `RpcClient.getSubagentReport()` helper so external hosts can mirror the interactive subagent copy action without scraping event history.
-- Added tracked detached background shell tasks with session events, built-in `start_background_task` / `wait_background_task` / `cancel_background_task` tools, matching RPC/client APIs, and interactive live activity rows with keyboard selection plus direct wait / cancel / copy actions for the active task.
-- Added repo-local `.pire/` profile discovery for coding-agent forks, including `.pire/APPEND_SYSTEM.md`, `.pire/TARGET.md`, `.pire/NOTES.md`, `.pire/prompts/`, and `.pire/skills/` so research-oriented projects can layer reverse-engineering context and workflows on top of the standard pi runtime.
-- Added `.pire/extensions/` discovery plus a starter `pire` extension that provides persistent `recon`, `dynamic`, `proofing`, and `report` modes and an `environment_inventory` tool for analysis environment introspection.
-- Added durable `.pire/artifacts.json` manifest tracking for observed research artifacts, with automatic updates from core tool results and a `/artifacts` command for session-visible inventory summaries.
-- Added a dedicated `.pire/SYSTEM.md` base prompt, completed the initial `pire` prompt-template and skill sets, and documented the `pire` project profile workflow in the coding-agent README.
-- Added structured `pire` binary, disasm, debug, net, and unpack tool packs with artifact-aware wrappers for binary inspection, rizin/radare2 analysis, debugger/tracer inspection, HTTP header capture, PCAP summarization, firmware triage, and controlled extraction.
-- Added browser-focused `pire` web tooling and skills for local Chrome DevTools Protocol discovery and read-oriented runtime evaluation, and automatically surface those tools in `web-security-review` sessions.
-- Added the remaining Phase 3 `pire` runtime features: research-aware compaction summaries, persistent research roles and session types, tracker detail/quick-action commands, and handoff summaries for RE workflows.
-- Added the Phase 4 `pire` runtime layer: persisted safety posture controls and active probing gates, notebook export commands (`/notebook-export`), and repro bundle generation for confirmed findings (`/repro-bundle`).
-- Tightened `pire` repro bundle generation so weak findings are refused by default unless they have confirmed/reported status plus linked evidence and replay material, and bundles now include an explicit readiness assessment.
-- Expanded `pire` notebook exports into richer research reports with structured scope/methodology sections, linked finding evidence and artifact details, open questions, dead ends, remediation drafts, and improved HTML evidence rendering.
-- Added a first `pire` eval foundation for reverse-engineering work: typed scoring/rubric helpers plus a starter binary-RE corpus covering disassembly, decompilation, UAF, OOB read/write, heap overflow, double-free, and TOCTOU tasks.
-- Added file-backed `pire` eval suite/run bundle helpers so binary-RE benchmark tasks and scored runs can be stored, validated, serialized, and compared without ad hoc scripts.
-- Added fixture-backed `pire` session eval extraction helpers plus starter binary-RE session cases so real `.pire` findings and artifact snapshots can be converted into scored benchmark runs with stable regression coverage.
-- Added a `pire-evals` CLI for scoring fixture or captured binary-RE session directories into a compact leaderboard or JSON summary for harness-driven regression tracking.
-- Added optional per-case `case.json` expectations for `pire-evals`, including score and rank thresholds plus an `--enforce` mode that fails CI when binary-RE session quality regresses.
-- Added optional suite-level `cases.json` expectations for `pire-evals`, so CI can gate aggregate binary-RE capability drift using average score, average issue count, regression count, and case-count thresholds.
-- Added `pire-evals --report` output for Markdown, JSON, and JSONL artifacts so CI runs can persist compact binary-RE eval summaries and regression details.
-- Added `pire-evals --baseline <report.json>` so current runs can be compared against a prior JSON report and emit per-case and suite-level score/issue deltas in leaderboard and report artifacts.
-- Extended `pire-evals --baseline` to support multiple named baselines via repeated `name=path` arguments, so reports can compare current binary-RE results against references like `main`, `last-good`, and `best-known` at the same time.
-- Added baseline-aware expectation gates for `pire-evals`, so case and suite metadata can fail CI on excessive score drops or issue increases relative to named baselines such as `last-good`.
-- Added baseline delta severity labels (`notice`, `warning`, `critical`) to `pire-evals` outputs so CI artifacts can distinguish mild drift from hard binary-RE regressions.
-- Added configurable `severityThresholds` support in `case.json` and `cases.json`, so binary-RE evals can tune when baseline drift should be labeled as `notice`, `warning`, or `critical`.
-- Added lane- and focus-aware default severity policies for `pire-evals`, so disassembly/surface-mapping cases and exploitability-focused cases start with different baseline-drift sensitivity even before any explicit overrides are added.
-- Added conventional `.pire/session/evals/` storage support for `pire-evals`, including named baseline saves/loads and named report sets so runs can update `last-good`, `main`, or other eval artifacts without ad hoc paths.
-- Added `pire-evals --promote-baseline <name>` so clean runs can atomically update named stored baselines like `last-good`, while regressed runs are refused instead of overwriting the reference.
-- Added `pire-evals --promote-report <name>` so clean runs can atomically update named stored report aliases like `main` or `nightly`, while regressed runs are refused instead of overwriting the reference report set.
-- Expanded the starter binary-RE eval corpus with explicit chain tasks, including three sophisticated cases that require linking 3+ vulnerabilities and one case that requires a 4-stage chain, so future eval growth can ratchet toward 5+ stage exploit paths without redesigning the corpus schema.
-- Added a `scenario` eval lane plus three end-to-end binary RE scenarios that require entry-to-goal exploitation chains with explicit success evidence, forbidden shortcuts, and proof-backed completion criteria.
-- Updated `pire-evals` reports and JSON output to surface scenario outcomes separately, including pass / near-miss / fail counts per case and at the suite level so end-to-end scenario progress is visible apart from lighter RE task scores.
-- Added a persisted scenario fixture suite plus pass / near-miss / fail `.pire` session cases so end-to-end scenario extraction, scoring, and CLI reporting can be exercised from disk instead of only through temporary test data.
-- Added an improved helper privilege-escalation iteration fixture alongside the original failing scenario, so evals can track fail -> near-miss movement on the same end-to-end path.
-- Tightened complex scenario evals into CTF-style objectives with required stage completion and captured-flag evidence, so scenario passes require explicit end-to-end exploitation artifacts instead of only high partial-credit scores.
-- Extended the same CTF-style objective and captured-flag contract to complex `chain` tasks, so all multi-stage exploit chains require explicit stage completion and proof artifacts instead of scoring well on partial reasoning alone.
-- Added a persisted chain fixture suite with pass / near-miss / fail `.pire` session cases, and surfaced chain-task CTF gating issues in `pire-evals` case reports so multi-stage exploit-chain regressions are visible in the harness instead of staying buried in task definitions.
-- Extended `pire-evals` enforcement and baseline drift gating to scenario outcome counts as well, so CI can fail directly on scenario pass / near-miss / fail regressions instead of relying only on aggregate score movement.
-- Added real outcome expectations to the persisted chain and scenario fixture metadata, so the shipped eval corpus now carries baseline-ready pass / near-miss / fail gates in `case.json` and `cases.json` instead of relying only on synthetic regression tests.
-- Expanded the starter binary-RE corpus with three harder end-to-end scenarios targeting sandbox escape, updater trust bypass, and broker-mediated privileged actions, including new 5-stage and 6-stage paths intended to expose harness weaknesses in long-horizon planning, cross-boundary state tracking, and proof discipline.
-- Added a persisted deep-scenario fixture suite for the new plugin-host sandbox-escape path, including pass / near-miss / fail `.pire` session cases so the harness can now score a concrete 5-stage scenario ladder instead of only defining the deeper tasks in the corpus.
-- Extended the persisted deep-scenario fixture suite with a second pass / near-miss / fail ladder for the 6-stage renderer-to-broker privileged-action path, so the harness can distinguish sandbox-themed failures from deeper long-horizon chain-depth failures.
-- Added a third persisted deep-scenario ladder for the updater trust-bypass path, including creative pass / near-miss / fail `.pire` sessions that distinguish descriptor-reuse progress from a real signed-package trust-boundary bypass.
-- Added an updater proof-gap variant to the deep-scenario ladder, so the eval harness can now separate “reached trust-bypass semantics” from “captured the final updater-owned proof artifact.”
-- Added a broker proof-gap variant to the deep-scenario ladder, so proof-discipline regressions can now be compared across both updater trust-boundary and broker privileged-action families.
-- Added a plugin-host proof-gap variant to the deep-scenario ladder, completing the chain-gap / proof-gap / full-proof split across all deep scenario families.
-- Added a small deep-scenario fixture generator and regression coverage for generating proof-gap cases on disk, so new eval ladders can be minted from structured inputs instead of handwritten JSON.
-- Added preset-based deep-scenario fixture generation for `pass`, `proof-gap`, and `chain-gap`, reducing new fixture authoring to a small structured declaration instead of repeating objectives, flags, and default judgements.
-- Added a `pire-eval-scaffold` CLI that writes starter deep-scenario case directories from `--suite`, `--task-id`, `--preset`, and `--case-name`, turning preset-based eval expansion into a command instead of a code edit.
+- Added `argument-hint` frontmatter field for prompt templates, displayed before the description in the autocomplete dropdown ([#2780](https://github.com/badlogic/pi-mono/pull/2780) by [@andresvi94](https://github.com/andresvi94))
+- Added `after_provider_response` extension hook so extensions can inspect provider HTTP status codes and headers after each provider response is received and before stream consumption begins ([#3128](https://github.com/badlogic/pi-mono/issues/3128))
+- Added OSC 8 hyperlink rendering for markdown links when the terminal advertises support ([#3248](https://github.com/badlogic/pi-mono/pull/3248) by [@ofa1](https://github.com/ofa1))
 
 ### Changed
 
-- Simplified the default `pire` mode tool surface to a shell-first workflow built around `bash`, `read`, and lightweight research-state helpers, so reverse-engineering sessions rely on installed CLI tooling instead of a large always-on wrapper tool menu.
+- Changed interactive startup header to a compact, comma-separated view of loaded AGENTS.md files, prompt templates, skills, and extensions, with `Ctrl+O` to toggle the expanded listing ([#3267](https://github.com/badlogic/pi-mono/pull/3267))
+- Tightened hyperlink capability detection to default `hyperlinks: false` for unknown terminals and force it off under tmux/screen (including nested sessions), preventing markdown link URLs from disappearing on terminals that silently swallow OSC 8 sequences ([#3248](https://github.com/badlogic/pi-mono/pull/3248))
+
+### Fixed
+
+- Fixed interactive user message rendering to keep bottom padding visible in terminals affected by OSC 133 prompt markers without adding an extra blank line before the following assistant message ([#3090](https://github.com/badlogic/pi-mono/issues/3090))
+- Fixed `--verbose` startup output to begin with expanded startup help and loaded resource listings after the compact startup header change ([#3147](https://github.com/badlogic/pi-mono/issues/3147))
+- Fixed `find` tool returning no results for path-based glob patterns such as `src/**/*.spec.ts` or `some/parent/child/**` by switching fd into full-path mode and normalizing the pattern when it contains a `/` ([#3302](https://github.com/badlogic/pi-mono/issues/3302))
+- Fixed `find` tool applying nested `.gitignore` rules across sibling directories (e.g. rules from `a/.gitignore` hiding matching files under `b/`) by dropping the manual `--ignore-file` collection and delegating to fd's hierarchical `.gitignore` handling via `--no-require-git` ([#3303](https://github.com/badlogic/pi-mono/issues/3303))
+- Fixed OpenAI Responses prompt caching for non-`api.openai.com` base URLs (OpenAI-compatible proxies such as litellm, theclawbay) by sending the `session_id` and `x-client-request-id` cache-affinity headers unconditionally when a `sessionId` is provided, matching the official Codex CLI behavior ([#3264](https://github.com/badlogic/pi-mono/pull/3264) by [@vegarsti](https://github.com/vegarsti))
+- Fixed the `preset` example extension to snapshot the active model, thinking level, and tool set on the first preset application and restore that state when cycling back to `(none)`, instead of falling back to a hardcoded default tool list ([#3272](https://github.com/badlogic/pi-mono/pull/3272) by [@stembi](https://github.com/stembi))
+
+## [0.67.5] - 2026-04-16
+
+### Fixed
+
+- Fixed Opus 4.7 adaptive thinking configuration across Anthropic and Bedrock providers by recognizing Opus 4.7 adaptive-thinking support and mapping `xhigh` reasoning to provider-supported effort values ([#3286](https://github.com/badlogic/pi-mono/pull/3286) by [@markusylisiurunen](https://github.com/markusylisiurunen))
+- Fixed Zellij `Shift+Enter` regressions by reverting the Zellij-specific Kitty keyboard query bypass and restoring the previous keyboard negotiation behavior ([#3259](https://github.com/badlogic/pi-mono/issues/3259))
+
+## [0.67.4] - 2026-04-16
+
+### New Features
+
+- `--no-context-files` (`-nc`) disables automatic `AGENTS.md` / `CLAUDE.md` discovery when you need a clean run without project context injection. See [README.md#context-files](README.md#context-files).
+- `loadProjectContextFiles()` is now exported as a standalone utility for extensions and SDK-style integrations that need to inspect the same context-file resolution order used by the CLI. See [README.md#context-files](README.md#context-files).
+- New `after_provider_response` extension hook lets extensions inspect provider HTTP status codes and headers immediately after response creation and before stream consumption. See [docs/extensions.md](docs/extensions.md).
+
+### Added
+
+- Added `--no-context-files` (`-nc`) to disable `AGENTS.md` and `CLAUDE.md` context file discovery and loading ([#3253](https://github.com/badlogic/pi-mono/issues/3253))
+- Exported `loadProjectContextFiles()` as a standalone utility so extensions can discover project context files without instantiating a full `DefaultResourceLoader` ([#3142](https://github.com/badlogic/pi-mono/issues/3142))
+- Added `after_provider_response` extension hook so extensions can inspect provider HTTP status codes and headers after each provider response is received and before stream consumption begins ([#3128](https://github.com/badlogic/pi-mono/issues/3128))
+
+### Changed
+
+- Added `claude-opus-4-7` model for Anthropic.
+- Changed Anthropic prompt caching to add a `cache_control` breakpoint on the last tool definition, so tool schemas can be cached independently from transcript updates while preserving existing cache retention behavior ([#3260](https://github.com/badlogic/pi-mono/issues/3260))
+
+### Fixed
+
+- Fixed markdown strikethrough parsing in interactive rendering and HTML export to require strict double-tilde delimiters (`~~text~~`) with non-whitespace boundaries.
+- Fixed shutdown handling to kill tracked detached `bash` tool child processes on exit signals, preventing orphaned background processes.
+>>>>>>> 165603189b60231ed8b88274729471cee676a0c0
+- Fixed flaky `edit-tool-no-full-redraw` TUI tests by waiting for asynchronous preview and preflight error rendering instead of relying on fixed render ticks.
+- Fixed `kimi-coding` default model selection to use `kimi-for-coding` instead of `kimi-k2-thinking` ([#3242](https://github.com/badlogic/pi-mono/issues/3242))
+- Fixed `ctrl+z` on native Windows to avoid crashing interactive mode, disable the default suspend binding there, and show a status message when suspend is invoked manually ([#3191](https://github.com/badlogic/pi-mono/issues/3191))
+- Fixed `find` tool cancellation and responsiveness on broad searches by making `.gitignore` discovery and `fd` execution fully abort-aware and non-blocking ([#3148](https://github.com/badlogic/pi-mono/issues/3148))
+- Fixed `grep` broad-search stalls when `context=0` by formatting match lines from ripgrep JSON output instead of doing synchronous per-match file reads ([#3205](https://github.com/badlogic/pi-mono/issues/3205))
+
+## [0.67.3] - 2026-04-15
+
+### New Features
+
+- `renderShell: "self"` for custom and built-in tool renderers so tools can own their outer shell instead of the default boxed shell. Useful for stable large previews such as edit diffs. See [docs/extensions.md#custom-rendering](docs/extensions.md#custom-rendering).
+- Interactive auto-retry status now shows a live countdown during backoff instead of a static retry delay message.
+
+### Added
+
+- Added `renderShell: "self"` for custom and built-in tool renderers so tools can own their outer shell instead of using the default boxed shell. This is useful for stable large previews such as edit diffs ([#3134](https://github.com/badlogic/pi-mono/issues/3134))
+
+### Fixed
+
+- Fixed edit diff previews to stay visible during edit permission dialogs and session replay without reintroducing large-result redraw flicker ([#3134](https://github.com/badlogic/pi-mono/issues/3134))
+- Fixed `/reload` to render a static reload status box instead of an animated spinner, avoiding redraw instability during interactive reloads.
+- Fixed the `plan-mode` example extension to allow `eza` in the read-only bash allowlist instead of the deprecated `exa` command ([#3240](https://github.com/badlogic/pi-mono/pull/3240) by [@rwachtler](https://github.com/rwachtler))
+- Fixed `google-vertex` API key resolution to treat `gcp-vertex-credentials` as an Application Default Credentials marker instead of a literal API key, so marker-based setups correctly fall back to ADC ([#3221](https://github.com/badlogic/pi-mono/pull/3221) by [@deepkilo](https://github.com/deepkilo))
+- Fixed RPC `prompt` to wait for prompt preflight success before emitting its single authoritative response, while still treating handled and queued prompts as success ([#3049](https://github.com/badlogic/pi-mono/issues/3049))
+- Fixed `/scoped-models` reordering to propagate into the `/model` scoped tab, preserving the user-defined scoped model order instead of re-sorting it ([#3217](https://github.com/badlogic/pi-mono/issues/3217))
+- Fixed `session_shutdown` to fire on `SIGHUP` and `SIGTERM` in interactive, print, and RPC modes so extensions can run shutdown cleanup on those signal-driven exits ([#3212](https://github.com/badlogic/pi-mono/issues/3212))
+- Fixed screenshot path parsing to handle lower case am/pm in macOS screenshot filenames ([#3194](https://github.com/badlogic/pi-mono/pull/3194) by [@jay-aye-see-kay](https://github.com/jay-aye-see-kay))
+- Fixed interactive auto-retry status updates to show a live countdown during backoff instead of a static retry delay message ([#3187](https://github.com/badlogic/pi-mono/issues/3187))
+
+## [0.67.2] - 2026-04-14
+
+### New Features
+
+- Support for multiple `--append-system-prompt` flags, each value is appended to the system prompt separated by double newlines. See [README.md#other-options](README.md#other-options).
+- Support for passing inline extension factories to `main()` for embedded integrations and custom entrypoints.
+- Interactive keybinding support for Kitty `super`-modified shortcuts such as `super+k`, `super+enter`, and `ctrl+super+k`. See [docs/keybindings.md](docs/keybindings.md).
+
+### Added
+
+- Added support for multiple `--append-system-prompt` flags, each value is appended to the system prompt separated by double newlines ([#3171](https://github.com/badlogic/pi-mono/pull/3171) by [@aliou](https://github.com/aliou))
+- Added interactive keybinding support for Kitty `super`-modified shortcuts such as `super+k`, `super+enter`, and `ctrl+super+k` ([#3111](https://github.com/badlogic/pi-mono/pull/3111) by [@sudosubin](https://github.com/sudosubin))
+- Added support for passing inline extension factories to `main()` for embedded integrations and custom entrypoints ([#3099](https://github.com/badlogic/pi-mono/pull/3099) by [@pmateusz](https://github.com/pmateusz))
+
+### Fixed
+
+- Fixed direct OpenAI Responses and Codex SSE requests to align `prompt_cache_key`, `session_id`, and `x-client-request-id` values with the same session-derived identifier, improving prompt cache affinity for append-only sessions ([#3018](https://github.com/badlogic/pi-mono/pull/3018) by [@steipete](https://github.com/steipete))
+- Fixed streaming-only `partialJson` scratch buffers leaking into persisted OpenAI Responses tool calls, which could corrupt follow-up payloads on resumed conversations.
+- Fixed Ctrl+Alt letter key matching in tmux by falling through from legacy ESC-prefixed handling to CSI-u and xterm `modifyOtherKeys` parsing when the legacy form does not match ([#2989](https://github.com/badlogic/pi-mono/pull/2989) by [@kaofelix](https://github.com/kaofelix))
+- Fixed the shipped `subagent` example to avoid leaking Bun virtual filesystem script paths into subagent prompts ([#3002](https://github.com/badlogic/pi-mono/pull/3002) by [@nathyong](https://github.com/nathyong))
+- Fixed bordered loaders to stop their animation timer when disposed, preventing stale loader updates after teardown.
+
+## [0.67.1] - 2026-04-13
+
+### Telemetry
+
+Interactive mode now sends a lightweight anonymous install/update telemetry ping to `https://pi.dev/install?version=x.y.z` after it writes `lastChangelogVersion` in `settings.json`.
+
+Why this exists:
+- Pi needs a reliable per-version usage signal to understand whether releases are being adopted and to help justify funding continued development.
+- npm download counts are not a reliable proxy for actual Pi usage.
+
+How it works:
+- It only runs in interactive mode.
+- It does not run in RPC mode, print mode, JSON mode, or SDK mode.
+- On a fresh interactive install, Pi writes `lastChangelogVersion`, then sends the ping.
+- On later interactive startups, if the local changelog contains entries newer than the previously stored `lastChangelogVersion`, Pi writes the new `lastChangelogVersion`, then sends the ping.
+- The request is fire-and-forget. Startup does not wait for it, and any errors are ignored.
+
+What data is collected:
+- Only the Pi version in the request path, for example `https://pi.dev/install?version=0.67.1`.
+- The server stores only aggregate per-version counters such as `{ "0.67.1": 3 }`.
+- It does not store IP addresses, client identifiers, prompts, paths, models, auth state, or any other per-user data. It literally only increments a counter for that version.
+
+How to disable it:
+- `/settings` → disable `Install telemetry`
+- `settings.json` → set `enableInstallTelemetry` to `false`
+- `PI_OFFLINE=1`
+- `PI_TELEMETRY=0`
+
+### New Features
+
+- Full `openRouterRouting` support in `models.json`, including fallbacks, parameter requirements, data collection, ZDR, ignore lists, quantizations, provider sorting, max price, and preferred throughput and latency constraints. See [docs/models.md](docs/models.md).
+- `PI_CODING_AGENT=true` environment variable set at startup so subprocesses can detect they are running inside the coding agent.
+- Updated `antigravity-image-gen.ts` example extension to use User-Agent version `1.21.9` ([#2901](https://github.com/badlogic/pi-mono/pull/2901) by [@aadishv](https://github.com/aadishv))
+- Fixed `--list-models` silently swallowing `models.json` load errors; errors are now printed to stderr ([#3072](https://github.com/badlogic/pi-mono/issues/3072))
+- Fixed custom models for built-in providers (e.g. `openrouter`) being silently dropped from `--list-models` by inheriting `api`/`baseUrl` from built-in model definitions and no longer requiring `apiKey` for providers with existing auth ([#2921](https://github.com/badlogic/pi-mono/issues/2921) and [#3072](https://github.com/badlogic/pi-mono/issues/3072))
+### Added
+
+- Added full `openRouterRouting` field support in `models.json`, including fallbacks, parameter requirements, data collection, ZDR, ignore lists, quantizations, provider sorting, max price, and preferred throughput and latency constraints ([#2904](https://github.com/badlogic/pi-mono/pull/2904) by [@zmberber](https://github.com/zmberber))
+- Set `PI_CODING_AGENT=true` environment variable at startup so sub-processes can detect they are running inside the coding agent ([#2868](https://github.com/badlogic/pi-mono/issues/2868))
+
+### Fixed
+
+- Fixed interactive changelog rendering for the telemetry notes by moving the section under a `### Telemetry` heading, so startup shows the full release notes instead of only the version header.
+- Updated `antigravity-image-gen.ts` example extension to use User-Agent version `1.21.9` ([#2901](https://github.com/badlogic/pi-mono/pull/2901) by [@aadishv](https://github.com/aadishv))
+- Bumped default Antigravity User-Agent version to `1.21.9` ([#2901](https://github.com/badlogic/pi-mono/pull/2901) by [@aadishv](https://github.com/aadishv))
+- Fixed Gemma 4 thinking level mapping to route between `MINIMAL` and `HIGH`, and map Pi reasoning levels to the model's supported thinking levels ([#2903](https://github.com/badlogic/pi-mono/pull/2903) by [@aadishv](https://github.com/aadishv))
+- Fixed Gemini 2.5 Flash Lite minimal thinking budget to use the model's supported 512-token minimum instead of the regular Flash 128-token minimum, avoiding invalid thinking budget errors ([#2861](https://github.com/badlogic/pi-mono/pull/2861) by [@JasonOA888](https://github.com/JasonOA888))
+- Fixed OpenAI Codex Responses requests to forward configured `serviceTier` values, restoring service-tier selection for Codex sessions ([#2996](https://github.com/badlogic/pi-mono/pull/2996) by [@markusylisiurunen](https://github.com/markusylisiurunen))
+- Fixed newly generated session IDs to use UUIDv7, improving time locality for session-based request routing ([#3018](https://github.com/badlogic/pi-mono/pull/3018) by [@steipete](https://github.com/steipete))
+- Fixed `Container.render()` stack overflow on long sessions by replacing `Array.push(...spread)` with a loop-based push, preventing `RangeError: Maximum call stack size exceeded` when child output exceeds the V8 call stack argument limit ([#2651](https://github.com/badlogic/pi-mono/issues/2651))
+- Fixed editor sticky-column tracking around paste markers so vertical cursor navigation restores the column from before the cursor entered a paste marker instead of jumping inside or past pasted content ([#3092](https://github.com/badlogic/pi-mono/pull/3092) by [@Perlence](https://github.com/Perlence))
+- Fixed queued messages typed during `/tree` branch summarization to flush automatically after navigation completes, so they no longer remain stuck in the steering queue ([#3091](https://github.com/badlogic/pi-mono/pull/3091) by [@Perlence](https://github.com/Perlence))
+- Fixed npm package update check to work with packages on non-default registries by using `npm view` instead of hardcoded `registry.npmjs.org` fetch ([#3164](https://github.com/badlogic/pi-mono/pull/3164) by [@aliou](https://github.com/aliou))
+
+## [0.67.0] - 2026-04-13
+
+See [0.67.1]. Version 0.67.0 shipped with a changelog formatting error that caused interactive startup to show only the version header instead of the full release notes.
+
+## [0.66.1] - 2026-04-08
+
+### Changed
+
+- Changed the Earendil announcement from an automatic startup notice to the hidden `/dementedelves` slash command.
+
+## [0.66.0] - 2026-04-08
+
+### New Features
+
+- Earendil startup announcement with bundled inline image rendering and a linked blog post for April 8 and 9, 2026.
+- Interactive Anthropic subscription auth warning when Anthropic subscription auth is active, clarifying that Anthropic third-party usage draws from extra usage and is billed per token.
+
+### Fixed
+
+- Fixed bare `readline` import to use `node:readline` prefix for Deno compatibility ([#2885](https://github.com/badlogic/pi-mono/issues/2885) by [@milosv-vtool](https://github.com/milosv-vtool))
+- Fixed auto-retry to treat stream failures like `request ended without sending any chunks` as transient errors ([#2892](https://github.com/badlogic/pi-mono/issues/2892))
+- Fixed interactive startup notices to render after the initial resource listing, and added a bundled Earendil startup announcement with inline image rendering for April 8 and 9, 2026. Moved the blog link above the image to avoid overlap with terminal image rendering.
+- Fixed interactive mode to warn when Anthropic subscription auth is active, so users know Anthropic third-party usage draws from extra usage and is billed per token.
 
 ## [0.65.2] - 2026-04-06
 

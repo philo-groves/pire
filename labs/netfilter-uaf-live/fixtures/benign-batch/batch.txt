@@ -1,3 +1,0 @@
-CREATE myset allow
-BIND myrule myset
-ACTIVATE myrule

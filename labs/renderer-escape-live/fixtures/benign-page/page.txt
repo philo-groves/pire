@@ -1,7 +1,0 @@
-LOAD https://example.test/
-CHANNEL ui
-MESSAGE
-Mode: render
-
-hello
-END

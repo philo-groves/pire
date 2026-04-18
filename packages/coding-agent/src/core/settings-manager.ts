@@ -6,8 +6,8 @@ import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 
 export interface CompactionSettings {
 	enabled?: boolean; // default: true
-	reserveTokens?: number; // default: 12288
-	keepRecentTokens?: number; // default: 32000
+	reserveTokens?: number; // default: 16384
+	keepRecentTokens?: number; // default: 20000
 }
 
 export interface BranchSummarySettings {
@@ -68,7 +68,6 @@ export interface Settings {
 	transport?: TransportSetting; // default: "sse"
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
-	autopilotEnabled?: boolean;
 	theme?: string;
 	compaction?: CompactionSettings;
 	branchSummary?: BranchSummarySettings;
@@ -79,6 +78,7 @@ export interface Settings {
 	shellCommandPrefix?: string; // Prefix prepended to every bash command (e.g., "shopt -s expand_aliases" for alias support)
 	npmCommand?: string[]; // Command used for npm package lookup/install operations, argv-style (e.g., ["mise", "exec", "node@20", "--", "npm"])
 	collapseChangelog?: boolean; // Show condensed changelog after update (use /changelog for full)
+	enableInstallTelemetry?: boolean; // default: true - anonymous version/update ping after changelog-detected updates
 	packages?: PackageSource[]; // Array of npm/git package sources (string or object with filtering)
 	extensions?: string[]; // Array of local extension file paths or directories
 	skills?: string[]; // Array of local skill file paths or directories
@@ -585,16 +585,6 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getAutopilotEnabled(): boolean {
-		return this.settings.autopilotEnabled ?? false;
-	}
-
-	setAutopilotEnabled(enabled: boolean): void {
-		this.globalSettings.autopilotEnabled = enabled;
-		this.markModified("autopilotEnabled");
-		this.save();
-	}
-
 	getTheme(): string | undefined {
 		return this.settings.theme;
 	}
@@ -639,11 +629,11 @@ export class SettingsManager {
 	}
 
 	getCompactionReserveTokens(): number {
-		return this.settings.compaction?.reserveTokens ?? 12288;
+		return this.settings.compaction?.reserveTokens ?? 16384;
 	}
 
 	getCompactionKeepRecentTokens(): number {
-		return this.settings.compaction?.keepRecentTokens ?? 32000;
+		return this.settings.compaction?.keepRecentTokens ?? 20000;
 	}
 
 	getCompactionSettings(): { enabled: boolean; reserveTokens: number; keepRecentTokens: number } {
@@ -744,6 +734,16 @@ export class SettingsManager {
 	setCollapseChangelog(collapse: boolean): void {
 		this.globalSettings.collapseChangelog = collapse;
 		this.markModified("collapseChangelog");
+		this.save();
+	}
+
+	getEnableInstallTelemetry(): boolean {
+		return this.settings.enableInstallTelemetry ?? true;
+	}
+
+	setEnableInstallTelemetry(enabled: boolean): void {
+		this.globalSettings.enableInstallTelemetry = enabled;
+		this.markModified("enableInstallTelemetry");
 		this.save();
 	}
 

@@ -1,61 +1,55 @@
-# PiRE Monorepo
+<p align="center">
+  <a href="https://shittycodingagent.ai">
+    <img src="https://shittycodingagent.ai/logo.svg" alt="pi logo" width="128">
+  </a>
+</p>
+<p align="center">
+  <a href="https://discord.com/invite/3cU7Bz4UPx"><img alt="Discord" src="https://img.shields.io/badge/discord-community-5865F2?style=flat-square&logo=discord&logoColor=white" /></a>
+  <a href="https://github.com/badlogic/pi-mono/actions/workflows/ci.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/badlogic/pi-mono/ci.yml?style=flat-square&branch=main" /></a>
+</p>
+<p align="center">
+  <a href="https://pi.dev">pi.dev</a> domain graciously donated by
+  <br /><br />
+  <a href="https://exe.dev"><img src="packages/coding-agent/docs/images/exy.png" alt="Exy mascot" width="48" /><br />exe.dev</a>
+</p>
 
-PiRE is a research-oriented fork of the pi stack. The main direction of this repo is no longer a generic coding-agent monorepo; it is a runtime and evaluation harness for reverse engineering, vulnerability research, exploit-development workflows, and measurable agent improvement.
+> New issues and PRs from new contributors are auto-closed by default. Maintainers review auto-closed issues daily. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-> **Looking for the CLI?** Start with **[packages/coding-agent](packages/coding-agent)**.
+---
 
-The repo currently centers on:
+# Pi Monorepo
 
-- a terminal coding and research agent with project-local `.pire/` profiles
-- subagent delegation with isolated context, persistent handles, and interactive/RPC controls
-- reverse-engineering and live-lab workflows
-- audited eval runs, proof validation, and regression tracking
-- reusable lower-level packages for models, agent runtimes, TUI, web UI, and deployment tooling
+> **Looking for the pi coding agent?** See **[packages/coding-agent](packages/coding-agent)** for installation and usage.
 
-## Project Direction
+Tools for building AI agents and managing LLM deployments.
 
-PiRE is optimized for questions like:
+## Share your OSS coding agent sessions
 
-- can the agent reverse unfamiliar targets instead of just summarize code
-- can it avoid shortcut paths and answer-key artifacts
-- can it preserve clean context while delegating bounded work to subagents
-- can it produce target-backed proof, not just plausible analysis
-- can capability changes be measured with repeatable evals instead of anecdotes
+If you use pi or other coding agents for open source work, please share your sessions.
 
-That direction shows up in three places across the repo:
+Public OSS session data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
 
-1. `packages/coding-agent` provides the main PiRE CLI/runtime, including `.pire/` discovery, research workflows, and subagent orchestration.
-2. `EVALUATION.md` and the shipped eval/lab harness define how runs are scored, audited, and compared over time.
-3. The supporting packages remain reusable, but they now primarily serve the PiRE runtime and its research workflows.
+For the full explanation, see [this post on X](https://x.com/badlogicgames/status/2037811643774652911).
 
-## PiRE Highlights
+To publish sessions, use [`badlogic/pi-share-hf`](https://github.com/badlogic/pi-share-hf). Read its README.md for setup instructions. All you need is a Hugging Face account, the Hugging Face CLI, and `pi-share-hf`.
 
-- Project-local `.pire/` profiles for `SYSTEM.md`, `APPEND_SYSTEM.md`, `TARGET.md`, `NOTES.md`, prompts, skills, and extensions
-- Built-in subagents with max depth 2, persistent handles, progress streaming, and interactive/RPC controls
-- Research-oriented commands, artifact tracking, reporting, and repro-bundle workflows
-- Binary-RE, runtime, and stateful-runtime evaluation helpers
-- Live-lab infrastructure for audited session capture, shortcut detection, proof classification, and baseline comparisons
+You can also watch [this video](https://x.com/badlogicgames/status/2041151967695634619), where I show how I publish my `pi-mono` sessions.
 
-For the full CLI workflow, install instructions, and PiRE-specific runtime details, read [packages/coding-agent/README.md](packages/coding-agent/README.md).
+I regularly publish my own `pi-mono` work sessions here:
 
-## Research Workflow
+- [badlogicgames/pi-mono on Hugging Face](https://huggingface.co/datasets/badlogicgames/pi-mono)
 
-If you are working in a PiRE-enabled target repo, the important local surface is usually:
+## Packages
 
-```text
-.pire/
-  SYSTEM.md
-  APPEND_SYSTEM.md
-  TARGET.md
-  NOTES.md
-  prompts/
-  skills/
-  extensions/
-```
-
-That project-local profile layers target-specific instructions and tools on top of the normal agent/session config under `~/.pire/agent/`.
-
-Repo-level eval and lab guidance lives in [EVALUATION.md](EVALUATION.md).
+| Package | Description |
+|---------|-------------|
+| **[@mariozechner/pi-ai](packages/ai)** | Unified multi-provider LLM API (OpenAI, Anthropic, Google, etc.) |
+| **[@mariozechner/pi-agent-core](packages/agent)** | Agent runtime with tool calling and state management |
+| **[@mariozechner/pi-coding-agent](packages/coding-agent)** | Interactive coding agent CLI |
+| **[@mariozechner/pi-mom](packages/mom)** | Slack bot that delegates messages to the pi coding agent |
+| **[@mariozechner/pi-tui](packages/tui)** | Terminal UI library with differential rendering |
+| **[@mariozechner/pi-web-ui](packages/web-ui)** | Web components for AI chat interfaces |
+| **[@mariozechner/pi-pods](packages/pods)** | CLI for managing vLLM deployments on GPU pods |
 
 ## Contributing
 
@@ -68,16 +62,10 @@ npm install          # Install all dependencies
 npm run build        # Build all packages
 npm run check        # Lint, format, and type check
 ./test.sh            # Run tests (skips LLM-dependent tests without API keys)
-./pire-test.sh         # Run pire from sources (can be run from any directory)
+./pi-test.sh         # Run pi from sources (can be run from any directory)
 ```
 
 > **Note:** `npm run check` requires `npm run build` to be run first. The web-ui package uses `tsc` which needs compiled `.d.ts` files from dependencies.
-
-If you are contributing to the PiRE runtime or eval harness:
-
-- read [AGENTS.md](AGENTS.md) for repo-specific development rules
-- read [EVALUATION.md](EVALUATION.md) for lab/eval workflow and fixture guidance
-- use package-local changelogs under `packages/*/CHANGELOG.md`
 
 ## License
 

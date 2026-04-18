@@ -120,8 +120,8 @@ export interface CompactionSettings {
 
 export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	enabled: true,
-	reserveTokens: 12288,
-	keepRecentTokens: 32000,
+	reserveTokens: 16384,
+	keepRecentTokens: 20000,
 };
 
 // ============================================================================

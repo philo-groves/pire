@@ -1,2 +1,0 @@
-token=smtp-token-88
-receipt=038ca103

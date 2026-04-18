@@ -7,17 +7,11 @@ export {
 	type AgentSessionConfig,
 	type AgentSessionEvent,
 	type AgentSessionEventListener,
-	type BackgroundTaskInfo,
-	type BackgroundTaskSessionEvent,
-	type BackgroundTaskStatus,
 	type ModelCycleResult,
 	type ParsedSkillBlock,
 	type PromptOptions,
 	parseSkillBlock,
 	type SessionStats,
-	type SubagentInfo,
-	type SubagentSessionEvent,
-	type SubagentStatus,
 } from "./core/agent-session.js";
 // Auth and model registry
 export {
@@ -158,120 +152,8 @@ export type {
 	ResolvedResource,
 } from "./core/package-manager.js";
 export { DefaultPackageManager } from "./core/package-manager.js";
-export {
-	createStarterBinaryReEvalSuite,
-	type PireEvalRunBundle,
-	type PireEvalRunScore,
-	type PireEvalTaskSuite,
-	parsePireEvalRunBundle,
-	parsePireEvalTaskSuite,
-	scorePireEvalRunBundle,
-	stringifyPireEvalRunBundle,
-	stringifyPireEvalTaskSuite,
-	summarizePireEvalRunScore,
-	validatePireEvalRunBundle,
-	validatePireEvalTaskSuite,
-} from "./core/pire/eval-bundles.js";
-export {
-	createStarterBinaryReEvalCorpus,
-	type PireBinaryBugClass,
-	type PireBinaryEvalCorpusSummary,
-	type PireBinaryEvalFocus,
-	type PireBinaryEvalTask,
-	summarizeBinaryReEvalCorpus,
-	validateBinaryReEvalCorpus,
-} from "./core/pire/eval-corpus.js";
-export {
-	type CreateGeneratedScenarioPresetScaffoldOptions,
-	createGeneratedScenarioFixtureCase,
-	createGeneratedScenarioPresetCase,
-	createGeneratedScenarioPresetScaffold,
-	type PireGeneratedFixtureArtifact,
-	type PireGeneratedFixtureCaseExpectation,
-	type PireGeneratedFixtureCaseOptions,
-	type PireGeneratedFixtureFindingOptions,
-	type PireGeneratedScenarioFixtureCase,
-	type PireGeneratedScenarioFixtureCaseOptions,
-	type PireGeneratedScenarioPreset,
-	type PireGeneratedScenarioPresetCaseOptions,
-	writeGeneratedScenarioFixtureCase,
-} from "./core/pire/eval-fixture-generator.js";
-export {
-	type CreatePireEvalRunBundleFromBindingFileOptions,
-	type CreatePireEvalRunBundleFromSessionOptions,
-	createPireEvalRunBundleFromBindingFile,
-	createPireEvalRunBundleFromSession,
-	formatPireEvalRunScoreReport,
-	getPireEvalStorageDir,
-	loadPireEvalRunBundle,
-	loadPireEvalSessionBindingFile,
-	loadPireEvalTaskSuite,
-	loadPireSessionArtifactManifest,
-	loadPireSessionTracker,
-	type PireEvalSessionBindingFile,
-	type PireEvalSessionTaskBinding,
-	type PireEvalStoredArtifactKind,
-	parsePireEvalSessionBindingFile,
-	resolvePireEvalStoredArtifactPath,
-	savePireEvalRunBundle,
-	scorePireEvalRunFromFiles,
-	scorePireEvalSessionFromFiles,
-} from "./core/pire/eval-runner.js";
-export {
-	createDefaultPireEvalRubric,
-	type PireEvalDimension,
-	type PireEvalDimensionScore,
-	type PireEvalEvidenceRef,
-	type PireEvalExpectedOutcome,
-	type PireEvalGrade,
-	type PireEvalJudgement,
-	type PireEvalLane,
-	type PireEvalRubric,
-	type PireEvalScore,
-	type PireEvalSubmission,
-	type PireEvalTask,
-	resolvePireEvalRubric,
-	scorePireEvalSubmission,
-	summarizePireEvalScore,
-	validatePireEvalSubmission,
-} from "./core/pire/evals.js";
-export {
-	applyPireLiveLabRunStrategy,
-	auditPireLiveLabSessionEntries,
-	auditPireLiveLabSessionFile,
-	classifyPireLiveLabAttempt,
-	type EvaluatePireLiveLabAgentRunOptions,
-	evaluatePireLiveLabAgentRun,
-	extractPireLiveLabBullets,
-	extractPireLiveLabSection,
-	type InspectPireLiveLabAgentRunOptions,
-	inspectPireLiveLabAgentRun,
-	listPireLiveLabDirectories,
-	listPireLiveLabProofArtifacts,
-	listPireLiveLabSessionFiles,
-	type PireLiveLabAgentRunOptions,
-	type PireLiveLabAgentRunResult,
-	type PireLiveLabAttemptAssessment,
-	type PireLiveLabAttemptKind,
-	type PireLiveLabAttemptLabel,
-	type PireLiveLabInventorySnapshot,
-	type PireLiveLabPaths,
-	type PireLiveLabRunStrategy,
-	type PireLiveLabSessionAuditOptions,
-	type PireLiveLabShortcutFinding,
-	readPireLiveLabInventory,
-	readPireLiveLabSessionEntries,
-	resolvePireLiveLabDefaultForbiddenPaths,
-	resolvePireLiveLabPaths,
-	resolvePireLiveLabRunStrategy,
-	runPireLiveLabAgent,
-	runPireLiveLabMake,
-	runPireLiveLabScript,
-	stagePireLiveLabWorkspace,
-	validatePireLiveLabInventory,
-} from "./core/pire/live-labs.js";
 export type { ResourceCollision, ResourceDiagnostic, ResourceLoader } from "./core/resource-loader.js";
-export { DefaultResourceLoader } from "./core/resource-loader.js";
+export { DefaultResourceLoader, loadProjectContextFiles } from "./core/resource-loader.js";
 // SDK for programmatic usage
 export {
 	AgentSessionRuntime,
@@ -409,15 +291,19 @@ export {
 	writeToolDefinition,
 } from "./core/tools/index.js";
 // Main entry point
-export { main } from "./main.js";
+export { type MainOptions, main } from "./main.js";
 // Run modes for programmatic SDK usage
 export {
-	createRpcHandler,
 	InteractiveMode,
 	type InteractiveModeOptions,
+	type ModelInfo,
 	type PrintModeOptions,
-	type RpcHandler,
-	type RpcHandlerOptions,
+	RpcClient,
+	type RpcClientOptions,
+	type RpcCommand,
+	type RpcEventListener,
+	type RpcResponse,
+	type RpcSessionState,
 	runPrintMode,
 	runRpcMode,
 } from "./modes/index.js";

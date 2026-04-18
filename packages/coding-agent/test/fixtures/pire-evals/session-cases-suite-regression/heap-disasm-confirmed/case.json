@@ -1,8 +1,0 @@
-{
-  "title": "Confirmed heap-disassembly session",
-  "expectation": {
-    "minNormalized": 0.5,
-    "maxIssues": 3,
-    "maxRank": 1
-  }
-}

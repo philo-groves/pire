@@ -9,11 +9,7 @@ import type { AgentMessage, AgentTool } from "@mariozechner/pi-agent-core";
 import { Agent } from "@mariozechner/pi-agent-core";
 import type { FauxModelDefinition, FauxProviderRegistration, FauxResponseStep, Model } from "@mariozechner/pi-ai";
 import { registerFauxProvider } from "@mariozechner/pi-ai";
-import {
-	AgentSession,
-	type AgentSessionEvent,
-	isImplicitContinuationUserMessage,
-} from "../../src/core/agent-session.js";
+import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.js";
 import { AuthStorage } from "../../src/core/auth-storage.js";
 import type { ExtensionRunner } from "../../src/core/extensions/index.js";
 import { convertToLlm } from "../../src/core/messages.js";
@@ -49,7 +45,7 @@ export function getMessageText(message: unknown): string {
 
 export function getUserTexts(harness: Harness): string[] {
 	return harness.session.messages
-		.filter((message) => message.role === "user" && !isImplicitContinuationUserMessage(message))
+		.filter((message) => message.role === "user")
 		.map((message) => getMessageText(message));
 }
 
@@ -67,7 +63,6 @@ export interface HarnessOptions {
 	resourceLoader?: ResourceLoader;
 	extensionFactories?: Array<ExtensionFactory | CreateTestExtensionsResultInput>;
 	withConfiguredAuth?: boolean;
-	subagentDepth?: number;
 }
 
 export interface Harness {
@@ -147,6 +142,17 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 			}
 			return runner.emitBeforeProviderRequest(payload);
 		},
+		onResponse: async (response) => {
+			const runner = extensionRunnerRef.current;
+			if (!runner?.hasHandlers("after_provider_response")) {
+				return;
+			}
+			await runner.emit({
+				type: "after_provider_response",
+				status: response.status,
+				headers: response.headers,
+			});
+		},
 		transformContext: async (messages: AgentMessage[]) => {
 			const runner = extensionRunnerRef.current;
 			if (!runner) return messages;
@@ -164,7 +170,6 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		sessionManager,
 		settingsManager,
 		cwd: tempDir,
-		subagentDepth: options.subagentDepth,
 		modelRegistry,
 		resourceLoader,
 		baseToolsOverride: toolMap,

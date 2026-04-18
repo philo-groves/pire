@@ -1,0 +1,15 @@
+{
+  "name": "pire-eval",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pire-eval": "./src/cybergym/cli.ts"
+  },
+  "scripts": {
+    "eval": "tsx src/cybergym/cli.ts"
+  },
+  "dependencies": {
+    "tsx": "^4.19.0"
+  }
+}

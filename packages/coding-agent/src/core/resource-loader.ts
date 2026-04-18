@@ -1,7 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve, sep } from "node:path";
 import chalk from "chalk";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { loadThemeFromPath, type Theme } from "../modes/interactive/theme/theme.js";
@@ -20,9 +19,6 @@ import { SettingsManager } from "./settings-manager.js";
 import type { Skill } from "./skills.js";
 import { loadSkills } from "./skills.js";
 import { createSourceInfo, type SourceInfo } from "./source-info.js";
-
-const PIRE_DIR_NAME = ".pire";
-const PIRE_CONTEXT_FILENAMES = ["TARGET.md", "NOTES.md"] as const;
 
 export interface ResourceExtensionPaths {
 	skillPaths?: Array<{ path: string; metadata: PathMetadata }>;
@@ -77,7 +73,7 @@ function loadContextFileFromDir(dir: string): { path: string; content: string } 
 	return null;
 }
 
-function loadProjectContextFiles(
+export function loadProjectContextFiles(
 	options: { cwd?: string; agentDir?: string } = {},
 ): Array<{ path: string; content: string }> {
 	const resolvedCwd = options.cwd ?? process.cwd();
@@ -112,71 +108,8 @@ function loadProjectContextFiles(
 	}
 
 	contextFiles.push(...ancestorContextFiles);
-	contextFiles.push(...loadPireContextFiles(resolvedCwd, seenPaths));
 
 	return contextFiles;
-}
-
-function loadPireContextFiles(cwd: string, seenPaths: Set<string>): Array<{ path: string; content: string }> {
-	const pireDir = join(cwd, PIRE_DIR_NAME);
-	const contextFiles: Array<{ path: string; content: string }> = [];
-
-	for (const filename of PIRE_CONTEXT_FILENAMES) {
-		const filePath = join(pireDir, filename);
-		if (!existsSync(filePath) || seenPaths.has(filePath)) {
-			continue;
-		}
-
-		try {
-			contextFiles.push({
-				path: filePath,
-				content: readFileSync(filePath, "utf-8"),
-			});
-			seenPaths.add(filePath);
-		} catch (error) {
-			console.error(chalk.yellow(`Warning: Could not read ${filePath}: ${error}`));
-		}
-	}
-
-	return contextFiles;
-}
-
-function discoverExtensionEntriesInDir(dir: string): string[] {
-	if (!existsSync(dir)) {
-		return [];
-	}
-
-	const entries: string[] = [];
-
-	try {
-		for (const entry of readdirSync(dir, { withFileTypes: true })) {
-			const entryPath = join(dir, entry.name);
-
-			if ((entry.isFile() || entry.isSymbolicLink()) && (entry.name.endsWith(".ts") || entry.name.endsWith(".js"))) {
-				entries.push(entryPath);
-				continue;
-			}
-
-			if (!entry.isDirectory() && !entry.isSymbolicLink()) {
-				continue;
-			}
-
-			const indexTs = join(entryPath, "index.ts");
-			if (existsSync(indexTs)) {
-				entries.push(indexTs);
-				continue;
-			}
-
-			const indexJs = join(entryPath, "index.js");
-			if (existsSync(indexJs)) {
-				entries.push(indexJs);
-			}
-		}
-	} catch {
-		return [];
-	}
-
-	return entries;
 }
 
 export interface DefaultResourceLoaderOptions {
@@ -193,8 +126,9 @@ export interface DefaultResourceLoaderOptions {
 	noSkills?: boolean;
 	noPromptTemplates?: boolean;
 	noThemes?: boolean;
+	noContextFiles?: boolean;
 	systemPrompt?: string;
-	appendSystemPrompt?: string;
+	appendSystemPrompt?: string[];
 	extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
 	skillsOverride?: (base: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
 		skills: Skill[];
@@ -230,8 +164,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private noSkills: boolean;
 	private noPromptTemplates: boolean;
 	private noThemes: boolean;
+	private noContextFiles: boolean;
 	private systemPromptSource?: string;
-	private appendSystemPromptSource?: string;
+	private appendSystemPromptSource?: string[];
 	private extensionsOverride?: (base: LoadExtensionsResult) => LoadExtensionsResult;
 	private skillsOverride?: (base: { skills: Skill[]; diagnostics: ResourceDiagnostic[] }) => {
 		skills: Skill[];
@@ -287,6 +222,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.noSkills = options.noSkills ?? false;
 		this.noPromptTemplates = options.noPromptTemplates ?? false;
 		this.noThemes = options.noThemes ?? false;
+		this.noContextFiles = options.noContextFiles ?? false;
 		this.systemPromptSource = options.systemPrompt;
 		this.appendSystemPromptSource = options.appendSystemPrompt;
 		this.extensionsOverride = options.extensionsOverride;
@@ -455,10 +391,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 		const cliEnabledPrompts = getEnabledPaths(cliExtensionPaths.prompts);
 		const cliEnabledThemes = getEnabledPaths(cliExtensionPaths.themes);
 
-		const pireExtensionPaths = this.getPireResourcePaths("extensions");
 		const extensionPaths = this.noExtensions
-			? this.mergePaths(cliEnabledExtensions, pireExtensionPaths)
-			: this.mergePaths([...cliEnabledExtensions, ...enabledExtensions, ...pireExtensionPaths], []);
+			? cliEnabledExtensions
+			: this.mergePaths(cliEnabledExtensions, enabledExtensions);
 
 		const extensionsResult = await loadExtensions(extensionPaths, this.cwd, this.eventBus);
 		const inlineExtensions = await this.loadExtensionFactories(extensionsResult.runtime);
@@ -480,10 +415,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 		this.extensionsResult = this.extensionsOverride ? this.extensionsOverride(extensionsResult) : extensionsResult;
 		this.applyExtensionSourceInfo(this.extensionsResult.extensions, metadataByPath);
 
-		const pireSkillPaths = this.getPireResourcePaths("skills");
 		const skillPaths = this.noSkills
-			? this.mergePaths([...cliEnabledSkills, ...pireSkillPaths], this.additionalSkillPaths)
-			: this.mergePaths([...cliEnabledSkills, ...enabledSkills, ...pireSkillPaths], this.additionalSkillPaths);
+			? this.mergePaths(cliEnabledSkills, this.additionalSkillPaths)
+			: this.mergePaths([...cliEnabledSkills, ...enabledSkills], this.additionalSkillPaths);
 
 		this.lastSkillPaths = skillPaths;
 		this.updateSkillsFromPaths(skillPaths, metadataByPath);
@@ -493,13 +427,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 			}
 		}
 
-		const pirePromptPaths = this.getPireResourcePaths("prompts");
 		const promptPaths = this.noPromptTemplates
-			? this.mergePaths([...cliEnabledPrompts, ...pirePromptPaths], this.additionalPromptTemplatePaths)
-			: this.mergePaths(
-					[...cliEnabledPrompts, ...enabledPrompts, ...pirePromptPaths],
-					this.additionalPromptTemplatePaths,
-				);
+			? this.mergePaths(cliEnabledPrompts, this.additionalPromptTemplatePaths)
+			: this.mergePaths([...cliEnabledPrompts, ...enabledPrompts], this.additionalPromptTemplatePaths);
 
 		this.lastPromptPaths = promptPaths;
 		this.updatePromptsFromPaths(promptPaths, metadataByPath);
@@ -521,7 +451,9 @@ export class DefaultResourceLoader implements ResourceLoader {
 			}
 		}
 
-		const agentsFiles = { agentsFiles: loadProjectContextFiles({ cwd: this.cwd, agentDir: this.agentDir }) };
+		const agentsFiles = {
+			agentsFiles: this.noContextFiles ? [] : loadProjectContextFiles({ cwd: this.cwd, agentDir: this.agentDir }),
+		};
 		const resolvedAgentsFiles = this.agentsFilesOverride ? this.agentsFilesOverride(agentsFiles) : agentsFiles;
 		this.agentsFiles = resolvedAgentsFiles.agentsFiles;
 
@@ -531,9 +463,12 @@ export class DefaultResourceLoader implements ResourceLoader {
 		);
 		this.systemPrompt = this.systemPromptOverride ? this.systemPromptOverride(baseSystemPrompt) : baseSystemPrompt;
 
-		const appendSource = this.appendSystemPromptSource ?? this.discoverAppendSystemPromptFile();
-		const resolvedAppend = resolvePromptInput(appendSource, "append system prompt");
-		const baseAppend = resolvedAppend ? [resolvedAppend] : [];
+		const appendSources =
+			this.appendSystemPromptSource ??
+			(this.discoverAppendSystemPromptFile() ? [this.discoverAppendSystemPromptFile()!] : []);
+		const baseAppend = appendSources
+			.map((s) => resolvePromptInput(s, "append system prompt"))
+			.filter((s): s is string => s !== undefined);
 		this.appendSystemPrompt = this.appendSystemPromptOverride
 			? this.appendSystemPromptOverride(baseAppend)
 			: baseAppend;
@@ -699,9 +634,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 			join(this.cwd, CONFIG_DIR_NAME, "prompts"),
 			join(this.cwd, CONFIG_DIR_NAME, "themes"),
 			join(this.cwd, CONFIG_DIR_NAME, "extensions"),
-			join(this.cwd, PIRE_DIR_NAME, "skills"),
-			join(this.cwd, PIRE_DIR_NAME, "prompts"),
-			join(this.cwd, PIRE_DIR_NAME, "extensions"),
 		];
 
 		for (const root of agentRoots) {
@@ -908,11 +840,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	private discoverSystemPromptFile(): string | undefined {
-		const pirePath = join(this.cwd, PIRE_DIR_NAME, "SYSTEM.md");
-		if (existsSync(pirePath)) {
-			return pirePath;
-		}
-
 		const projectPath = join(this.cwd, CONFIG_DIR_NAME, "SYSTEM.md");
 		if (existsSync(projectPath)) {
 			return projectPath;
@@ -927,11 +854,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	private discoverAppendSystemPromptFile(): string | undefined {
-		const pirePath = join(this.cwd, PIRE_DIR_NAME, "APPEND_SYSTEM.md");
-		if (existsSync(pirePath)) {
-			return pirePath;
-		}
-
 		const projectPath = join(this.cwd, CONFIG_DIR_NAME, "APPEND_SYSTEM.md");
 		if (existsSync(projectPath)) {
 			return projectPath;
@@ -943,34 +865,6 @@ export class DefaultResourceLoader implements ResourceLoader {
 		}
 
 		return undefined;
-	}
-
-	private getPireResourcePaths(resourceType: "skills" | "prompts" | "extensions"): string[] {
-		const paths: string[] = [];
-		const seen = new Set<string>();
-
-		const addDir = (dir: string) => {
-			if (seen.has(dir) || !existsSync(dir)) return;
-			seen.add(dir);
-			if (resourceType === "extensions") {
-				paths.push(...discoverExtensionEntriesInDir(dir));
-			} else {
-				paths.push(dir);
-			}
-		};
-
-		// 1. Agent-level (always loaded for this user)
-		addDir(join(this.agentDir, resourceType));
-
-		// 2. cwd's .pire/
-		addDir(join(this.cwd, PIRE_DIR_NAME, resourceType));
-
-		// 2. Pire repo's .pire/ (always loaded regardless of cwd)
-		// resource-loader.ts is at packages/coding-agent/src/core/ — 4 levels up = repo root
-		const repoDir = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
-		addDir(join(repoDir, PIRE_DIR_NAME, resourceType));
-
-		return paths;
 	}
 
 	private isUnderPath(target: string, root: string): boolean {

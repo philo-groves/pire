@@ -1,9 +1,0 @@
-{
-  "title": "Candidate TOCTOU session",
-  "expectation": {
-    "minNormalized": 0.4,
-    "maxIssues": 3,
-    "minRank": 2,
-    "maxRank": 2
-  }
-}

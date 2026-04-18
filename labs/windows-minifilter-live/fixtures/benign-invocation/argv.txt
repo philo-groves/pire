@@ -1,4 +1,0 @@
---register
---filter-name=user_logger
---altitude=60
---action=allow

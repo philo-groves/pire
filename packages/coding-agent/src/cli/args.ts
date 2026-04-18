@@ -15,7 +15,7 @@ export interface Args {
 	model?: string;
 	apiKey?: string;
 	systemPrompt?: string;
-	appendSystemPrompt?: string;
+	appendSystemPrompt?: string[];
 	thinking?: ThinkingLevel;
 	continue?: boolean;
 	resume?: boolean;
@@ -39,6 +39,7 @@ export interface Args {
 	noPromptTemplates?: boolean;
 	themes?: string[];
 	noThemes?: boolean;
+	noContextFiles?: boolean;
 	listModels?: string | true;
 	offline?: boolean;
 	verbose?: boolean;
@@ -88,7 +89,8 @@ export function parseArgs(args: string[]): Args {
 		} else if (arg === "--system-prompt" && i + 1 < args.length) {
 			result.systemPrompt = args[++i];
 		} else if (arg === "--append-system-prompt" && i + 1 < args.length) {
-			result.appendSystemPrompt = args[++i];
+			result.appendSystemPrompt = result.appendSystemPrompt ?? [];
+			result.appendSystemPrompt.push(args[++i]);
 		} else if (arg === "--no-session") {
 			result.noSession = true;
 		} else if (arg === "--session" && i + 1 < args.length) {
@@ -149,6 +151,8 @@ export function parseArgs(args: string[]): Args {
 			result.noPromptTemplates = true;
 		} else if (arg === "--no-themes") {
 			result.noThemes = true;
+		} else if (arg === "--no-context-files" || arg === "-nc") {
+			result.noContextFiles = true;
 		} else if (arg === "--list-models") {
 			// Check if next arg is a search pattern (not a flag or file arg)
 			if (i + 1 < args.length && !args[i + 1].startsWith("-") && !args[i + 1].startsWith("@")) {
@@ -197,7 +201,7 @@ export function printHelp(extensionFlags?: ExtensionFlag[]): void {
 					})
 					.join("\n")}\n`
 			: "";
-	console.log(`${chalk.bold(APP_NAME)} - AI coding assistant with read, webfetch, bash, edit, write tools
+	console.log(`${chalk.bold(APP_NAME)} - AI coding assistant with read, bash, edit, write tools
 
 ${chalk.bold("Usage:")}
   ${APP_NAME} [options] [@files...] [messages...]
@@ -216,7 +220,7 @@ ${chalk.bold("Options:")}
   --model <pattern>              Model pattern or ID (supports "provider/id" and optional ":<thinking>")
   --api-key <key>                API key (defaults to env vars)
   --system-prompt <text>         System prompt (default: coding assistant prompt)
-  --append-system-prompt <text>  Append text or file contents to the system prompt
+  --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
   --mode <mode>                  Output mode: text (default), json, or rpc
   --print, -p                    Non-interactive mode: process prompt and exit
   --continue, -c                 Continue previous session
@@ -228,8 +232,8 @@ ${chalk.bold("Options:")}
   --models <patterns>            Comma-separated model patterns for Ctrl+P cycling
                                  Supports globs (anthropic/*, *sonnet*) and fuzzy matching
   --no-tools                     Disable all built-in tools
-  --tools <tools>                Comma-separated list of tools to enable (default: read,webfetch,bash,edit,write)
-                                 Available: read, webfetch, bash, edit, write, grep, find, ls
+  --tools <tools>                Comma-separated list of tools to enable (default: read,bash,edit,write)
+                                 Available: read, bash, edit, write, grep, find, ls
   --thinking <level>             Set thinking level: off, minimal, low, medium, high, xhigh
   --extension, -e <path>         Load an extension file (can be used multiple times)
   --no-extensions, -ne           Disable extension discovery (explicit -e paths still work)
@@ -239,10 +243,11 @@ ${chalk.bold("Options:")}
   --no-prompt-templates, -np     Disable prompt template discovery and loading
   --theme <path>                 Load a theme file or directory (can be used multiple times)
   --no-themes                    Disable theme discovery and loading
+  --no-context-files, -nc        Disable AGENTS.md and CLAUDE.md discovery and loading
   --export <file>                Export session file to HTML and exit
   --list-models [search]         List available models (with optional fuzzy search)
   --verbose                      Force verbose startup (overrides quietStartup setting)
-  --offline                      Disable startup network operations (same as PIRE_OFFLINE=1)
+  --offline                      Disable startup network operations (same as PI_OFFLINE=1)
   --help, -h                     Show this help
   --version, -v                  Show version number
 
@@ -321,14 +326,14 @@ ${chalk.bold("Environment Variables:")}
   AWS_BEARER_TOKEN_BEDROCK         - Bedrock API key (bearer token)
   AWS_REGION                       - AWS region for Amazon Bedrock (e.g., us-east-1)
   ${ENV_AGENT_DIR.padEnd(32)} - Session storage directory (default: ~/${CONFIG_DIR_NAME}/agent)
-  PIRE_PACKAGE_DIR                 - Override package directory (for Nix/Guix store paths)
-  PIRE_OFFLINE                     - Disable startup network operations when set to 1/true/yes
-  PIRE_SHARE_VIEWER_URL            - Base URL for /share command (default: https://pire.dev/session/)
-  PIRE_AI_ANTIGRAVITY_VERSION      - Override Antigravity User-Agent version (e.g., 1.23.0)
+  PI_PACKAGE_DIR                   - Override package directory (for Nix/Guix store paths)
+  PI_OFFLINE                       - Disable startup network operations when set to 1/true/yes
+  PI_TELEMETRY                     - Override install telemetry when set to 1/true/yes or 0/false/no
+  PI_SHARE_VIEWER_URL              - Base URL for /share command (default: https://pi.dev/session/)
+  PI_AI_ANTIGRAVITY_VERSION        - Override Antigravity User-Agent version (e.g., 1.23.0)
 
-${chalk.bold("Available Tools (default: read, webfetch, bash, edit, write):")}
+${chalk.bold("Available Tools (default: read, bash, edit, write):")}
   read   - Read file contents
-  webfetch - Fetch HTTP/HTTPS pages directly
   bash   - Execute bash commands
   edit   - Edit files with find/replace
   write  - Write files (creates/overwrites)

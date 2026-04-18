@@ -1,2 +1,0 @@
---ioctl-code=0x00
---device=\\.\PiReDriver

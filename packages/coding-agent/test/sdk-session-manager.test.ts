@@ -63,35 +63,4 @@ describe("createAgentSession session manager defaults", () => {
 
 		session.dispose();
 	});
-
-	it("enables subagent and background task lifecycle tools by default", async () => {
-		const model = getModel("anthropic", "claude-sonnet-4-5");
-		expect(model).toBeTruthy();
-
-		const { session } = await createAgentSession({
-			cwd,
-			agentDir,
-			model: model!,
-		});
-
-		expect(session.getActiveToolNames()).toEqual(
-			expect.arrayContaining([
-				"spawn_agent",
-				"send_input",
-				"wait_agent",
-				"close_agent",
-				"start_background_task",
-				"wait_background_task",
-				"cancel_background_task",
-			]),
-		);
-		expect(session.systemPrompt).toContain(
-			"- wait_agent: Wait for a subagent to finish and return its latest report",
-		);
-		expect(session.systemPrompt).toContain(
-			"- wait_background_task: Wait for a background task and inspect its latest output",
-		);
-
-		session.dispose();
-	});
 });

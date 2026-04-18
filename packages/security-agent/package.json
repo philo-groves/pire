@@ -1,0 +1,54 @@
+{
+	"name": "@mariozechner/pi-security-agent",
+	"version": "0.67.6",
+	"description": "Security research agent CLI built directly on pi-agent-core and pi-ai",
+	"type": "module",
+	"bin": {
+		"pire": "dist/cli.js"
+	},
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"CHANGELOG.md"
+	],
+	"scripts": {
+		"clean": "shx rm -rf dist",
+		"build": "tsgo -p tsconfig.build.json && shx chmod +x dist/cli.js",
+		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
+		"prepublishOnly": "npm run clean && npm run build"
+	},
+	"dependencies": {
+		"@mariozechner/pi-agent-core": "^0.67.6",
+		"@mariozechner/pi-ai": "^0.67.6"
+	},
+	"devDependencies": {
+		"@types/node": "^24.3.0",
+		"shx": "^0.4.0",
+		"typescript": "^5.7.3"
+	},
+	"keywords": [
+		"security-agent",
+		"ai",
+		"llm",
+		"research",
+		"security"
+	],
+	"author": "Mario Zechner",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/badlogic/pi-mono.git",
+		"directory": "packages/security-agent"
+	},
+	"engines": {
+		"node": ">=20.0.0"
+	}
+}

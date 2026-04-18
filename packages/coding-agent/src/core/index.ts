@@ -7,15 +7,9 @@ export {
 	type AgentSessionConfig,
 	type AgentSessionEvent,
 	type AgentSessionEventListener,
-	type BackgroundTaskInfo,
-	type BackgroundTaskSessionEvent,
-	type BackgroundTaskStatus,
 	type ModelCycleResult,
 	type PromptOptions,
 	type SessionStats,
-	type SubagentInfo,
-	type SubagentSessionEvent,
-	type SubagentStatus,
 } from "./agent-session.js";
 export {
 	AgentSessionRuntime,

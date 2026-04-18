@@ -7,7 +7,7 @@
 
 import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { ImageContent, Model } from "@mariozechner/pi-ai";
-import type { AgentSessionEvent, BackgroundTaskInfo, SessionStats, SubagentInfo } from "../../core/agent-session.js";
+import type { SessionStats } from "../../core/agent-session.js";
 import type { BashResult } from "../../core/bash-executor.js";
 import type { CompactionResult } from "../../core/compaction/index.js";
 import type { SourceInfo } from "../../core/source-info.js";
@@ -60,17 +60,6 @@ export type RpcCommand =
 	| { id?: string; type: "get_fork_messages" }
 	| { id?: string; type: "get_last_assistant_text" }
 	| { id?: string; type: "set_session_name"; name: string }
-	| { id?: string; type: "spawn_subagent"; task: string; context?: string; maxTurns?: number }
-	| { id?: string; type: "send_subagent_input"; agentId: string; message: string }
-	| { id?: string; type: "wait_subagent"; agentId: string; timeoutMs?: number }
-	| { id?: string; type: "close_subagent"; agentId: string }
-	| { id?: string; type: "get_subagent_report"; agentId: string }
-	| { id?: string; type: "list_subagents" }
-	| { id?: string; type: "start_background_task"; command: string }
-	| { id?: string; type: "wait_background_task"; taskId: string; timeoutMs?: number }
-	| { id?: string; type: "cancel_background_task"; taskId: string }
-	| { id?: string; type: "get_background_task_report"; taskId: string }
-	| { id?: string; type: "list_background_tasks" }
 
 	// Messages
 	| { id?: string; type: "get_messages" }
@@ -198,35 +187,6 @@ export type RpcResponse =
 			data: { text: string | null };
 	  }
 	| { id?: string; type: "response"; command: "set_session_name"; success: true }
-	| { id?: string; type: "response"; command: "spawn_subagent"; success: true; data: SubagentInfo }
-	| { id?: string; type: "response"; command: "send_subagent_input"; success: true; data: SubagentInfo }
-	| { id?: string; type: "response"; command: "wait_subagent"; success: true; data: SubagentInfo }
-	| { id?: string; type: "response"; command: "close_subagent"; success: true; data: SubagentInfo }
-	| {
-			id?: string;
-			type: "response";
-			command: "get_subagent_report";
-			success: true;
-			data: { subagent: SubagentInfo; text: string | null };
-	  }
-	| { id?: string; type: "response"; command: "list_subagents"; success: true; data: { agents: SubagentInfo[] } }
-	| { id?: string; type: "response"; command: "start_background_task"; success: true; data: BackgroundTaskInfo }
-	| { id?: string; type: "response"; command: "wait_background_task"; success: true; data: BackgroundTaskInfo }
-	| { id?: string; type: "response"; command: "cancel_background_task"; success: true; data: BackgroundTaskInfo }
-	| {
-			id?: string;
-			type: "response";
-			command: "get_background_task_report";
-			success: true;
-			data: { task: BackgroundTaskInfo; text: string | null };
-	  }
-	| {
-			id?: string;
-			type: "response";
-			command: "list_background_tasks";
-			success: true;
-			data: { tasks: BackgroundTaskInfo[] };
-	  }
 
 	// Messages
 	| { id?: string; type: "response"; command: "get_messages"; success: true; data: { messages: AgentMessage[] } }
@@ -284,15 +244,6 @@ export type RpcExtensionUIRequest =
 	  }
 	| { type: "extension_ui_request"; id: string; method: "setTitle"; title: string }
 	| { type: "extension_ui_request"; id: string; method: "set_editor_text"; text: string };
-
-export interface RpcExtensionErrorEvent {
-	type: "extension_error";
-	extensionPath: string;
-	event: string;
-	error: string;
-}
-
-export type RpcEvent = AgentSessionEvent | RpcExtensionUIRequest | RpcExtensionErrorEvent;
 
 // ============================================================================
 // Extension UI Commands (stdin)

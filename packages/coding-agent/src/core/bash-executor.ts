@@ -7,13 +7,11 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { createWriteStream, existsSync, type WriteStream } from "node:fs";
+import { createWriteStream, type WriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawn } from "child_process";
 import stripAnsi from "strip-ansi";
-import { waitForChildProcess } from "../utils/child-process.js";
-import { getShellConfig, getShellEnv, killProcessTree, sanitizeBinaryOutput } from "../utils/shell.js";
+import { sanitizeBinaryOutput } from "../utils/shell.js";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.js";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./tools/truncate.js";
 
@@ -41,12 +39,6 @@ export interface BashResult {
 	fullOutputPath?: string;
 }
 
-export interface BackgroundBashTask {
-	pid: number | undefined;
-	wait: () => Promise<BashResult>;
-	cancel: () => void;
-}
-
 // ============================================================================
 // Implementation
 // ============================================================================
@@ -66,128 +58,6 @@ export interface BackgroundBashTask {
  */
 export function executeBash(command: string, options?: BashExecutorOptions): Promise<BashResult> {
 	return executeBashWithOperations(command, process.cwd(), createLocalBashOperations(), options);
-}
-
-export function startBackgroundBash(
-	command: string,
-	cwd: string,
-	options?: {
-		onChunk?: (chunk: string) => void;
-		env?: NodeJS.ProcessEnv;
-	},
-): BackgroundBashTask {
-	if (!existsSync(cwd)) {
-		throw new Error(`Working directory does not exist: ${cwd}\nCannot execute background bash commands.`);
-	}
-	const { shell, args } = getShellConfig();
-	const child = spawn(shell, [...args, command], {
-		cwd,
-		detached: true,
-		env: options?.env ?? getShellEnv(),
-		stdio: ["ignore", "pipe", "pipe"],
-	});
-
-	const outputChunks: string[] = [];
-	let outputBytes = 0;
-	const maxOutputBytes = DEFAULT_MAX_BYTES * 2;
-
-	let tempFilePath: string | undefined;
-	let tempFileStream: WriteStream | undefined;
-	let totalBytes = 0;
-	let cancelled = false;
-
-	const ensureTempFile = () => {
-		if (tempFilePath) {
-			return;
-		}
-		const id = randomBytes(8).toString("hex");
-		tempFilePath = join(tmpdir(), `pi-bash-${id}.log`);
-		tempFileStream = createWriteStream(tempFilePath);
-		for (const chunk of outputChunks) {
-			tempFileStream.write(chunk);
-		}
-	};
-
-	const decoder = new TextDecoder();
-
-	const onData = (data: Buffer) => {
-		totalBytes += data.length;
-		const text = sanitizeBinaryOutput(stripAnsi(decoder.decode(data, { stream: true }))).replace(/\r/g, "");
-
-		if (totalBytes > DEFAULT_MAX_BYTES) {
-			ensureTempFile();
-		}
-
-		if (tempFileStream) {
-			tempFileStream.write(text);
-		}
-
-		outputChunks.push(text);
-		outputBytes += text.length;
-		while (outputBytes > maxOutputBytes && outputChunks.length > 1) {
-			const removed = outputChunks.shift()!;
-			outputBytes -= removed.length;
-		}
-
-		options?.onChunk?.(text);
-	};
-
-	child.stdout?.on("data", onData);
-	child.stderr?.on("data", onData);
-
-	const wait = waitForChildProcess(child)
-		.then((exitCode) => {
-			if (tempFileStream) {
-				tempFileStream.end();
-			}
-
-			const fullOutput = outputChunks.join("");
-			const truncationResult = truncateTail(fullOutput);
-			if (truncationResult.truncated) {
-				ensureTempFile();
-			}
-
-			return {
-				output: truncationResult.truncated ? truncationResult.content : fullOutput,
-				exitCode: cancelled ? undefined : (exitCode ?? undefined),
-				cancelled,
-				truncated: truncationResult.truncated,
-				fullOutputPath: tempFilePath,
-			} satisfies BashResult;
-		})
-		.catch((err) => {
-			if (tempFileStream) {
-				tempFileStream.end();
-			}
-
-			if (cancelled) {
-				const fullOutput = outputChunks.join("");
-				const truncationResult = truncateTail(fullOutput);
-				if (truncationResult.truncated) {
-					ensureTempFile();
-				}
-				return {
-					output: truncationResult.truncated ? truncationResult.content : fullOutput,
-					exitCode: undefined,
-					cancelled: true,
-					truncated: truncationResult.truncated,
-					fullOutputPath: tempFilePath,
-				} satisfies BashResult;
-			}
-
-			throw err;
-		});
-
-	return {
-		pid: child.pid,
-		wait: () => wait,
-		cancel: () => {
-			cancelled = true;
-			if (child.pid) {
-				killProcessTree(child.pid);
-			}
-		},
-	};
 }
 
 /**

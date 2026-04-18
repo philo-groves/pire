@@ -276,6 +276,17 @@ Content`,
 			expect(agentsFiles.some((f) => f.path.includes("AGENTS.md"))).toBe(true);
 		});
 
+		it("should skip AGENTS.md and CLAUDE.md discovery when noContextFiles is true", async () => {
+			writeFileSync(join(cwd, "AGENTS.md"), "# Project Guidelines\n\nBe helpful.");
+			writeFileSync(join(cwd, "CLAUDE.md"), "# Claude Guidelines\n\nBe helpful.");
+
+			const loader = new DefaultResourceLoader({ cwd, agentDir, noContextFiles: true });
+			await loader.reload();
+
+			const { agentsFiles } = loader.getAgentsFiles();
+			expect(agentsFiles).toEqual([]);
+		});
+
 		it("should discover SYSTEM.md from cwd/.pi", async () => {
 			const piDir = join(cwd, ".pi");
 			mkdirSync(piDir, { recursive: true });
@@ -296,82 +307,6 @@ Content`,
 			await loader.reload();
 
 			expect(loader.getAppendSystemPrompt()).toContain("Additional instructions.");
-		});
-
-		it("should discover .pire context files, system prompt, and append prompt", async () => {
-			const pireDir = join(cwd, ".pire");
-			mkdirSync(pireDir, { recursive: true });
-			writeFileSync(join(cwd, "AGENTS.md"), "# Project Rules\n\nBase guidance.");
-			writeFileSync(join(pireDir, "SYSTEM.md"), "You are the pire base prompt.");
-			writeFileSync(join(pireDir, "TARGET.md"), "# Target\n\nFirmware sample A.");
-			writeFileSync(join(pireDir, "NOTES.md"), "# Notes\n\nCrash reproduces on startup.");
-			writeFileSync(join(pireDir, "APPEND_SYSTEM.md"), "Research-first instructions.");
-
-			const loader = new DefaultResourceLoader({ cwd, agentDir });
-			await loader.reload();
-
-			const { agentsFiles } = loader.getAgentsFiles();
-			expect(agentsFiles.map((file) => file.path)).toEqual([
-				join(cwd, "AGENTS.md"),
-				join(pireDir, "TARGET.md"),
-				join(pireDir, "NOTES.md"),
-			]);
-			expect(loader.getSystemPrompt()).toBe("You are the pire base prompt.");
-			expect(loader.getAppendSystemPrompt()).toContain("Research-first instructions.");
-		});
-
-		it("should discover skills and prompts from .pire", async () => {
-			const pirePromptDir = join(cwd, ".pire", "prompts");
-			const pireSkillDir = join(cwd, ".pire", "skills", "binary-triage");
-			mkdirSync(pirePromptDir, { recursive: true });
-			mkdirSync(pireSkillDir, { recursive: true });
-			writeFileSync(
-				join(pirePromptDir, "triage-binary.md"),
-				`---
-description: Binary triage
----
-Prompt body.`,
-			);
-			writeFileSync(
-				join(pireSkillDir, "SKILL.md"),
-				`---
-name: binary-triage
-description: Analyze a binary sample.
----
-Skill body.`,
-			);
-
-			const loader = new DefaultResourceLoader({ cwd, agentDir });
-			await loader.reload();
-
-			const prompt = loader.getPrompts().prompts.find((entry) => entry.name === "triage-binary");
-			expect(prompt?.filePath).toBe(join(pirePromptDir, "triage-binary.md"));
-			expect(prompt?.sourceInfo.scope).toBe("project");
-
-			const skill = loader.getSkills().skills.find((entry) => entry.name === "binary-triage");
-			expect(skill?.filePath).toBe(join(pireSkillDir, "SKILL.md"));
-			expect(skill?.sourceInfo.scope).toBe("project");
-		});
-
-		it("should discover extensions from .pire", async () => {
-			const pireExtensionDir = join(cwd, ".pire", "extensions");
-			mkdirSync(pireExtensionDir, { recursive: true });
-			writeFileSync(
-				join(pireExtensionDir, "pire-test.ts"),
-				`export default function(pi) {
-	pi.registerCommand("pire-test", {
-		description: "pire extension command",
-		handler: async () => {},
-	});
-}`,
-			);
-
-			const loader = new DefaultResourceLoader({ cwd, agentDir });
-			await loader.reload();
-
-			const extension = loader.getExtensions().extensions.find((entry) => entry.path.endsWith("pire-test.ts"));
-			expect(extension).toBeDefined();
-			expect(extension?.sourceInfo.scope).toBe("project");
 		});
 	});
 

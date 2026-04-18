@@ -30,16 +30,6 @@ export interface AppKeybindings {
 	"app.session.tree": true;
 	"app.session.fork": true;
 	"app.session.resume": true;
-	"app.subagent.previous": true;
-	"app.subagent.next": true;
-	"app.subagent.wait": true;
-	"app.subagent.close": true;
-	"app.subagent.copy": true;
-	"app.backgroundTask.previous": true;
-	"app.backgroundTask.next": true;
-	"app.backgroundTask.wait": true;
-	"app.backgroundTask.cancel": true;
-	"app.backgroundTask.copy": true;
 	"app.tree.foldOrUp": true;
 	"app.tree.unfoldOrDown": true;
 	"app.tree.editLabel": true;
@@ -62,7 +52,10 @@ export const KEYBINDINGS = {
 	"app.interrupt": { defaultKeys: "escape", description: "Cancel or abort" },
 	"app.clear": { defaultKeys: "ctrl+c", description: "Clear editor" },
 	"app.exit": { defaultKeys: "ctrl+d", description: "Exit when editor is empty" },
-	"app.suspend": { defaultKeys: "ctrl+z", description: "Suspend to background" },
+	"app.suspend": {
+		defaultKeys: process.platform === "win32" ? [] : "ctrl+z",
+		description: "Suspend to background",
+	},
 	"app.thinking.cycle": {
 		defaultKeys: "shift+tab",
 		description: "Cycle thinking level",
@@ -105,46 +98,6 @@ export const KEYBINDINGS = {
 	"app.session.tree": { defaultKeys: [], description: "Open session tree" },
 	"app.session.fork": { defaultKeys: [], description: "Fork current session" },
 	"app.session.resume": { defaultKeys: [], description: "Resume a session" },
-	"app.subagent.previous": {
-		defaultKeys: "alt+k",
-		description: "Select previous subagent row",
-	},
-	"app.subagent.next": {
-		defaultKeys: "alt+j",
-		description: "Select next subagent row",
-	},
-	"app.subagent.wait": {
-		defaultKeys: "alt+w",
-		description: "Wait for selected subagent",
-	},
-	"app.subagent.close": {
-		defaultKeys: "alt+x",
-		description: "Close selected subagent",
-	},
-	"app.subagent.copy": {
-		defaultKeys: "alt+c",
-		description: "Copy selected subagent report",
-	},
-	"app.backgroundTask.previous": {
-		defaultKeys: "alt+shift+k",
-		description: "Select previous background task row",
-	},
-	"app.backgroundTask.next": {
-		defaultKeys: "alt+shift+j",
-		description: "Select next background task row",
-	},
-	"app.backgroundTask.wait": {
-		defaultKeys: "alt+shift+w",
-		description: "Wait for selected background task",
-	},
-	"app.backgroundTask.cancel": {
-		defaultKeys: "alt+shift+x",
-		description: "Cancel selected background task",
-	},
-	"app.backgroundTask.copy": {
-		defaultKeys: "alt+shift+c",
-		description: "Copy selected background task output",
-	},
 	"app.tree.foldOrUp": {
 		defaultKeys: ["ctrl+left", "alt+left"],
 		description: "Fold tree branch or move up",
@@ -234,16 +187,6 @@ const KEYBINDING_NAME_MIGRATIONS = {
 	tree: "app.session.tree",
 	fork: "app.session.fork",
 	resume: "app.session.resume",
-	selectPreviousSubagent: "app.subagent.previous",
-	selectNextSubagent: "app.subagent.next",
-	waitForSubagent: "app.subagent.wait",
-	closeSubagent: "app.subagent.close",
-	copySubagentReport: "app.subagent.copy",
-	selectPreviousBackgroundTask: "app.backgroundTask.previous",
-	selectNextBackgroundTask: "app.backgroundTask.next",
-	waitForBackgroundTask: "app.backgroundTask.wait",
-	cancelBackgroundTask: "app.backgroundTask.cancel",
-	copyBackgroundTaskReport: "app.backgroundTask.copy",
 	treeFoldOrUp: "app.tree.foldOrUp",
 	treeUnfoldOrDown: "app.tree.unfoldOrDown",
 	treeEditLabel: "app.tree.editLabel",

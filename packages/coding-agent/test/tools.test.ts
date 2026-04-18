@@ -9,7 +9,6 @@ import { findTool } from "../src/core/tools/find.js";
 import { grepTool } from "../src/core/tools/grep.js";
 import { lsTool } from "../src/core/tools/ls.js";
 import { readTool } from "../src/core/tools/read.js";
-import { createWebfetchTool, webfetchTool } from "../src/core/tools/webfetch.js";
 import { writeTool } from "../src/core/tools/write.js";
 import * as shellModule from "../src/utils/shell.js";
 
@@ -487,87 +486,6 @@ describe("Coding Agent Tools", () => {
 		});
 	});
 
-	describe("webfetch tool", () => {
-		it("should fetch textual content without shelling out", async () => {
-			const fetchCalls: Array<{ url: string; method: string }> = [];
-			const tool = createWebfetchTool({
-				operations: {
-					fetch: async (url, init) => {
-						fetchCalls.push({ url, method: init.method });
-						return {
-							url: "https://example.com/final",
-							status: 200,
-							statusText: "OK",
-							headers: [
-								["content-type", "text/html; charset=utf-8"],
-								["x-test", "yes"],
-							],
-							text: async () => "<html><body>Hello from webfetch</body></html>",
-						};
-					},
-				},
-			});
-
-			const result = await tool.execute("test-webfetch-1", { url: "https://example.com/docs" });
-			const output = getTextOutput(result);
-
-			expect(fetchCalls).toEqual([{ url: "https://example.com/docs", method: "GET" }]);
-			expect(output).toContain("URL: https://example.com/final");
-			expect(output).toContain("Status: 200 OK");
-			expect(output).toContain("content-type: text/html; charset=utf-8");
-			expect(output).toContain("Hello from webfetch");
-			expect(result.details?.finalUrl).toBe("https://example.com/final");
-		});
-
-		it("should support HEAD requests", async () => {
-			const result = await createWebfetchTool({
-				operations: {
-					fetch: async (_url, init) => {
-						expect(init.method).toBe("HEAD");
-						return {
-							url: "https://example.com/head",
-							status: 204,
-							statusText: "No Content",
-							headers: [["content-type", "text/plain"]],
-							text: async () => "should not be read",
-						};
-					},
-				},
-			}).execute("test-webfetch-2", { url: "https://example.com/head", method: "HEAD" });
-
-			const output = getTextOutput(result);
-			expect(output).toContain("Status: 204 No Content");
-			expect(output).toContain("Body: (HEAD request, no body fetched)");
-			expect(output).not.toContain("should not be read");
-		});
-
-		it("should reject unsupported URL schemes", async () => {
-			await expect(webfetchTool.execute("test-webfetch-3", { url: "file:///etc/passwd" })).rejects.toThrow(
-				/http:\/\/ and https:\/\//i,
-			);
-		});
-
-		it("should truncate large responses", async () => {
-			const largeBody = Array.from({ length: 2500 }, (_, index) => `Line ${index + 1}`).join("\n");
-			const result = await createWebfetchTool({
-				operations: {
-					fetch: async () => ({
-						url: "https://example.com/large",
-						status: 200,
-						statusText: "OK",
-						headers: [["content-type", "text/plain"]],
-						text: async () => largeBody,
-					}),
-				},
-			}).execute("test-webfetch-4", { url: "https://example.com/large" });
-
-			const output = getTextOutput(result);
-			expect(output).toContain("Line 1");
-			expect(output).toContain("[Showing first");
-			expect(result.details?.truncation?.truncated).toBe(true);
-		});
-	});
-
 	describe("grep tool", () => {
 		it("should include filename when searching a single file", async () => {
 			const testFile = join(testDir, "example.txt");
@@ -638,6 +556,15 @@ describe("Coding Agent Tools", () => {
 			const output = getTextOutput(result);
 			expect(output).toContain("kept.txt");
 			expect(output).not.toContain("ignored.txt");
+		});
+
+		it("should surface fd glob parse errors", async () => {
+			await expect(
+				findTool.execute("test-call-15", {
+					pattern: "[",
+					path: testDir,
+				}),
+			).rejects.toThrow(/error parsing glob|fd exited with code 1|fd error/i);
 		});
 	});
 

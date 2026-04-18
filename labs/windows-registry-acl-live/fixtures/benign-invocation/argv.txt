@@ -1,2 +1,0 @@
---query
---path=HKLM\SOFTWARE\App\Config
