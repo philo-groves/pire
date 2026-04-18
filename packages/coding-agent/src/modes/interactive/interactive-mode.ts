@@ -163,6 +163,33 @@ function isUnknownModel(model: Model<any> | undefined): boolean {
 	return !!model && model.provider === "unknown" && model.id === "unknown" && model.api === "unknown";
 }
 
+function getInteractiveBranding(): {
+	cliName: string;
+	productName: string;
+} {
+	const cliNameOverride = process.env.PI_CLI_BRAND_NAME?.trim();
+	const productNameOverride = process.env.PI_PRODUCT_BRAND_NAME?.trim();
+	if (cliNameOverride || productNameOverride) {
+		return {
+			cliName: cliNameOverride || APP_NAME,
+			productName: productNameOverride || cliNameOverride || (APP_NAME === "pi" ? "Pi" : APP_NAME),
+		};
+	}
+
+	const argvEntry = process.argv[1];
+	const invokedName = argvEntry ? path.basename(argvEntry, path.extname(argvEntry)) : "";
+	if (process.title === "pire" || invokedName === "pire") {
+		return {
+			cliName: "pire",
+			productName: "PiRE",
+		};
+	}
+	return {
+		cliName: APP_NAME,
+		productName: APP_NAME === "pi" ? "Pi" : APP_NAME,
+	};
+}
+
 function hasDefaultModelProvider(providerId: string): providerId is keyof typeof defaultModelPerProvider {
 	return providerId in defaultModelPerProvider;
 }
@@ -522,7 +549,8 @@ export class InteractiveMode {
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
+			const branding = getInteractiveBranding();
+			const logo = theme.bold(theme.fg("accent", branding.cliName)) + theme.fg("dim", ` v${this.version}`);
 
 			// Build startup instructions using keybinding hint helpers
 			const hint = (keybinding: AppKeybinding, description: string) => keyHint(keybinding, description);
@@ -561,7 +589,7 @@ export class InteractiveMode {
 			);
 			const onboarding = theme.fg(
 				"dim",
-				`Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.`,
+				`${branding.productName} can explain its own features and look up its docs. Ask it how to use or extend ${branding.productName}.`,
 			);
 			this.builtInHeader = new ExpandableText(
 				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
@@ -3304,7 +3332,7 @@ export class InteractiveMode {
 	}
 
 	showPackageUpdateNotification(packages: string[]): void {
-		const action = theme.fg("accent", `${APP_NAME} update`);
+		const action = theme.fg("accent", `${getInteractiveBranding().cliName} update`);
 		const updateInstruction = theme.fg("muted", "Package updates are available. Run ") + action;
 		const packageLines = packages.map((pkg) => `- ${pkg}`).join("\n");
 
