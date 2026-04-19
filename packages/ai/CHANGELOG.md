@@ -5,6 +5,7 @@
 ### Fixed
 
 - Fixed Anthropic and Bedrock adaptive-thinking payload tests to expect the default `display: "summarized"` field when reasoning is enabled.
+- Fixed stale OpenRouter Llama 4 test fixtures to use the current `meta-llama/llama-4-scout` model id instead of the removed `meta-llama/llama-4-maverick`.
 
 ## [0.67.6] - 2026-04-16
 

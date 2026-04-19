@@ -87,6 +87,52 @@ export function clampThinkingLevel(model: Model<Api>, requested: ThinkingLevel):
 	return requested;
 }
 
+export function resolveModelCommandInput(input: string, currentModel: Model<Api>): Model<Api> {
+	const trimmed = input.trim();
+	if (trimmed.length === 0) {
+		return currentModel;
+	}
+
+	const parts = trimmed.split(/\s+/).filter((part) => part.length > 0);
+	if (parts.length >= 2 && isKnownProvider(parts[0]!)) {
+		return resolveModel({ provider: parts[0]!, modelId: parts.slice(1).join(" ") });
+	}
+
+	if (trimmed.includes("/")) {
+		const separatorIndex = trimmed.indexOf("/");
+		const provider = trimmed.slice(0, separatorIndex);
+		const modelId = trimmed.slice(separatorIndex + 1);
+		if (!provider || !modelId) {
+			throw new Error(`Invalid model selector "${trimmed}". Use /model <provider>/<model-id>.`);
+		}
+		return resolveModel({ provider, modelId });
+	}
+
+	if (isKnownProvider(trimmed)) {
+		return resolveModel({ provider: trimmed });
+	}
+
+	if (isKnownProvider(currentModel.provider)) {
+		const currentProviderMatch = findModel(currentModel.provider, trimmed);
+		if (currentProviderMatch) {
+			return currentProviderMatch;
+		}
+	}
+
+	const matches = getProviders().flatMap((provider) =>
+		listProviderModels(provider).filter((model) => model.id === trimmed),
+	);
+	if (matches.length === 1) {
+		return matches[0]!;
+	}
+	if (matches.length > 1) {
+		const providers = Array.from(new Set(matches.map((model) => model.provider))).join(", ");
+		throw new Error(`Model "${trimmed}" is ambiguous across ${providers}. Use /model <provider>/<model-id>.`);
+	}
+
+	throw new Error(`Model "${trimmed}" not found.`);
+}
+
 export interface ResolveModelOptions {
 	provider?: string;
 	modelId?: string;

@@ -10,6 +10,7 @@ import {
 } from "./context.js";
 import { type DebugSpec, loadDebugSpec } from "./debug-spec.js";
 import { LogicMapStore } from "./logic-map/store.js";
+import { clampThinkingLevel } from "./models.js";
 import { NotebookStore } from "./notebook/store.js";
 import { SECURITY_SYSTEM_PROMPT } from "./prompt.js";
 import { seedSurfaceMapFromWorkspaceGraph } from "./surface-map/seed.js";
@@ -56,8 +57,6 @@ export class SecurityAgentRuntime {
 	readonly cwd: string;
 	readonly stateDir: string;
 	readonly workspaceRoot: string;
-	readonly model: Model<Api>;
-	readonly thinkingLevel: ThinkingLevel;
 	readonly logicMap: LogicMapStore;
 	readonly notebook: NotebookStore;
 	readonly surfaceMap: SurfaceMapStore;
@@ -74,8 +73,6 @@ export class SecurityAgentRuntime {
 	constructor(options: SecurityAgentRuntimeOptions) {
 		this.cwd = options.cwd;
 		this.stateDir = options.stateDir ?? options.cwd;
-		this.model = options.model;
-		this.thinkingLevel = options.thinkingLevel;
 		this.logicMap = new LogicMapStore(this.stateDir);
 		this.notebook = new NotebookStore(this.stateDir);
 		this.surfaceMap = new SurfaceMapStore(this.stateDir);
@@ -173,8 +170,29 @@ export class SecurityAgentRuntime {
 		return this.agent.subscribe(listener);
 	}
 
+	get model(): Model<Api> {
+		return this.agent.state.model;
+	}
+
+	get thinkingLevel(): ThinkingLevel {
+		return this.agent.state.thinkingLevel;
+	}
+
 	get state() {
 		return this.agent.state;
+	}
+
+	setModel(model: Model<Api>): ThinkingLevel {
+		this.agent.state.model = model;
+		const clampedThinkingLevel = clampThinkingLevel(model, this.agent.state.thinkingLevel);
+		this.agent.state.thinkingLevel = clampedThinkingLevel;
+		return clampedThinkingLevel;
+	}
+
+	setThinkingLevel(thinkingLevel: ThinkingLevel): ThinkingLevel {
+		const clampedThinkingLevel = clampThinkingLevel(this.agent.state.model, thinkingLevel);
+		this.agent.state.thinkingLevel = clampedThinkingLevel;
+		return clampedThinkingLevel;
 	}
 
 	async prompt(prompt: string): Promise<void> {

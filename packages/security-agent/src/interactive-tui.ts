@@ -17,6 +17,7 @@ import {
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
 import { createSecurityAgentKeybindings } from "./keybindings.js";
+import { parseThinkingLevel, resolveModelCommandInput } from "./models.js";
 import type { SecurityAgentRuntime } from "./runtime.js";
 import type { SurfaceRecord } from "./surface-map/store.js";
 import type { ResearchPlan } from "./tools/plan.js";
@@ -668,6 +669,8 @@ class SecurityConsoleApp implements Component, Focusable {
 				[
 					{ name: "status", description: "Ask the agent for a status summary" },
 					{ name: "plan", description: "Ask the agent to refresh the plan" },
+					{ name: "model", description: "Show or change the active model" },
+					{ name: "effort", description: "Show or change the reasoning effort" },
 					{ name: "surfaces", description: "Toggle the surfaces panel" },
 				],
 				this.runtime.workspaceRoot,
@@ -797,16 +800,93 @@ class SecurityConsoleApp implements Component, Focusable {
 	}
 
 	private handleLocalCommand(command: string): boolean {
-		const normalizedCommand = command.replace(/^\/+/, "/");
-		if (normalizedCommand !== "/surfaces") {
-			return false;
+		const normalizedCommand = command.trim().replace(/^\/+/, "/");
+		const [name = ""] = normalizedCommand.split(/\s+/, 1);
+		const args = normalizedCommand.slice(name.length).trim();
+		switch (name) {
+			case "/surfaces":
+				this.showSurfaces = !this.showSurfaces;
+				if (this.showSurfaces) {
+					this.surfaceScrollOffset = 0;
+				}
+				return true;
+			case "/model":
+				this.handleModelCommand(args);
+				return true;
+			case "/effort":
+				this.handleEffortCommand(args);
+				return true;
+			default:
+				return false;
+		}
+	}
+
+	private handleModelCommand(args: string): void {
+		const currentModel = this.runtime.model;
+		const currentThinkingLevel = this.runtime.thinkingLevel;
+		if (args.length === 0) {
+			this.pushNotice(
+				"model",
+				`Current model ${currentModel.provider}/${currentModel.id} at ${currentThinkingLevel} effort. Usage: /model <provider> <model-id>, /model <provider>/<model-id>, or /model <model-id>.`,
+				"neutral",
+			);
+			return;
 		}
 
-		this.showSurfaces = !this.showSurfaces;
-		if (this.showSurfaces) {
-			this.surfaceScrollOffset = 0;
+		try {
+			const nextModel = resolveModelCommandInput(args, currentModel);
+			const appliedThinkingLevel = this.runtime.setModel(nextModel);
+			if (currentModel.provider === nextModel.provider && currentModel.id === nextModel.id) {
+				this.pushNotice(
+					"model",
+					`Model remains ${nextModel.provider}/${nextModel.id} at ${appliedThinkingLevel} effort.${this.runtime.state.isStreaming ? " Applies on the next turn." : ""}`,
+					"neutral",
+				);
+				return;
+			}
+
+			const effortNote =
+				appliedThinkingLevel === currentThinkingLevel
+					? `${appliedThinkingLevel} effort`
+					: `${appliedThinkingLevel} effort (clamped from ${currentThinkingLevel})`;
+			this.pushNotice(
+				"model",
+				`Model set to ${nextModel.provider}/${nextModel.id} with ${effortNote}.${this.runtime.state.isStreaming ? " Applies on the next turn." : ""}`,
+				appliedThinkingLevel === currentThinkingLevel ? "success" : "warning",
+			);
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.pushNotice("model", message, "error");
 		}
-		return true;
+	}
+
+	private handleEffortCommand(args: string): void {
+		if (args.length === 0) {
+			this.pushNotice(
+				"effort",
+				`Current effort ${this.runtime.thinkingLevel}. Usage: /effort <off|minimal|low|medium|high|xhigh>.`,
+				"neutral",
+			);
+			return;
+		}
+
+		const requestedThinkingLevel = parseThinkingLevel(args);
+		if (!requestedThinkingLevel) {
+			this.pushNotice(
+				"effort",
+				`Invalid effort "${args}". Use one of: off, minimal, low, medium, high, xhigh.`,
+				"error",
+			);
+			return;
+		}
+
+		const appliedThinkingLevel = this.runtime.setThinkingLevel(requestedThinkingLevel);
+		const model = this.runtime.model;
+		const message =
+			appliedThinkingLevel === requestedThinkingLevel
+				? `Effort set to ${appliedThinkingLevel} for ${model.provider}/${model.id}.${this.runtime.state.isStreaming ? " Applies on the next turn." : ""}`
+				: `Effort ${requestedThinkingLevel} is not supported by ${model.provider}/${model.id}; using ${appliedThinkingLevel}.${this.runtime.state.isStreaming ? " Applies on the next turn." : ""}`;
+		this.pushNotice("effort", message, appliedThinkingLevel === requestedThinkingLevel ? "success" : "warning");
 	}
 
 	private scrollPlan(delta: number): void {
@@ -1239,7 +1319,7 @@ class SecurityConsoleApp implements Component, Focusable {
 	private renderComposer(width: number): string[] {
 		const inputWidth = Math.max(1, width - composerSurface.paddingX * 2);
 		const workspaceLabel = forceTildeHome(formatFooterWorkspacePath(this.runtime.workspaceRoot));
-		const modelLabel = `${this.runtime.model.id} ${this.runtime.thinkingLevel}`;
+		const modelLabel = `${this.runtime.state.model.id} ${this.runtime.state.thinkingLevel}`;
 		const stateBadge = this.runtime.state.isStreaming
 			? styles.bgBadge("LOCKED", 232, 208)
 			: styles.bgBadge("ARMED", 232, 114);
