@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import { type AutocompleteProvider, CombinedAutocompleteProvider } from "../src/autocomplete.js";
 import { Editor, wordWrapLine } from "../src/components/editor.js";
-import { TUI } from "../src/tui.js";
+import { CURSOR_MARKER, TUI } from "../src/tui.js";
 import { visibleWidth } from "../src/utils.js";
 import { defaultEditorTheme } from "./test-themes.js";
 import { VirtualTerminal } from "./virtual-terminal.js";
@@ -659,6 +659,22 @@ describe("Editor component", () => {
 			assert.ok(contentLine.includes("\x1b[7m"), "Should have reverse video cursor");
 
 			// Line should still be correct width
+			assert.strictEqual(visibleWidth(contentLine), width);
+		});
+
+		it("uses the hardware cursor marker instead of reverse video when enabled", () => {
+			const tui = createTestTUI();
+			tui.setShowHardwareCursor(true);
+			const editor = new Editor(tui, defaultEditorTheme);
+			const width = 20;
+
+			editor.focused = true;
+			editor.setText("A✅B");
+			const lines = editor.render(width);
+
+			const contentLine = lines[1]!;
+			assert.ok(contentLine.includes(CURSOR_MARKER), "Should emit hardware cursor marker");
+			assert.ok(!contentLine.includes("\x1b[7m"), "Should not render reverse video cursor");
 			assert.strictEqual(visibleWidth(contentLine), width);
 		});
 

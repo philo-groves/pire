@@ -1,6 +1,7 @@
 import assert from "node:assert";
 import { describe, it } from "node:test";
 import { Input } from "../src/components/input.js";
+import { CURSOR_MARKER } from "../src/tui.js";
 import { visibleWidth } from "../src/utils.js";
 
 describe("Input component", () => {
@@ -79,6 +80,21 @@ describe("Input component", () => {
 
 			const [line] = input.render(width);
 			assert.ok(line);
+			assert.ok(visibleWidth(line) <= width);
+		});
+
+		it("uses the hardware cursor marker instead of reverse video when enabled", () => {
+			const input = new Input();
+			const width = 20;
+
+			input.setValue("hello");
+			input.focused = true;
+			input.useHardwareCursor = true;
+
+			const [line] = input.render(width);
+			assert.ok(line);
+			assert.ok(line.includes(CURSOR_MARKER));
+			assert.ok(!line.includes("\x1b[7m"));
 			assert.ok(visibleWidth(line) <= width);
 		});
 	});

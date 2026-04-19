@@ -12,3 +12,4 @@
 
 ### Changed
 - Compact the interactive plan panel by removing `[output truncated]` labels from snapshot summaries, collapsing plan step whitespace, and using `Shift+Up`/`Shift+Down` for plan scrolling plus `Shift+Left`/`Shift+Right` for surfaces scrolling.
+- Switched the interactive composer and auth prompt inputs to the terminal hardware cursor instead of a static rendered block cursor.

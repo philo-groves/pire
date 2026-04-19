@@ -465,6 +465,7 @@ export class Editor implements Component, Focusable {
 		// Render each visible layout line
 		// Emit hardware cursor marker only when focused and not showing autocomplete
 		const emitCursorMarker = this.focused && !this.autocompleteState;
+		const useHardwareCursor = emitCursorMarker && this.tui.getShowHardwareCursor();
 
 		for (const layoutLine of visibleLines) {
 			let displayText = layoutLine.text;
@@ -479,7 +480,9 @@ export class Editor implements Component, Focusable {
 				// Hardware cursor marker (zero-width, emitted before fake cursor for IME positioning)
 				const marker = emitCursorMarker ? CURSOR_MARKER : "";
 
-				if (after.length > 0) {
+				if (useHardwareCursor) {
+					displayText = before + marker + after;
+				} else if (after.length > 0) {
 					// Cursor is on a character (grapheme) - replace it with highlighted version
 					// Get the first grapheme from 'after'
 					const afterGraphemes = [...this.segment(after)];

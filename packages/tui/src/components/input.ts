@@ -20,6 +20,7 @@ export class Input implements Component, Focusable {
 	private cursor: number = 0; // Cursor position in the value
 	public onSubmit?: (value: string) => void;
 	public onEscape?: () => void;
+	public useHardwareCursor: boolean = false;
 
 	/** Focusable interface - set by TUI when focus changes */
 	focused: boolean = false;
@@ -488,10 +489,10 @@ export class Input implements Component, Focusable {
 
 		// Hardware cursor marker (zero-width, emitted before fake cursor for IME positioning)
 		const marker = this.focused ? CURSOR_MARKER : "";
-
-		// Use inverse video to show cursor
-		const cursorChar = `\x1b[7m${atCursor}\x1b[27m`; // ESC[7m = reverse video, ESC[27m = normal
-		const textWithCursor = beforeCursor + marker + cursorChar + afterCursor;
+		const reverseVideoCursor = `\x1b[7m${atCursor}\x1b[27m`;
+		const textWithCursor = this.useHardwareCursor
+			? `${beforeCursor}${marker}${atCursor}${afterCursor}`
+			: `${beforeCursor}${marker}${reverseVideoCursor}${afterCursor}`;
 
 		// Calculate visual width
 		const visualLength = visibleWidth(textWithCursor);

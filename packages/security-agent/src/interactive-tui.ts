@@ -1136,6 +1136,7 @@ class SecurityConsoleApp implements Component, Focusable {
 			cancelling: false,
 		};
 
+		dialog.input.useHardwareCursor = this.ui.getShowHardwareCursor();
 		dialog.input.focused = this.focused;
 		dialog.input.onSubmit = (value) => {
 			const pendingInput = dialog.pendingInput;
@@ -1960,11 +1961,12 @@ export async function runInteractiveTui(runtime: SecurityAgentRuntime): Promise<
 
 	const terminal = new ProcessTerminal();
 	const ui = new TUI(terminal);
+	ui.setShowHardwareCursor(true);
 	const app = new SecurityConsoleApp(runtime, ui);
 
 	ui.addChild(app);
 	ui.setFocus(app);
-	ui.terminal.setTitle("pire // red cell console");
+	ui.terminal.setTitle("pire // security agent");
 	ui.start();
 
 	try {
