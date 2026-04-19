@@ -195,6 +195,16 @@ export class SecurityAgentRuntime {
 		return clampedThinkingLevel;
 	}
 
+	reset(): void {
+		this.agent.reset();
+		this.planState.current = undefined;
+		if (this.validationState) {
+			this.validationState.attempts = 0;
+			this.validationState.lastResult = undefined;
+			this.validationState.history = [];
+		}
+	}
+
 	async prompt(prompt: string): Promise<void> {
 		const startingAttempts = this.validationState?.attempts ?? 0;
 		await this.agent.prompt(prompt);

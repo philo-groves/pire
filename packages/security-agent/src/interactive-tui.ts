@@ -1,7 +1,9 @@
+import { spawn } from "node:child_process";
 import { homedir, userInfo } from "node:os";
 import { basename, relative, resolve } from "node:path";
 import type { AgentEvent, AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@mariozechner/pi-ai";
+import type { OAuthProviderInterface } from "@mariozechner/pi-ai/oauth";
 import {
 	CombinedAutocompleteProvider,
 	type Component,
@@ -9,6 +11,7 @@ import {
 	type EditorTheme,
 	type Focusable,
 	getKeybindings,
+	Input,
 	ProcessTerminal,
 	setKeybindings,
 	TUI,
@@ -16,6 +19,13 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@mariozechner/pi-tui";
+import {
+	getAvailableOAuthProviders,
+	getConfiguredOAuthProviderIds,
+	getDefaultAuthPath,
+	loginWithOAuthProvider,
+	logoutOAuthProvider,
+} from "./auth.js";
 import { createSecurityAgentKeybindings } from "./keybindings.js";
 import { parseThinkingLevel, resolveModelCommandInput } from "./models.js";
 import type { SecurityAgentRuntime } from "./runtime.js";
@@ -80,6 +90,32 @@ type FilledTone = {
 	thinking: (text: string) => string;
 	error: (text: string) => string;
 };
+
+interface OAuthSelectorState {
+	mode: "login" | "logout";
+	providers: OAuthProviderInterface[];
+	selectedIndex: number;
+}
+
+interface OAuthDialogState {
+	providerId: string;
+	providerName: string;
+	input: Input;
+	abortController: AbortController;
+	authUrl?: string;
+	instructions?: string;
+	waitingMessage?: string;
+	progressMessages: string[];
+	promptMessage?: string;
+	promptPlaceholder?: string;
+	pendingInput?:
+		| {
+				resolve: (value: string) => void;
+				reject: (error: Error) => void;
+		  }
+		| undefined;
+	cancelling: boolean;
+}
 
 function sgr(codes: string, text: string): string {
 	return `\x1b[${codes}m${text}\x1b[0m`;
@@ -411,6 +447,28 @@ function formatRelativePath(basePath: string, targetPath: string): string {
 	return formatPath(targetPath);
 }
 
+function openExternalUrl(url: string): void {
+	try {
+		if (process.platform === "win32") {
+			const child = spawn("cmd", ["/c", "start", "", url], {
+				detached: true,
+				stdio: "ignore",
+			});
+			child.unref();
+			return;
+		}
+
+		const command = process.platform === "darwin" ? "open" : "xdg-open";
+		const child = spawn(command, [url], {
+			detached: true,
+			stdio: "ignore",
+		});
+		child.unref();
+	} catch {
+		// Browser open failures are non-fatal; the URL stays visible in the TUI.
+	}
+}
+
 function fitLine(text: string, width: number): string {
 	if (width <= 0) {
 		return "";
@@ -614,6 +672,10 @@ function keyHint(
 	id:
 		| "tui.input.submit"
 		| "tui.input.newLine"
+		| "tui.select.up"
+		| "tui.select.down"
+		| "tui.select.confirm"
+		| "tui.select.cancel"
 		| "app.exit"
 		| "app.plan.scrollUp"
 		| "app.plan.scrollDown"
@@ -637,6 +699,8 @@ class SecurityConsoleApp implements Component, Focusable {
 	private planScrollOffset = 0;
 	private showSurfaces = false;
 	private surfaceScrollOffset = 0;
+	private oauthSelector?: OAuthSelectorState;
+	private oauthDialog?: OAuthDialogState;
 	private _focused = false;
 
 	get focused(): boolean {
@@ -646,6 +710,9 @@ class SecurityConsoleApp implements Component, Focusable {
 	set focused(value: boolean) {
 		this._focused = value;
 		this.editor.focused = value;
+		if (this.oauthDialog) {
+			this.oauthDialog.input.focused = value;
+		}
 	}
 
 	constructor(
@@ -667,8 +734,10 @@ class SecurityConsoleApp implements Component, Focusable {
 		this.editor.setAutocompleteProvider(
 			new CombinedAutocompleteProvider(
 				[
+					{ name: "login", description: "Login with an OAuth provider" },
+					{ name: "logout", description: "Logout from an OAuth provider" },
+					{ name: "new", description: "Start a new conversation" },
 					{ name: "status", description: "Ask the agent for a status summary" },
-					{ name: "plan", description: "Ask the agent to refresh the plan" },
 					{ name: "model", description: "Show or change the active model" },
 					{ name: "effort", description: "Show or change the reasoning effort" },
 					{ name: "surfaces", description: "Toggle the surfaces panel" },
@@ -711,10 +780,21 @@ class SecurityConsoleApp implements Component, Focusable {
 
 	invalidate(): void {
 		this.editor.invalidate();
+		this.oauthDialog?.input.invalidate();
 	}
 
 	handleInput(data: string): void {
 		const keybindings = getKeybindings();
+
+		if (this.oauthDialog) {
+			this.handleOAuthDialogInput(data);
+			return;
+		}
+
+		if (this.oauthSelector) {
+			this.handleOAuthSelectorInput(data);
+			return;
+		}
 
 		if (this.hasPlan() && keybindings.matches(data, "app.plan.scrollUp")) {
 			this.scrollPlan(-1);
@@ -764,7 +844,7 @@ class SecurityConsoleApp implements Component, Focusable {
 		const snapshot = this.renderSnapshot(effectiveWidth);
 		this.editor.disableSubmit = this.runtime.state.isStreaming;
 		this.editor.borderColor = styles.subtle;
-		const composer = this.renderComposer(effectiveWidth);
+		const composer = this.renderActiveInputSection(effectiveWidth);
 		const timeline = this.renderTimeline(effectiveWidth);
 		const bottomSections = snapshot.length > 0 ? ["", ...snapshot, "", ...composer] : ["", ...composer];
 		const spacerCount = Math.max(0, this.ui.terminal.rows - (timeline.length + bottomSections.length));
@@ -804,6 +884,15 @@ class SecurityConsoleApp implements Component, Focusable {
 		const [name = ""] = normalizedCommand.split(/\s+/, 1);
 		const args = normalizedCommand.slice(name.length).trim();
 		switch (name) {
+			case "/login":
+				this.handleLoginCommand(args);
+				return true;
+			case "/logout":
+				this.handleLogoutCommand(args);
+				return true;
+			case "/new":
+				this.handleNewCommand();
+				return true;
 			case "/surfaces":
 				this.showSurfaces = !this.showSurfaces;
 				if (this.showSurfaces) {
@@ -887,6 +976,296 @@ class SecurityConsoleApp implements Component, Focusable {
 				? `Effort set to ${appliedThinkingLevel} for ${model.provider}/${model.id}.${this.runtime.state.isStreaming ? " Applies on the next turn." : ""}`
 				: `Effort ${requestedThinkingLevel} is not supported by ${model.provider}/${model.id}; using ${appliedThinkingLevel}.${this.runtime.state.isStreaming ? " Applies on the next turn." : ""}`;
 		this.pushNotice("effort", message, appliedThinkingLevel === requestedThinkingLevel ? "success" : "warning");
+	}
+
+	private handleLoginCommand(args: string): void {
+		const providerId = args.trim();
+		if (providerId.length === 0) {
+			this.openOAuthSelector("login");
+			return;
+		}
+
+		const provider = getAvailableOAuthProviders().find((candidate) => candidate.id === providerId);
+		if (!provider) {
+			const availableProviders = getAvailableOAuthProviders()
+				.map((candidate) => candidate.id)
+				.join(", ");
+			this.pushNotice(
+				"login",
+				`Unknown OAuth provider "${providerId}". Available providers: ${availableProviders}.`,
+				"error",
+			);
+			return;
+		}
+
+		void this.beginOAuthLogin(provider.id);
+	}
+
+	private handleLogoutCommand(args: string): void {
+		const providerId = args.trim();
+		if (providerId.length === 0) {
+			this.openOAuthSelector("logout");
+			return;
+		}
+
+		this.performLogout(providerId);
+	}
+
+	private handleNewCommand(): void {
+		if (this.runtime.state.isStreaming) {
+			this.pushNotice("new", "Wait for the active run to finish before starting a new conversation.", "warning");
+			return;
+		}
+		if (this.oauthDialog || this.oauthSelector) {
+			this.pushNotice("new", "Finish the active OAuth flow before starting a new conversation.", "warning");
+			return;
+		}
+
+		this.runtime.reset();
+		this.timeline.length = 0;
+		this.toolsById.clear();
+		this.currentAssistantId = undefined;
+		this.runningTools = 0;
+		this.planScrollOffset = 0;
+		this.surfaceScrollOffset = 0;
+		this.editor.setText("");
+		this.pushNotice(
+			"session",
+			`Started a new conversation in ${basename(this.runtime.workspaceRoot)}. Workspace notes and surface state were preserved.`,
+			"neutral",
+		);
+		this.ui.requestRender();
+	}
+
+	private openOAuthSelector(mode: "login" | "logout"): void {
+		if (this.oauthDialog) {
+			this.pushNotice("auth", "Finish the active OAuth flow before opening another auth command.", "warning");
+			return;
+		}
+
+		const loggedInProviders = new Set(getConfiguredOAuthProviderIds());
+		const providers = getAvailableOAuthProviders().filter(
+			(provider) => mode === "login" || loggedInProviders.has(provider.id),
+		);
+		if (providers.length === 0) {
+			this.pushNotice(
+				mode,
+				mode === "login" ? "No OAuth providers are available." : "No OAuth providers are currently logged in.",
+				"warning",
+			);
+			return;
+		}
+
+		this.oauthSelector = { mode, providers, selectedIndex: 0 };
+		this.ui.requestRender();
+	}
+
+	private handleOAuthSelectorInput(data: string): void {
+		const selector = this.oauthSelector;
+		if (!selector) {
+			return;
+		}
+
+		const keybindings = getKeybindings();
+		if (keybindings.matches(data, "tui.select.up")) {
+			selector.selectedIndex = Math.max(0, selector.selectedIndex - 1);
+			this.ui.requestRender();
+			return;
+		}
+
+		if (keybindings.matches(data, "tui.select.down")) {
+			selector.selectedIndex = Math.min(selector.providers.length - 1, selector.selectedIndex + 1);
+			this.ui.requestRender();
+			return;
+		}
+
+		if (keybindings.matches(data, "tui.select.confirm")) {
+			const provider = selector.providers[selector.selectedIndex];
+			this.oauthSelector = undefined;
+			this.ui.requestRender();
+			if (!provider) {
+				return;
+			}
+			if (selector.mode === "login") {
+				void this.beginOAuthLogin(provider.id);
+			} else {
+				this.performLogout(provider.id);
+			}
+			return;
+		}
+
+		if (keybindings.matches(data, "tui.select.cancel")) {
+			this.oauthSelector = undefined;
+			this.ui.requestRender();
+		}
+	}
+
+	private createOAuthDialogState(providerId: string, providerName: string): OAuthDialogState {
+		const dialog: OAuthDialogState = {
+			providerId,
+			providerName,
+			input: new Input(),
+			abortController: new AbortController(),
+			progressMessages: [],
+			cancelling: false,
+		};
+
+		dialog.input.focused = this.focused;
+		dialog.input.onSubmit = (value) => {
+			const pendingInput = dialog.pendingInput;
+			if (!pendingInput) {
+				return;
+			}
+			dialog.pendingInput = undefined;
+			dialog.promptMessage = undefined;
+			dialog.promptPlaceholder = undefined;
+			dialog.waitingMessage = "Waiting for authentication to complete...";
+			pendingInput.resolve(value);
+			this.ui.requestRender();
+		};
+		dialog.input.onEscape = () => {
+			this.cancelOAuthDialog(dialog);
+		};
+
+		return dialog;
+	}
+
+	private requestOAuthDialogInput(dialog: OAuthDialogState, message: string, placeholder?: string): Promise<string> {
+		dialog.promptMessage = message;
+		dialog.promptPlaceholder = placeholder;
+		dialog.waitingMessage = undefined;
+		dialog.input.setValue("");
+		dialog.input.focused = this.focused;
+		this.ui.requestRender();
+
+		return new Promise<string>((resolve, reject) => {
+			dialog.pendingInput = { resolve, reject };
+		});
+	}
+
+	private cancelOAuthDialog(dialog: OAuthDialogState): void {
+		if (this.oauthDialog !== dialog || dialog.cancelling) {
+			return;
+		}
+
+		dialog.cancelling = true;
+		dialog.waitingMessage = "Cancelling login...";
+		dialog.abortController.abort();
+		if (dialog.pendingInput) {
+			dialog.pendingInput.reject(new Error("Login cancelled"));
+			dialog.pendingInput = undefined;
+		}
+		dialog.promptMessage = undefined;
+		dialog.promptPlaceholder = undefined;
+		this.ui.requestRender();
+	}
+
+	private handleOAuthDialogInput(data: string): void {
+		const dialog = this.oauthDialog;
+		if (!dialog) {
+			return;
+		}
+
+		if (dialog.pendingInput) {
+			dialog.input.handleInput(data);
+			return;
+		}
+
+		if (getKeybindings().matches(data, "tui.select.cancel")) {
+			this.cancelOAuthDialog(dialog);
+		}
+	}
+
+	private appendOAuthProgress(dialog: OAuthDialogState, message: string): void {
+		dialog.progressMessages = [...dialog.progressMessages, message].slice(-6);
+		dialog.waitingMessage = message;
+		this.ui.requestRender();
+	}
+
+	private async beginOAuthLogin(providerId: string): Promise<void> {
+		const provider = getAvailableOAuthProviders().find((candidate) => candidate.id === providerId);
+		if (!provider) {
+			this.pushNotice("login", `Unknown OAuth provider "${providerId}".`, "error");
+			return;
+		}
+		if (this.oauthDialog) {
+			this.pushNotice("login", "An OAuth login flow is already active.", "warning");
+			return;
+		}
+
+		const dialog = this.createOAuthDialogState(provider.id, provider.name);
+		this.oauthDialog = dialog;
+		this.ui.requestRender();
+
+		let manualCodePromise: Promise<string> | undefined;
+		try {
+			await loginWithOAuthProvider(provider.id, {
+				onAuth: (info) => {
+					dialog.authUrl = info.url;
+					dialog.instructions = info.instructions;
+					dialog.waitingMessage =
+						provider.usesCallbackServer || provider.id === "github-copilot"
+							? "Waiting for browser authentication..."
+							: undefined;
+					openExternalUrl(info.url);
+					if (provider.usesCallbackServer) {
+						manualCodePromise ??= this.requestOAuthDialogInput(
+							dialog,
+							"Paste the final redirect URL below, or complete login in the browser:",
+						);
+					}
+					this.ui.requestRender();
+				},
+				onPrompt: async (prompt) => {
+					return this.requestOAuthDialogInput(dialog, prompt.message, prompt.placeholder);
+				},
+				onProgress: (message) => {
+					this.appendOAuthProgress(dialog, message);
+				},
+				onManualCodeInput: () =>
+					manualCodePromise ??
+					this.requestOAuthDialogInput(
+						dialog,
+						"Paste the final redirect URL below, or complete login in the browser:",
+					),
+				signal: dialog.abortController.signal,
+			});
+
+			this.oauthDialog = undefined;
+			this.ui.requestRender();
+			this.pushNotice(
+				"login",
+				`Logged in to ${provider.name}. Credentials saved to ${getDefaultAuthPath()}.`,
+				"success",
+			);
+		} catch (error: unknown) {
+			this.oauthDialog = undefined;
+			this.ui.requestRender();
+			const message = error instanceof Error ? error.message : String(error);
+			if (message !== "Login cancelled") {
+				this.pushNotice("login", `Failed to login to ${provider.name}: ${message}`, "error");
+			}
+		}
+	}
+
+	private performLogout(providerId: string): void {
+		const provider = getAvailableOAuthProviders().find((candidate) => candidate.id === providerId);
+		const providerName = provider?.name ?? providerId;
+
+		try {
+			logoutOAuthProvider(providerId);
+			const isCurrentProvider = this.runtime.model.provider === providerId;
+			this.pushNotice(
+				"logout",
+				isCurrentProvider
+					? `Logged out of ${providerName}. Credentials removed from ${getDefaultAuthPath()}. Current model still targets that provider; switch models or /login again before the next turn.`
+					: `Logged out of ${providerName}. Credentials removed from ${getDefaultAuthPath()}.`,
+				isCurrentProvider ? "warning" : "success",
+			);
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.pushNotice("logout", `Failed to logout of ${providerName}: ${message}`, "error");
+		}
 	}
 
 	private scrollPlan(delta: number): void {
@@ -1316,13 +1695,31 @@ class SecurityConsoleApp implements Component, Focusable {
 		);
 	}
 
-	private renderComposer(width: number): string[] {
-		const inputWidth = Math.max(1, width - composerSurface.paddingX * 2);
+	private renderActiveInputSection(width: number): string[] {
+		if (this.oauthDialog) {
+			return this.renderOAuthDialog(width);
+		}
+		if (this.oauthSelector) {
+			return this.renderOAuthSelector(width);
+		}
+		return this.renderComposer(width);
+	}
+
+	private renderAppFooter(width: number): string {
 		const workspaceLabel = forceTildeHome(formatFooterWorkspacePath(this.runtime.workspaceRoot));
 		const modelLabel = `${this.runtime.state.model.id} ${this.runtime.state.thinkingLevel}`;
 		const stateBadge = this.runtime.state.isStreaming
 			? styles.bgBadge("LOCKED", 232, 208)
 			: styles.bgBadge("ARMED", 232, 114);
+		return renderAlignedLine(
+			styles.dim(`${modelLabel} • ${workspaceLabel} • ${keyHint("app.exit")} exit`),
+			stateBadge,
+			width,
+		);
+	}
+
+	private renderComposer(width: number): string[] {
+		const inputWidth = Math.max(1, width - composerSurface.paddingX * 2);
 		const editorLines = this.editor.render(inputWidth);
 		if (editorLines.length > 0 && isSolidRuleLine(editorLines[0]!)) {
 			editorLines.shift();
@@ -1333,18 +1730,102 @@ class SecurityConsoleApp implements Component, Focusable {
 				break;
 			}
 		}
-		const footer = renderAlignedLine(
-			styles.dim(`${modelLabel} • ${workspaceLabel} • ${keyHint("app.exit")} exit`),
-			stateBadge,
-			width,
-		);
 		return [
 			renderFilledLine("", width, composerSurface.paddingX),
 			...(editorLines.length > 0 ? editorLines : [""]).map((line) =>
 				renderFilledLine(line, width, composerSurface.paddingX),
 			),
 			renderFilledLine("", width, composerSurface.paddingX),
-			footer,
+			this.renderAppFooter(width),
+		];
+	}
+
+	private renderOAuthSelector(width: number): string[] {
+		const selector = this.oauthSelector;
+		if (!selector) {
+			return this.renderComposer(width);
+		}
+
+		const loggedInProviders = new Set(getConfiguredOAuthProviderIds());
+		const lines =
+			selector.providers.length > 0
+				? selector.providers.map((provider, index) => {
+						const prefix = index === selector.selectedIndex ? styles.yellow("> ") : "  ";
+						const name =
+							index === selector.selectedIndex ? styles.bright(provider.name) : styles.text(provider.name);
+						const providerId = styles.dim(`(${provider.id})`);
+						const status = loggedInProviders.has(provider.id) ? ` ${styles.green("logged in")}` : "";
+						return `${prefix}${name} ${providerId}${status}`;
+					})
+				: [
+						selector.mode === "login"
+							? styles.dim("no OAuth providers available")
+							: styles.dim("no OAuth providers are currently logged in"),
+					];
+
+		lines.push("");
+		lines.push(
+			styles.dim(
+				`${keyHint("tui.select.up")}/${keyHint("tui.select.down")} move • ${keyHint("tui.select.confirm")} select • ${keyHint("tui.select.cancel")} cancel`,
+			),
+		);
+
+		return [
+			...renderFilledBlock(
+				width,
+				`${brandBadge(selector.mode === "login" ? "LOGIN" : "LOGOUT")} ${styles.bright("select provider")}`,
+				lines,
+				filledTones.snapshotCard,
+			),
+			this.renderAppFooter(width),
+		];
+	}
+
+	private renderOAuthDialog(width: number): string[] {
+		const dialog = this.oauthDialog;
+		if (!dialog) {
+			return this.renderComposer(width);
+		}
+
+		const bodyWidth = Math.max(1, width - composerSurface.paddingX * 2);
+		const lines: string[] = [styles.dim(`provider ${dialog.providerId}`)];
+
+		if (dialog.authUrl) {
+			lines.push("");
+			lines.push(styles.cyan(dialog.authUrl));
+			lines.push(styles.dim("If your browser did not open automatically, copy this URL manually."));
+		}
+		if (dialog.instructions) {
+			lines.push("");
+			lines.push(styles.amber(dialog.instructions));
+		}
+		if (dialog.promptMessage) {
+			lines.push("");
+			lines.push(styles.text(dialog.promptMessage));
+			if (dialog.promptPlaceholder) {
+				lines.push(styles.dim(`e.g. ${dialog.promptPlaceholder}`));
+			}
+			lines.push(...dialog.input.render(bodyWidth));
+		} else if (dialog.waitingMessage) {
+			lines.push("");
+			lines.push(styles.dim(dialog.waitingMessage));
+		}
+		if (dialog.progressMessages.length > 0) {
+			lines.push("");
+			lines.push(styles.subtle("progress"));
+			lines.push(...dialog.progressMessages.map((message) => styles.dim(message)));
+		}
+		lines.push("");
+		lines.push(styles.dim(`${keyHint("tui.select.cancel")} cancel`));
+
+		return [
+			...renderFilledBlock(
+				width,
+				`${brandBadge("LOGIN")} ${styles.bright(dialog.providerName)}`,
+				lines,
+				filledTones.snapshotCard,
+			),
+			this.renderAppFooter(width),
 		];
 	}
 
