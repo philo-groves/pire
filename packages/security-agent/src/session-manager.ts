@@ -55,18 +55,39 @@ export interface ModelChangeEntry extends SessionEntryBase {
 	modelId: string;
 }
 
+export interface CompactionEntry extends SessionEntryBase {
+	type: "compaction";
+	summary: string;
+	firstKeptEntryId: string;
+	tokensBefore: number;
+}
+
 export interface SessionInfoEntry extends SessionEntryBase {
 	type: "session_info";
 	name?: string;
 }
 
-export type SessionEntry = SessionMessageEntry | ThinkingLevelChangeEntry | ModelChangeEntry | SessionInfoEntry;
+export type SessionEntry =
+	| SessionMessageEntry
+	| ThinkingLevelChangeEntry
+	| ModelChangeEntry
+	| CompactionEntry
+	| SessionInfoEntry;
 export type FileEntry = SessionHeader | SessionEntry;
+
+export interface PersistedCompactionSummary {
+	summary: string;
+	tokensBefore: number;
+	timestamp: string;
+	firstKeptEntryId: string;
+}
 
 export interface SessionContext {
 	messages: AgentMessage[];
+	messageEntryIds: string[];
 	thinkingLevel: ThinkingLevel;
 	model: { provider: string; modelId: string } | null;
+	compaction?: PersistedCompactionSummary;
 }
 
 export interface SessionInfo {
@@ -276,7 +297,7 @@ export function buildSessionContext(
 	const entryById = byId ?? new Map(entries.map((entry) => [entry.id, entry]));
 
 	if (leafId === null) {
-		return { messages: [], thinkingLevel: "off", model: null };
+		return { messages: [], messageEntryIds: [], thinkingLevel: "off", model: null };
 	}
 
 	let leaf = leafId ? entryById.get(leafId) : undefined;
@@ -285,7 +306,7 @@ export function buildSessionContext(
 	}
 
 	if (!leaf) {
-		return { messages: [], thinkingLevel: "off", model: null };
+		return { messages: [], messageEntryIds: [], thinkingLevel: "off", model: null };
 	}
 
 	const path: SessionEntry[] = [];
@@ -297,7 +318,9 @@ export function buildSessionContext(
 
 	let thinkingLevel: ThinkingLevel = "off";
 	let model: { provider: string; modelId: string } | null = null;
+	let latestCompaction: CompactionEntry | undefined;
 	const messages: AgentMessage[] = [];
+	const messageEntryIds: string[] = [];
 
 	for (const entry of path) {
 		if (entry.type === "thinking_level_change") {
@@ -313,11 +336,14 @@ export function buildSessionContext(
 			continue;
 		}
 
-		if (entry.type !== "message") {
-			continue;
+		if (entry.type === "compaction") {
+			latestCompaction = entry;
 		}
+	}
 
+	const appendMessage = (entry: SessionMessageEntry) => {
 		messages.push(entry.message);
+		messageEntryIds.push(entry.id);
 
 		if (entry.message.role === "assistant") {
 			const provider = (entry.message as { provider?: unknown }).provider;
@@ -326,9 +352,50 @@ export function buildSessionContext(
 				model = { provider, modelId };
 			}
 		}
+	};
+
+	if (latestCompaction) {
+		let foundFirstKept = false;
+		for (const entry of path) {
+			if (entry.id === latestCompaction.firstKeptEntryId) {
+				foundFirstKept = true;
+			}
+			if (!foundFirstKept || entry.type !== "message") {
+				continue;
+			}
+			appendMessage(entry);
+		}
+		if (!foundFirstKept) {
+			for (const entry of path) {
+				if (entry.type !== "message") {
+					continue;
+				}
+				appendMessage(entry);
+			}
+		}
+	} else {
+		for (const entry of path) {
+			if (entry.type !== "message") {
+				continue;
+			}
+			appendMessage(entry);
+		}
 	}
 
-	return { messages, thinkingLevel, model };
+	return {
+		messages,
+		messageEntryIds,
+		thinkingLevel,
+		model,
+		compaction: latestCompaction
+			? {
+					summary: latestCompaction.summary,
+					tokensBefore: latestCompaction.tokensBefore,
+					timestamp: latestCompaction.timestamp,
+					firstKeptEntryId: latestCompaction.firstKeptEntryId,
+				}
+			: undefined,
+	};
 }
 
 export function readSessionInfo(filePath: string): SessionInfo | undefined {
@@ -408,6 +475,26 @@ export function listSessions(cwd: string, sessionDir?: string): SessionInfo[] {
 	} catch {
 		return [];
 	}
+}
+
+export function readMostRecentThinkingLevel(cwd: string, sessionDir?: string): ThinkingLevel | undefined {
+	const normalizedCwd = resolve(cwd);
+	const session = listSessions(cwd, sessionDir).find((entry) => resolve(entry.cwd) === normalizedCwd);
+	if (!session) {
+		return undefined;
+	}
+
+	const fileEntries = loadEntriesFromFile(session.path);
+	if (fileEntries.length === 0) {
+		return undefined;
+	}
+
+	const entries = fileEntries.filter((entry): entry is SessionEntry => entry.type !== "session");
+	if (!entries.some((entry) => entry.type === "thinking_level_change")) {
+		return undefined;
+	}
+
+	return buildSessionContext(entries).thinkingLevel;
 }
 
 export class SessionManager {
@@ -508,9 +595,7 @@ export class SessionManager {
 		}
 
 		if (!this.flushed) {
-			for (const fileEntry of this.fileEntries) {
-				appendFileSync(this.sessionFile, `${JSON.stringify(fileEntry)}\n`);
-			}
+			this.rewriteFile();
 			this.flushed = true;
 			return;
 		}
@@ -581,12 +666,43 @@ export class SessionManager {
 		return entry.id;
 	}
 
+	appendCompaction(summary: string, firstKeptEntryId: string, tokensBefore: number): string {
+		const entry: CompactionEntry = {
+			type: "compaction",
+			id: generateEntryId(this.byId),
+			parentId: this.leafId,
+			timestamp: new Date().toISOString(),
+			summary,
+			firstKeptEntryId,
+			tokensBefore,
+		};
+		this.appendEntry(entry);
+		return entry.id;
+	}
+
 	hasEntryType(type: SessionEntry["type"]): boolean {
 		return this.fileEntries.some((entry) => entry.type === type);
 	}
 
 	buildSessionContext(): SessionContext {
 		return buildSessionContext(this.getEntries(), this.leafId, this.byId);
+	}
+
+	getLatestCompaction(): PersistedCompactionSummary | undefined {
+		const entries = this.getEntries();
+		for (let index = entries.length - 1; index >= 0; index--) {
+			const entry = entries[index];
+			if (entry?.type !== "compaction") {
+				continue;
+			}
+			return {
+				summary: entry.summary,
+				tokensBefore: entry.tokensBefore,
+				timestamp: entry.timestamp,
+				firstKeptEntryId: entry.firstKeptEntryId,
+			};
+		}
+		return undefined;
 	}
 
 	getEntries(): SessionEntry[] {
@@ -603,6 +719,14 @@ export class SessionManager {
 
 	getSessionDir(): string {
 		return this.sessionDir;
+	}
+
+	flush(): void {
+		if (!this.persist || !this.sessionFile) {
+			return;
+		}
+		this.rewriteFile();
+		this.flushed = true;
 	}
 
 	getCwd(): string {

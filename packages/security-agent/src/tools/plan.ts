@@ -26,6 +26,76 @@ export interface PlanState {
 	current?: ResearchPlan;
 }
 
+const PLAN_TERM_STOP_WORDS = new Set([
+	"the",
+	"and",
+	"for",
+	"with",
+	"from",
+	"into",
+	"onto",
+	"over",
+	"under",
+	"through",
+	"across",
+	"before",
+	"after",
+	"while",
+	"when",
+	"where",
+	"that",
+	"this",
+	"these",
+	"those",
+	"then",
+	"than",
+	"path",
+	"paths",
+	"flow",
+	"flows",
+	"file",
+	"files",
+	"real",
+	"smallest",
+	"current",
+	"fresh",
+	"next",
+	"map",
+	"inspect",
+	"identify",
+	"validate",
+	"review",
+	"drive",
+	"use",
+	"check",
+	"confirm",
+	"build",
+]);
+
+const PLAN_TERM_ALIASES: Record<string, string[]> = {
+	gap: ["mismatch"],
+	mismatch: ["gap"],
+	handler: ["handling"],
+	handling: ["handler"],
+	entrypoint: ["ingress"],
+	ingress: ["entrypoint"],
+};
+
+const PLAN_WRAP_UP_HINTS = [
+	"best next step",
+	"remaining blocker",
+	"what is still only a candidate",
+	"still only a candidate",
+	"not yet proven",
+	"haven't yet ruled out",
+	"have not yet proven",
+	"have not yet ruled out",
+	"if you want, i'll continue",
+	"if you want, i’ll continue",
+	"if you want, i'll",
+	"if you want, i’ll",
+];
+
 const planStepStatusSchema = Type.Union(
 	[Type.Literal("pending"), Type.Literal("in_progress"), Type.Literal("completed")],
 	{
@@ -138,6 +208,13 @@ function derivePhaseStatus(explicitStatus: PlanItemStatus | undefined, steps: Re
 	return explicitStatus ?? "pending";
 }
 
+function mergeStepStatus(previousStep: ResearchPlanStep, nextStep: ResearchPlanStep): PlanItemStatus {
+	if (previousStep.status === "completed") {
+		return "completed";
+	}
+	return nextStep.status;
+}
+
 function mergePlanSteps(previousSteps: ResearchPlanStep[], nextSteps: PlanPhaseInput["steps"]): ResearchPlanStep[] {
 	const incoming = nextSteps.map((step) => ({
 		key: normalizePlanKey(step.text),
@@ -153,7 +230,7 @@ function mergePlanSteps(previousSteps: ResearchPlanStep[], nextSteps: PlanPhaseI
 			match.matched = true;
 			merged.push({
 				text: match.step.text,
-				status: match.step.status ?? previousStep.status,
+				status: mergeStepStatus(previousStep, match.step),
 			});
 			continue;
 		}
@@ -230,6 +307,169 @@ export function mergeResearchPlan(previous: ResearchPlan | undefined, params: Pl
 
 export function isResearchPlanComplete(plan: ResearchPlan): boolean {
 	return plan.phases.length > 0 && plan.phases.every((phase) => phase.status === "completed");
+}
+
+function splitPlanTerms(text: string): string[] {
+	return (
+		text
+			.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+			.toLowerCase()
+			.match(/[a-z0-9]{3,}/g) ?? []
+	);
+}
+
+function normalizePlanTerm(term: string): string {
+	let normalized = term.trim().toLowerCase();
+	if (normalized.length > 5 && normalized.endsWith("ing")) {
+		normalized = normalized.slice(0, -3);
+	} else if (normalized.length > 4 && normalized.endsWith("ed")) {
+		normalized = normalized.slice(0, -2);
+	} else if (normalized.length > 4 && normalized.endsWith("es")) {
+		normalized = normalized.slice(0, -2);
+	} else if (normalized.length > 3 && normalized.endsWith("s")) {
+		normalized = normalized.slice(0, -1);
+	}
+	return normalized;
+}
+
+function extractPlanTerms(text: string): string[] {
+	const terms = splitPlanTerms(text)
+		.map((term) => normalizePlanTerm(term))
+		.filter((term) => term.length >= 3 && !PLAN_TERM_STOP_WORDS.has(term))
+		.flatMap((term) => [term, ...(PLAN_TERM_ALIASES[term] ?? [])]);
+	return [...new Set(terms)];
+}
+
+function shouldAutoCompleteStep(step: ResearchPlanStep, evidenceTerms: ReadonlySet<string>): boolean {
+	if (step.status === "completed") {
+		return false;
+	}
+
+	const stepTerms = extractPlanTerms(step.text);
+	if (stepTerms.length === 0) {
+		return false;
+	}
+
+	const matches = stepTerms.filter((term) => evidenceTerms.has(term)).length;
+	const coverage = matches / stepTerms.length;
+
+	if (matches >= 4) {
+		return true;
+	}
+	if (matches >= 3 && coverage >= 0.33) {
+		return true;
+	}
+	if (step.status === "in_progress" && matches >= 2 && coverage >= 0.25) {
+		return true;
+	}
+	return false;
+}
+
+function countCompletedSteps(steps: ResearchPlanStep[]): number {
+	return steps.filter((step) => step.status === "completed").length;
+}
+
+function hasPlanWrapUpSignal(evidenceText: string): boolean {
+	const normalized = evidenceText.toLowerCase();
+	return PLAN_WRAP_UP_HINTS.some((hint) => normalized.includes(hint));
+}
+
+export function reconcileResearchPlan(
+	plan: ResearchPlan | undefined,
+	evidenceText: string,
+): { plan: ResearchPlan | undefined; changed: boolean; cleared: boolean } {
+	if (!plan || evidenceText.trim().length === 0) {
+		return { plan, changed: false, cleared: false };
+	}
+
+	const evidenceTerms = new Set(extractPlanTerms(evidenceText));
+	if (evidenceTerms.size === 0) {
+		return { plan, changed: false, cleared: false };
+	}
+
+	let changed = false;
+	const phases = plan.phases.map((phase) => {
+		let phaseChanged = false;
+		let autoCompletedCount = 0;
+		const unfinishedBefore = phase.steps.filter((step) => step.status !== "completed");
+		const hasInProgressStep = unfinishedBefore.some((step) => step.status === "in_progress");
+		const firstUnfinishedStep = unfinishedBefore[0];
+		let nextSteps = phase.steps.map((step) => {
+			const canAutoComplete = phase.parallelSteps
+				? step.status !== "completed"
+				: step.status === "in_progress" || (!hasInProgressStep && firstUnfinishedStep === step);
+			if (!canAutoComplete || !shouldAutoCompleteStep(step, evidenceTerms)) {
+				return step;
+			}
+			phaseChanged = true;
+			autoCompletedCount++;
+			return completePlanStep(step);
+		});
+
+		if (!phase.parallelSteps && autoCompletedCount > 0) {
+			nextSteps = nextSteps.map((step) => {
+				if (step.status === "completed" || !shouldAutoCompleteStep(step, evidenceTerms)) {
+					return step;
+				}
+				phaseChanged = true;
+				autoCompletedCount++;
+				return completePlanStep(step);
+			});
+		}
+
+		if (!phase.parallelSteps) {
+			const unfinishedAfter = nextSteps.filter((step) => step.status !== "completed");
+			if (unfinishedAfter.length === 1 && unfinishedBefore.length === 1 && hasPlanWrapUpSignal(evidenceText)) {
+				nextSteps = nextSteps.map((step) => (step.status === "completed" ? step : completePlanStep(step)));
+				phaseChanged = true;
+			}
+		}
+
+		if (phase.parallelSteps) {
+			const unfinishedAfter = nextSteps.filter((step) => step.status !== "completed");
+			const autoCompletedThisTurn = countCompletedSteps(nextSteps) - countCompletedSteps(phase.steps);
+
+			if (
+				unfinishedAfter.length === 1 &&
+				unfinishedBefore.length >= 3 &&
+				autoCompletedThisTurn >= unfinishedBefore.length - 1
+			) {
+				nextSteps = nextSteps.map((step) => (step.status === "completed" ? step : completePlanStep(step)));
+				phaseChanged = true;
+			}
+		}
+
+		const nextStatus = derivePhaseStatus(phase.status, nextSteps);
+		if (nextStatus !== phase.status) {
+			phaseChanged = true;
+		}
+		if (phaseChanged) {
+			changed = true;
+		}
+
+		return {
+			name: phase.name,
+			parallelSteps: phase.parallelSteps,
+			steps: nextSteps,
+			status: nextStatus,
+		};
+	});
+
+	if (!changed) {
+		return { plan, changed: false, cleared: false };
+	}
+
+	const nextPlan: ResearchPlan = {
+		createdAt: plan.createdAt,
+		updatedAt: new Date().toISOString(),
+		phases,
+	};
+
+	if (isResearchPlanComplete(nextPlan)) {
+		return { plan: undefined, changed: true, cleared: true };
+	}
+
+	return { plan: nextPlan, changed: true, cleared: false };
 }
 
 export function formatPlan(plan: ResearchPlan): string {

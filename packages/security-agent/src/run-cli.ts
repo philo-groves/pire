@@ -7,6 +7,7 @@ import type { Api, Model } from "@mariozechner/pi-ai";
 import { runInteractiveTui } from "./interactive-tui.js";
 import { clampThinkingLevel, parseThinkingLevel, resolveModel } from "./models.js";
 import { SecurityAgentRuntime } from "./runtime.js";
+import { readMostRecentThinkingLevel } from "./session-manager.js";
 
 interface CliArgs {
 	provider?: string;
@@ -204,8 +205,13 @@ async function runReadlineInteractive(runtime: SecurityAgentRuntime): Promise<vo
 	}
 }
 
-function resolveThinking(requested: ThinkingLevel | undefined, model: Model<Api>): ThinkingLevel {
-	const desired = requested ?? (model.reasoning ? "medium" : "off");
+function resolveThinking(
+	requested: ThinkingLevel | undefined,
+	model: Model<Api>,
+	cwd: string,
+	sessionDir?: string,
+): ThinkingLevel {
+	const desired = requested ?? readMostRecentThinkingLevel(cwd, sessionDir) ?? (model.reasoning ? "medium" : "off");
 	return clampThinkingLevel(model, desired);
 }
 
@@ -228,7 +234,7 @@ export async function runCli(argv: string[]): Promise<number> {
 		stateDir: args.sessionDir ?? process.cwd(),
 		sessionDir: args.sessionDir,
 		model,
-		thinkingLevel: resolveThinking(args.thinkingLevel, model),
+		thinkingLevel: resolveThinking(args.thinkingLevel, model, process.cwd(), args.sessionDir),
 		debugSpecPath: args.debugSpecPath,
 		validationSpecPath: args.validationSpecPath,
 		proofRepairAttempts: args.proofRepairAttempts,

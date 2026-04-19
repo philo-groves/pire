@@ -465,6 +465,22 @@ function formatCount(value: number): string {
 	return `${(value / 1_000_000).toFixed(1)}M`;
 }
 
+function formatContextSize(value: number | undefined): string {
+	if (value === undefined || value <= 0) {
+		return "--";
+	}
+	if (value < 1000) {
+		return `${value}`;
+	}
+	if (value < 10_000) {
+		return `${(value / 1000).toFixed(1)}K`;
+	}
+	if (value < 1_000_000) {
+		return `${Math.round(value / 1000)}K`;
+	}
+	return `${(value / 1_000_000).toFixed(1)}M`;
+}
+
 function formatPath(path: string): string {
 	const rawPath = path.trim();
 	const normalizedPath = rawPath.replace(/\/+$/, "");
@@ -2425,13 +2441,9 @@ class SecurityConsoleApp implements Component, Focusable {
 		}
 
 		if (entry.thinking.trim().length > 0) {
-			const thinkingLines = limitLines(
-				renderMarkdownLines(entry.thinking, bodyWidth, filledTones.thinkingCard.body, {
-					color: filledTones.thinkingCard.body,
-				}),
-				entry.streaming ? 10 : 6,
-				filledTones.thinkingCard.meta("... thinking truncated"),
-			);
+			const thinkingLines = renderMarkdownLines(entry.thinking, bodyWidth, filledTones.thinkingCard.body, {
+				color: filledTones.thinkingCard.body,
+			});
 			const thinkingTitle = renderAlignedLine(
 				styles.bgBadge("THOUGHT", 231, 245),
 				filledTones.thinkingCard.meta(thoughtMetaText),
@@ -2529,7 +2541,8 @@ class SecurityConsoleApp implements Component, Focusable {
 	private renderAppFooter(width: number): string {
 		const workspaceLabel = forceTildeHome(formatFooterWorkspacePath(this.runtime.workspaceRoot));
 		const modelLabel = `${this.runtime.state.model.id} ${this.runtime.state.thinkingLevel}`;
-		const left = styles.dim(` ${modelLabel} • ${workspaceLabel} • ${keyHint("app.exit")} exit`);
+		const contextLabel = formatContextSize(this.runtime.estimatedContextTokens);
+		const left = styles.dim(` ${contextLabel} • ${modelLabel} • ${workspaceLabel} • ${keyHint("app.exit")} exit`);
 		if (!this.activeRunStartedAt) {
 			return fitLine(left, width);
 		}

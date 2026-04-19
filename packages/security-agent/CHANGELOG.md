@@ -36,6 +36,7 @@
 - Switched the interactive composer and auth prompt inputs to the terminal hardware cursor instead of a static rendered block cursor.
 - Switched the security-agent TUI primary accent color from yellow to blue to match the session and resume badges.
 - Retinted successful agent response cards, including startup `Recommended Actions`, to a dark blue-black background instead of the older warm yellow-black tone.
+- Replaced the old full-state injected prompt context with a budgeted working set built from durable research memory plus a predictive transcript compaction path, and persist compaction checkpoints into security-agent sessions so resumed conversations reload from the latest kept tail while still carrying the saved summary forward.
 - Simplified the startup `Recommended Actions` card by removing the saved-research summary and extra meta line, leaving only lettered action options.
 - Included the startup `Recommended Actions` option list in injected workspace context so first-turn references like `option A` or `option 1` resolve correctly.
 - Excluded workspace context files like `AGENTS.md` and `CLAUDE.md` from recommendation ranking and future surface/prior seeding so the agent does not target its own instruction files.
@@ -51,3 +52,12 @@
 - Added one column of left padding to the interactive footer metadata row.
 - Removed the initial session attachment notice from the interactive startup timeline.
 - Replaced the startup banner art with the shorter `Pi for RE` block banner.
+- Reconciled unfinished plans from completed turn output so finished parallel work turns green and the plan clears even when the model misses the final explicit `plan` update.
+- Close the last remaining step in a parallel phase when the completed response already covered the rest of that phase, avoiding stale one-step plans that bleed into the next run.
+- Allow sequential phases to close when the final response covers both the active step and the next pending step in the same phase, preventing stale trailing tasks from sticking around between runs.
+- Close the lone final task in a sequential phase when the response is clearly a blocker/next-step wrap-up, preventing stale last-step plans from lingering after the agent has already summarized the remaining blocker and next validation path.
+- Render full thinking traces in `THOUGHT` cards instead of truncating them with a fixed line limit.
+- Added the estimated context size to the left side of the interactive footer, ahead of the active model and workspace labels.
+- Raised the security-agent fallback context-window estimate from `128k` to `272k` when the active model does not expose an explicit context limit.
+- Restore the last saved `/effort` value on startup from the most recent matching workspace session when no explicit `--thinking` flag is provided, and flush explicit `/effort` or `/model` changes immediately so they survive a restart before the next assistant reply.
+- Allow eligible OpenAI GPT-5 runs to keep roughly `100k` more prompt context before compaction by applying a soft overflow allowance above the declared `272k` context window while preserving the existing next-turn reserve heuristics.

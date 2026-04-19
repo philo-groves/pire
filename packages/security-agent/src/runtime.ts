@@ -4,11 +4,11 @@ import type { Api, ImageContent, Model, TextContent } from "@mariozechner/pi-ai"
 import { getConfiguredApiKey } from "./auth.js";
 import {
 	containsWorkspaceContextReference,
-	formatInjectedContext,
 	loadWorkspaceContextFiles,
 	resolveWorkspaceRoot,
 	type WorkspaceContextFile,
 } from "./context.js";
+import { assembleResearchContextWindow } from "./context-window.js";
 import { type DebugSpec, loadDebugSpec } from "./debug-spec.js";
 import { type ResearchGraphHtmlResult, writeResearchGraphHtml } from "./graph-export.js";
 import { type LogicMapData, LogicMapStore, type LogicRecord } from "./logic-map/store.js";
@@ -17,6 +17,7 @@ import { type NotebookData, NotebookStore } from "./notebook/store.js";
 import { SECURITY_SYSTEM_PROMPT } from "./prompt.js";
 import {
 	listSessions,
+	type PersistedCompactionSummary,
 	readSessionInfo,
 	type SessionContext,
 	type SessionInfo,
@@ -25,7 +26,7 @@ import {
 import { seedSurfaceMapFromWorkspaceGraph } from "./surface-map/seed.js";
 import { type SurfaceMapData, SurfaceMapStore, type SurfaceRecord } from "./surface-map/store.js";
 import { createSecurityTools } from "./tools/index.js";
-import type { PlanState } from "./tools/plan.js";
+import { formatPlan, type PlanState, reconcileResearchPlan } from "./tools/plan.js";
 import {
 	loadValidationSpec,
 	type ValidationSessionState,
@@ -593,7 +594,9 @@ export class SecurityAgentRuntime {
 	readonly agent: Agent;
 	private sessionManager: SessionManager;
 	private readonly proofRepairAttempts: number;
+	private lastEstimatedContextTokens: number | undefined;
 	private workspacePrepared = false;
+	private persistedCompactionSummary?: PersistedCompactionSummary;
 
 	constructor(options: SecurityAgentRuntimeOptions) {
 		this.cwd = options.cwd;
@@ -635,8 +638,12 @@ export class SecurityAgentRuntime {
 			transformContext: async (messages) => this.injectContext(messages),
 		});
 
-		this.agent.subscribe((event) => {
+		this.agent.subscribe(async (event) => {
 			this.persistSessionEvent(event);
+			if (event.type === "turn_end") {
+				await this.reconcilePlanFromTurn(event);
+				this.refreshContextEstimate();
+			}
 		});
 
 		const existingSession = this.sessionManager.buildSessionContext();
@@ -651,28 +658,79 @@ export class SecurityAgentRuntime {
 		} else {
 			this.persistCurrentSessionSettings();
 		}
+
+		this.refreshContextEstimate();
+	}
+
+	private buildResearchContextWindow(messages: AgentMessage[]) {
+		const recommendedActionsText = this.getStartupRecommendedActions();
+		const persistedCompactionSummary = this.persistedCompactionSummary ?? this.sessionManager.getLatestCompaction();
+		return assembleResearchContextWindow({
+			cwd: this.cwd,
+			contextFiles: this.contextFiles,
+			recommendedActionsText,
+			persistedCompactionSummary: persistedCompactionSummary
+				? `Compacted from ${persistedCompactionSummary.tokensBefore.toLocaleString()} estimated tokens earlier in this branch.\n${persistedCompactionSummary.summary}`
+				: undefined,
+			notebook: this.notebook.read(),
+			surfaceMap: this.surfaceMap.read(),
+			logicMap: this.logicMap.read(),
+			workspaceGraph: this.workspaceGraph.read(),
+			plan: this.planState.current,
+			messages,
+			model: this.agent.state.model,
+			thinkingLevel: this.agent.state.thinkingLevel,
+		});
+	}
+
+	private refreshContextEstimate(messages: AgentMessage[] = this.agent.state.messages): void {
+		this.lastEstimatedContextTokens = this.buildResearchContextWindow(messages).estimatedTokens;
 	}
 
 	private async injectContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
 		await this.ensureWorkspacePrepared(messages);
-		const recommendedActionsText = this.getStartupRecommendedActions();
-		const injectedContext = formatInjectedContext({
-			cwd: this.cwd,
-			contextFiles: this.contextFiles,
-			recommendedActionsText,
-			notebookText: this.notebook.formatForPrompt(),
-			surfaceMapText: this.surfaceMap.formatForPrompt(),
-			logicMapText: this.logicMap.formatForPrompt(),
-			workspaceGraphText: this.workspaceGraph.formatForPrompt(),
-		});
+		const assembledContext = this.buildResearchContextWindow(messages);
+		this.lastEstimatedContextTokens = assembledContext.estimatedTokens;
 
-		const contextMessage: AgentMessage = {
-			role: "user",
-			content: [{ type: "text", text: injectedContext }],
-			timestamp: Date.now(),
-		};
+		if (
+			assembledContext.usedCompaction &&
+			assembledContext.compactedTranscriptText &&
+			assembledContext.firstKeptReplayMessageIndex !== undefined
+		) {
+			this.persistCompactionCheckpoint(
+				assembledContext.compactedTranscriptText,
+				assembledContext.firstKeptReplayMessageIndex,
+				assembledContext.estimatedTokens,
+			);
+		}
+		return assembledContext.messages;
+	}
 
-		return [contextMessage, ...messages];
+	private persistCompactionCheckpoint(
+		compactedTranscriptText: string,
+		firstKeptReplayMessageIndex: number,
+		tokensBefore: number,
+	): void {
+		const sessionContext = this.sessionManager.buildSessionContext();
+		const firstKeptEntryId = sessionContext.messageEntryIds[firstKeptReplayMessageIndex];
+		if (!firstKeptEntryId) {
+			return;
+		}
+
+		const latestCompaction = this.sessionManager.getLatestCompaction();
+		if (
+			latestCompaction &&
+			latestCompaction.firstKeptEntryId === firstKeptEntryId &&
+			latestCompaction.summary === compactedTranscriptText
+		) {
+			this.persistedCompactionSummary = latestCompaction;
+			return;
+		}
+
+		this.sessionManager.appendCompaction(compactedTranscriptText, firstKeptEntryId, tokensBefore);
+		const updatedSessionContext = this.sessionManager.buildSessionContext();
+		this.agent.state.messages = updatedSessionContext.messages;
+		this.persistedCompactionSummary = updatedSessionContext.compaction;
 	}
 
 	private async ensureWorkspacePrepared(messages: AgentMessage[]): Promise<void> {
@@ -722,6 +780,10 @@ export class SecurityAgentRuntime {
 		return this.agent.state.thinkingLevel;
 	}
 
+	get estimatedContextTokens(): number | undefined {
+		return this.lastEstimatedContextTokens;
+	}
+
 	get state() {
 		return this.agent.state;
 	}
@@ -766,15 +828,22 @@ export class SecurityAgentRuntime {
 	setModel(model: Model<Api>): ThinkingLevel {
 		const previousModel = this.agent.state.model;
 		const modelChanged = previousModel.provider !== model.provider || previousModel.id !== model.id;
+		let persistedSettingsChanged = false;
 		this.agent.state.model = model;
 		if (modelChanged) {
 			this.sessionManager.appendModelChange(model.provider, model.id);
+			persistedSettingsChanged = true;
 		}
 		const clampedThinkingLevel = clampThinkingLevel(model, this.agent.state.thinkingLevel);
 		if (clampedThinkingLevel !== this.agent.state.thinkingLevel) {
 			this.sessionManager.appendThinkingLevelChange(clampedThinkingLevel);
+			persistedSettingsChanged = true;
 		}
 		this.agent.state.thinkingLevel = clampedThinkingLevel;
+		if (persistedSettingsChanged) {
+			this.sessionManager.flush();
+		}
+		this.refreshContextEstimate();
 		return clampedThinkingLevel;
 	}
 
@@ -782,19 +851,23 @@ export class SecurityAgentRuntime {
 		const clampedThinkingLevel = clampThinkingLevel(this.agent.state.model, thinkingLevel);
 		if (clampedThinkingLevel !== this.agent.state.thinkingLevel) {
 			this.sessionManager.appendThinkingLevelChange(clampedThinkingLevel);
+			this.sessionManager.flush();
 		}
 		this.agent.state.thinkingLevel = clampedThinkingLevel;
+		this.refreshContextEstimate();
 		return clampedThinkingLevel;
 	}
 
 	reset(): void {
 		this.agent.reset();
+		this.persistedCompactionSummary = undefined;
 		this.planState.current = undefined;
 		if (this.validationState) {
 			this.validationState.attempts = 0;
 			this.validationState.lastResult = undefined;
 			this.validationState.history = [];
 		}
+		this.refreshContextEstimate();
 	}
 
 	startNewConversation(): string | undefined {
@@ -883,6 +956,8 @@ export class SecurityAgentRuntime {
 		}
 		this.agent.state.thinkingLevel = clampThinkingLevel(this.agent.state.model, sessionContext.thinkingLevel);
 		this.agent.state.messages = sessionContext.messages;
+		this.persistedCompactionSummary = sessionContext.compaction;
+		this.refreshContextEstimate();
 	}
 
 	private persistSessionEvent(event: AgentEvent): void {
@@ -893,6 +968,38 @@ export class SecurityAgentRuntime {
 		if (event.message.role === "user" || event.message.role === "assistant" || event.message.role === "toolResult") {
 			this.sessionManager.appendMessage(event.message);
 		}
+	}
+
+	private async reconcilePlanFromTurn(event: Extract<AgentEvent, { type: "turn_end" }>): Promise<void> {
+		if (!this.planState.current) {
+			return;
+		}
+
+		const messageText = extractMessageText(event.message).trim();
+		if (messageText.length === 0) {
+			return;
+		}
+
+		const evidenceText = [messageText, ...event.toolResults.map((result) => extractMessageText(result))]
+			.map((text) => text.trim())
+			.filter((text) => text.length > 0)
+			.join("\n\n");
+		if (evidenceText.length === 0) {
+			return;
+		}
+
+		const reconciled = reconcileResearchPlan(this.planState.current, evidenceText);
+		if (!reconciled.changed) {
+			return;
+		}
+
+		this.planState.current = reconciled.plan;
+		if (!reconciled.plan || reconciled.cleared) {
+			await this.notebook.delete("_plan");
+			return;
+		}
+
+		await this.notebook.set("_plan", formatPlan(reconciled.plan));
 	}
 
 	private async runProofRepairLoop(startingAttempts: number): Promise<void> {
