@@ -149,6 +149,15 @@ function getLastActivityTime(entries: FileEntry[]): number | undefined {
 	let lastActivityTime: number | undefined;
 
 	for (const entry of entries) {
+		if (entry.type === "session") {
+			continue;
+		}
+
+		const entryTime = new Date(entry.timestamp).getTime();
+		if (!Number.isNaN(entryTime)) {
+			lastActivityTime = Math.max(lastActivityTime ?? 0, entryTime);
+		}
+
 		if (entry.type !== "message") {
 			continue;
 		}
@@ -164,12 +173,6 @@ function getLastActivityTime(entries: FileEntry[]): number | undefined {
 		const messageTimestamp = (message as { timestamp?: number }).timestamp;
 		if (typeof messageTimestamp === "number") {
 			lastActivityTime = Math.max(lastActivityTime ?? 0, messageTimestamp);
-			continue;
-		}
-
-		const entryTime = new Date(entry.timestamp).getTime();
-		if (!Number.isNaN(entryTime)) {
-			lastActivityTime = Math.max(lastActivityTime ?? 0, entryTime);
 		}
 	}
 
@@ -255,6 +258,11 @@ export function loadEntriesFromFile(filePath: string): FileEntry[] {
 	}
 
 	return entries;
+}
+
+export function readSessionHeader(filePath: string): SessionHeader | undefined {
+	const header = loadEntriesFromFile(filePath)[0];
+	return header?.type === "session" ? header : undefined;
 }
 
 function isValidSessionFile(filePath: string): boolean {
@@ -711,6 +719,46 @@ export class SessionManager {
 
 	getSessionId(): string {
 		return this.sessionId;
+	}
+
+	getParentSessionFile(): string | undefined {
+		const header = this.fileEntries[0];
+		return header?.type === "session" ? header.parentSession : undefined;
+	}
+
+	getSessionLineageIds(): string[] {
+		const lineage: string[] = [];
+		const visitedPaths = new Set<string>();
+
+		const appendHeader = (header: SessionHeader | undefined) => {
+			if (!header?.id || lineage.includes(header.id)) {
+				return;
+			}
+			lineage.push(header.id);
+		};
+
+		const currentHeader = this.fileEntries[0];
+		if (currentHeader?.type === "session") {
+			appendHeader(currentHeader);
+			let parentPath = currentHeader.parentSession;
+			while (parentPath) {
+				const resolvedPath = resolve(parentPath);
+				if (visitedPaths.has(resolvedPath)) {
+					break;
+				}
+				visitedPaths.add(resolvedPath);
+				const parentHeader = readSessionHeader(resolvedPath);
+				if (!parentHeader) {
+					break;
+				}
+				appendHeader(parentHeader);
+				parentPath = parentHeader.parentSession;
+			}
+		} else if (this.sessionId) {
+			lineage.push(this.sessionId);
+		}
+
+		return lineage.reverse();
 	}
 
 	getSessionFile(): string | undefined {

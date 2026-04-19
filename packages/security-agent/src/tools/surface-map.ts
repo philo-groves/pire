@@ -1,5 +1,6 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { type Static, Type } from "@mariozechner/pi-ai";
+import type { ResearchJournalStore, ResearchOverlayScope } from "../research-journal/store.js";
 import type { SurfaceMapStore, SurfaceStatus, SurfaceUpsertInput } from "../surface-map/store.js";
 import type { WorkspaceGraphStore } from "../workspace-graph/store.js";
 
@@ -67,6 +68,8 @@ function validateUpsert(params: SurfaceMapToolParams): SurfaceUpsertInput {
 export function createSurfaceMapTool(
 	store: SurfaceMapStore,
 	workspaceGraph?: WorkspaceGraphStore,
+	journal?: ResearchJournalStore,
+	getOverlayScope?: () => ResearchOverlayScope,
 ): AgentTool<typeof surfaceMapToolSchema, { action: string; surfaces: number; id?: string }> {
 	return {
 		name: "surface_map",
@@ -75,6 +78,7 @@ export function createSurfaceMapTool(
 			"Track, rank, and claim likely attack surfaces. Use this early to map promising surfaces and update it as evidence raises or lowers neighboring targets.",
 		parameters: surfaceMapToolSchema,
 		async execute(_toolCallId: string, params: SurfaceMapToolParams) {
+			const overlayScope = journal && getOverlayScope ? getOverlayScope() : undefined;
 			if (params.action === "read") {
 				const data = store.read();
 				return {
@@ -117,6 +121,28 @@ export function createSurfaceMapTool(
 						}
 					}
 				}
+				if (journal && overlayScope && claimedSurface) {
+					await journal.append({
+						sessionId: overlayScope.sessionId,
+						sessionLineageIds: overlayScope.sessionLineageIds,
+						scope: "workspace",
+						domain: "surface_map",
+						action: "claim",
+						entityId: claimedSurface.id,
+						summary: `${claimedSurface.status}: ${claimedSurface.label}`,
+						payload: { record: claimedSurface },
+					});
+					await journal.append({
+						sessionId: overlayScope.sessionId,
+						sessionLineageIds: overlayScope.sessionLineageIds,
+						scope: "workspace",
+						domain: "workspace_graph",
+						action: "sync_surface",
+						entityId: claimedSurface.id,
+						summary: claimedSurface.label,
+						payload: { surfaceId: claimedSurface.id },
+					});
+				}
 				return {
 					content: [{ type: "text", text: `Claimed ${params.id.trim()} for ${params.owner.trim()}` }],
 					details: {
@@ -135,6 +161,28 @@ export function createSurfaceMapTool(
 				const releasedSurface = updated.surfaces[params.id.trim()];
 				if (workspaceGraph && releasedSurface) {
 					await workspaceGraph.syncSurface(releasedSurface);
+				}
+				if (journal && overlayScope && releasedSurface) {
+					await journal.append({
+						sessionId: overlayScope.sessionId,
+						sessionLineageIds: overlayScope.sessionLineageIds,
+						scope: "workspace",
+						domain: "surface_map",
+						action: "release",
+						entityId: releasedSurface.id,
+						summary: `${releasedSurface.status}: ${releasedSurface.label}`,
+						payload: { record: releasedSurface },
+					});
+					await journal.append({
+						sessionId: overlayScope.sessionId,
+						sessionLineageIds: overlayScope.sessionLineageIds,
+						scope: "workspace",
+						domain: "workspace_graph",
+						action: "sync_surface",
+						entityId: releasedSurface.id,
+						summary: releasedSurface.label,
+						payload: { surfaceId: releasedSurface.id },
+					});
 				}
 				return {
 					content: [{ type: "text", text: `Released ${params.id.trim()}` }],
@@ -156,6 +204,28 @@ export function createSurfaceMapTool(
 						await workspaceGraph.syncSurface(adjacent);
 					}
 				}
+			}
+			if (journal && overlayScope) {
+				await journal.append({
+					sessionId: overlayScope.sessionId,
+					sessionLineageIds: overlayScope.sessionLineageIds,
+					scope: "workspace",
+					domain: "surface_map",
+					action: "upsert",
+					entityId: surface.id,
+					summary: `${surface.status}: ${surface.label}`,
+					payload: { record: surface },
+				});
+				await journal.append({
+					sessionId: overlayScope.sessionId,
+					sessionLineageIds: overlayScope.sessionLineageIds,
+					scope: "workspace",
+					domain: "workspace_graph",
+					action: "sync_surface",
+					entityId: surface.id,
+					summary: surface.label,
+					payload: { surfaceId: surface.id },
+				});
 			}
 			return {
 				content: [

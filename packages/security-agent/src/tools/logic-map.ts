@@ -1,6 +1,7 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { type Static, Type } from "@mariozechner/pi-ai";
 import type { LogicMapStore, LogicStatus, LogicUpsertInput } from "../logic-map/store.js";
+import type { ResearchJournalStore, ResearchOverlayScope } from "../research-journal/store.js";
 import type { WorkspaceGraphStore } from "../workspace-graph/store.js";
 
 const logicStatusSchema = Type.Union([
@@ -49,6 +50,8 @@ function normalizeInput(params: LogicMapToolParams): LogicUpsertInput {
 export function createLogicMapTool(
 	store: LogicMapStore,
 	workspaceGraph?: WorkspaceGraphStore,
+	journal?: ResearchJournalStore,
+	getOverlayScope?: () => ResearchOverlayScope,
 ): AgentTool<typeof logicMapToolSchema, { action: string; rules: number; id?: string }> {
 	return {
 		name: "logic_map",
@@ -57,6 +60,7 @@ export function createLogicMapTool(
 			"Track intended-vs-implemented rules for auth, state machines, business logic, and trust boundaries. Use this when the bug is a policy or invariant mismatch rather than a parser crash.",
 		parameters: logicMapToolSchema,
 		async execute(_toolCallId: string, params: LogicMapToolParams) {
+			const overlayScope = journal && getOverlayScope ? getOverlayScope() : undefined;
 			if (params.action === "read") {
 				const data = store.read();
 				return {
@@ -90,6 +94,28 @@ export function createLogicMapTool(
 						weight: 1,
 					});
 				}
+			}
+			if (journal && overlayScope) {
+				await journal.append({
+					sessionId: overlayScope.sessionId,
+					sessionLineageIds: overlayScope.sessionLineageIds,
+					scope: "workspace",
+					domain: "logic_map",
+					action: "upsert",
+					entityId: record.id,
+					summary: `${record.status}: ${record.label}`,
+					payload: { record },
+				});
+				await journal.append({
+					sessionId: overlayScope.sessionId,
+					sessionLineageIds: overlayScope.sessionLineageIds,
+					scope: "workspace",
+					domain: "workspace_graph",
+					action: "upsert_logic_rule",
+					entityId: `logic:${record.id}`,
+					summary: record.label,
+					payload: { logicRuleId: record.id, surfaces: record.surfaces },
+				});
 			}
 
 			return {

@@ -1,6 +1,7 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { type Static, Type } from "@mariozechner/pi-ai";
 import type { NotebookStore } from "../notebook/store.js";
+import type { ResearchJournalStore, ResearchOverlayScope } from "../research-journal/store.js";
 
 const notebookWriteSchema = Type.Object({
 	key: Type.String({ description: "Notebook entry name" }),
@@ -25,7 +26,11 @@ type NotebookReadParams = Static<typeof notebookReadSchema>;
 type NotebookAppendParams = Static<typeof notebookAppendSchema>;
 type NotebookDeleteParams = Static<typeof notebookDeleteSchema>;
 
-export function createNotebookTools(store: NotebookStore): Array<AgentTool<any>> {
+export function createNotebookTools(
+	store: NotebookStore,
+	journal?: ResearchJournalStore,
+	getOverlayScope?: () => ResearchOverlayScope,
+): Array<AgentTool<any>> {
 	const writeTool: AgentTool<typeof notebookWriteSchema, { key: string; entries: number }> = {
 		name: "notebook_write",
 		label: "Notebook Write",
@@ -33,6 +38,19 @@ export function createNotebookTools(store: NotebookStore): Array<AgentTool<any>>
 		parameters: notebookWriteSchema,
 		async execute(_toolCallId: string, params: NotebookWriteParams) {
 			const notebook = await store.set(params.key, params.value);
+			if (journal && getOverlayScope) {
+				const scope = getOverlayScope();
+				await journal.append({
+					sessionId: scope.sessionId,
+					sessionLineageIds: scope.sessionLineageIds,
+					scope: "workspace",
+					domain: "notebook",
+					action: "set",
+					entityId: params.key,
+					summary: `set ${params.key}`,
+					payload: { key: params.key, value: params.value },
+				});
+			}
 			return {
 				content: [{ type: "text", text: `Wrote "${params.key}" (${Object.keys(notebook).length} entries total)` }],
 				details: {
@@ -80,6 +98,19 @@ export function createNotebookTools(store: NotebookStore): Array<AgentTool<any>>
 		parameters: notebookAppendSchema,
 		async execute(_toolCallId: string, params: NotebookAppendParams) {
 			const notebook = await store.append(params.key, params.value);
+			if (journal && getOverlayScope) {
+				const scope = getOverlayScope();
+				await journal.append({
+					sessionId: scope.sessionId,
+					sessionLineageIds: scope.sessionLineageIds,
+					scope: "workspace",
+					domain: "notebook",
+					action: "append",
+					entityId: params.key,
+					summary: `append ${params.key}`,
+					payload: { key: params.key, value: params.value },
+				});
+			}
 			return {
 				content: [
 					{ type: "text", text: `Appended to "${params.key}" (${Object.keys(notebook).length} entries total)` },
@@ -104,6 +135,19 @@ export function createNotebookTools(store: NotebookStore): Array<AgentTool<any>>
 			}
 
 			const updated = await store.delete(params.key);
+			if (journal && getOverlayScope) {
+				const scope = getOverlayScope();
+				await journal.append({
+					sessionId: scope.sessionId,
+					sessionLineageIds: scope.sessionLineageIds,
+					scope: "workspace",
+					domain: "notebook",
+					action: "delete",
+					entityId: params.key,
+					summary: `delete ${params.key}`,
+					payload: { key: params.key },
+				});
+			}
 			return {
 				content: [
 					{ type: "text", text: `Deleted "${params.key}" (${Object.keys(updated).length} entries remaining)` },

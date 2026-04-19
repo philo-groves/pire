@@ -212,6 +212,8 @@ describe("assembleResearchContextWindow", () => {
 			contextFiles: [{ path: "/repo/AGENTS.md", content: "Research only the active workspace scope." }],
 			recommendedActionsText: "A. Validate Host normalization in proxy blacklist handling.",
 			notebook,
+			researchArtifacts: { artifacts: {} },
+			findingDossiers: { dossiers: {} },
 			surfaceMap,
 			logicMap,
 			workspaceGraph,
@@ -247,6 +249,8 @@ describe("assembleResearchContextWindow", () => {
 			recommendedActionsText:
 				"A. Validate the active candidate.\nB. Draft the report.\nC. Compare against the known control path.",
 			notebook: {},
+			researchArtifacts: { artifacts: {} },
+			findingDossiers: { dossiers: {} },
 			surfaceMap: { surfaces: {} },
 			logicMap: { rules: {} },
 			workspaceGraph: { version: 1, nodes: {}, edges: [] },
@@ -273,6 +277,8 @@ describe("assembleResearchContextWindow", () => {
 			persistedCompactionSummary:
 				"Compacted from 18 earlier transcript groups. Proven controls: Host without explicit port strips attacker-supplied forwarding headers.",
 			notebook: {},
+			researchArtifacts: { artifacts: {} },
+			findingDossiers: { dossiers: {} },
 			surfaceMap: { surfaces: {} },
 			logicMap: { rules: {} },
 			workspaceGraph: { version: 1, nodes: {}, edges: [] },
@@ -299,6 +305,8 @@ describe("assembleResearchContextWindow", () => {
 			contextFiles: [],
 			recommendedActionsText: undefined,
 			notebook: {},
+			researchArtifacts: { artifacts: {} },
+			findingDossiers: { dossiers: {} },
 			surfaceMap: { surfaces: {} },
 			logicMap: { rules: {} },
 			workspaceGraph: { version: 1, nodes: {}, edges: [] },
@@ -317,6 +325,8 @@ describe("assembleResearchContextWindow", () => {
 			contextFiles: [],
 			recommendedActionsText: undefined,
 			notebook: {},
+			researchArtifacts: { artifacts: {} },
+			findingDossiers: { dossiers: {} },
 			surfaceMap: { surfaces: {} },
 			logicMap: { rules: {} },
 			workspaceGraph: { version: 1, nodes: {}, edges: [] },
@@ -329,6 +339,102 @@ describe("assembleResearchContextWindow", () => {
 		assert.strictEqual(strictWindowResult.usedCompaction, true);
 		assert.strictEqual(softWindowResult.usedCompaction, false);
 		assert.ok(softWindowResult.estimatedTokens > strictWindowResult.estimatedTokens);
+	});
+
+	it("injects relevant research artifacts and finding dossiers into durable context", () => {
+		const result = assembleResearchContextWindow({
+			cwd: "/repo",
+			contextFiles: [],
+			recommendedActionsText: undefined,
+			notebook: {},
+			researchArtifacts: {
+				artifacts: {
+					"proof:host-gap": {
+						id: "proof:host-gap",
+						kind: "proof",
+						title: "Host-port blacklist bypass proof",
+						summary: "Validated control vs candidate request pair for Host normalization mismatch.",
+						content: "Candidate preserves spoofed forwarded header when Host includes explicit port.",
+						surfaces: ["module:proxyprotocol-stripuntrusted"],
+						findingIds: ["finding:proxy-host-gap"],
+						logicRuleIds: ["proxy:blacklist-host-port-normalization"],
+						commands: ["./gradlew sampleProofTest"],
+						artifactPaths: ["/tmp/proof.txt"],
+						tags: ["host", "proxy"],
+						status: "validated",
+						storageScope: "workspace",
+						updatedAt: "2026-04-19T11:05:00.000Z",
+					},
+				},
+			},
+			findingDossiers: {
+				dossiers: {
+					"dossier:proxy-host-gap": {
+						id: "dossier:proxy-host-gap",
+						findingId: "finding:proxy-host-gap",
+						title: "Proxy Host canonicalization gap",
+						claim: "Blacklist compares raw Host while downstream forwarding honors host:port variant.",
+						target: "zuul-sample downstream proxy path",
+						targetScope: "sample application path",
+						impact: "Spoofed forwarding metadata reaches origin",
+						trigger: "Send Host with explicit port and spoofed forwarding headers",
+						surfaces: ["module:proxyprotocol-stripuntrusted"],
+						logicRuleIds: ["proxy:blacklist-host-port-normalization"],
+						controls: [{ label: "control", result: "no spoof" }],
+						evidence: ["sample proof exists"],
+						reproCommands: ["./gradlew sampleProofTest"],
+						artifactPaths: ["/tmp/proof.txt"],
+						blockers: [],
+						reportNotes: "Ready to draft sample-focused report.",
+						tags: ["host", "proxy"],
+						status: "ready_for_report",
+						storageScope: "workspace",
+						updatedAt: "2026-04-19T11:06:00.000Z",
+					},
+				},
+			},
+			surfaceMap: {
+				surfaces: {
+					"module:proxyprotocol-stripuntrusted": {
+						id: "module:proxyprotocol-stripuntrusted",
+						kind: "module",
+						label: "StripUntrustedProxyHeadersHandler",
+						score: 5,
+						status: "active",
+						why: "Raw Host handling may bypass blacklist canonicalization.",
+						evidence: ["Validated adjacent gap around Host-port normalization."],
+						adjacent: [],
+						updatedAt: "2026-04-19T11:04:00.000Z",
+					},
+				},
+			},
+			logicMap: {
+				rules: {
+					"proxy:blacklist-host-port-normalization": {
+						id: "proxy:blacklist-host-port-normalization",
+						label: "Blacklist should normalize Host authority before trust checks",
+						intended: "Reject or canonicalize Host before forwarding decisions.",
+						implemented: "Raw Host comparison happens before downstream forwarding.",
+						gap: "Host with explicit port can bypass blacklist canonicalization.",
+						surfaces: ["module:proxyprotocol-stripuntrusted"],
+						evidence: ["Control Host is stripped, candidate Host:443 survives."],
+						status: "violated",
+						updatedAt: "2026-04-19T11:01:00.000Z",
+					},
+				},
+			},
+			workspaceGraph: { version: 1, nodes: {}, edges: [] },
+			plan: undefined,
+			messages: [createUserMessage("Continue the host gap proof.", 1)],
+			model: TEST_MODEL,
+			thinkingLevel: "medium",
+		});
+
+		const durableContextText = extractMessageText(result.messages[0]!);
+		assert.match(durableContextText, /\[Research Artifacts\]/);
+		assert.match(durableContextText, /Host-port blacklist bypass proof/);
+		assert.match(durableContextText, /\[Finding Dossiers\]/);
+		assert.match(durableContextText, /Proxy Host canonicalization gap/);
 	});
 });
 

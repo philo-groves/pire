@@ -1,5 +1,7 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import { type Static, Type } from "@mariozechner/pi-ai";
+import type { FindingDossierStore } from "../finding-dossiers/store.js";
+import type { ResearchJournalStore, ResearchOverlayScope } from "../research-journal/store.js";
 import type { FindingCandidateInput, WorkspaceGraphStore } from "../workspace-graph/store.js";
 
 const findingStatusSchema = Type.Union([
@@ -56,6 +58,9 @@ function normalizeInput(params: FindingGateToolParams): FindingCandidateInput {
 
 export function createFindingGateTool(
 	store: WorkspaceGraphStore,
+	journal?: ResearchJournalStore,
+	getOverlayScope?: () => ResearchOverlayScope,
+	dossierStore?: FindingDossierStore,
 ): AgentTool<
 	typeof findingGateToolSchema,
 	{ action: string; recommendation: string; findingId?: string; blocked?: boolean }
@@ -68,6 +73,7 @@ export function createFindingGateTool(
 		parameters: findingGateToolSchema,
 		async execute(_toolCallId: string, params: FindingGateToolParams) {
 			const input = normalizeInput(params);
+			const overlayScope = journal && getOverlayScope ? getOverlayScope() : undefined;
 			if (params.action === "review") {
 				const review = store.reviewFindingCandidate(input);
 				return {
@@ -84,6 +90,45 @@ export function createFindingGateTool(
 			const promotionText = promotion.blocked
 				? `${reviewText}\nPromotion blocked: likely duplicate. Re-run with force=true only if the overlap is understood and intentional.`
 				: `${reviewText}\nPromoted durable finding: ${promotion.id}`;
+			if (journal && overlayScope) {
+				await journal.append({
+					sessionId: overlayScope.sessionId,
+					sessionLineageIds: overlayScope.sessionLineageIds,
+					scope: "workspace",
+					domain: "workspace_graph",
+					action: params.action === "promote" ? "promote_finding" : "review_finding",
+					entityId: promotion.id ?? input.id,
+					summary: input.label,
+					payload: {
+						label: input.label,
+						summary: input.summary,
+						recommendation: promotion.review.recommendation,
+						blocked: promotion.blocked,
+					},
+				});
+			}
+			if (!promotion.blocked && promotion.id && dossierStore && overlayScope) {
+				await dossierStore.upsert(
+					{
+						id: `dossier:${promotion.id}`,
+						findingId: promotion.id,
+						title: input.label,
+						claim: input.summary,
+						trigger: input.proof?.trim() || undefined,
+						surfaces: input.surfaces,
+						evidence: input.evidence,
+						tags: input.tags,
+						status:
+							input.status === "rejected"
+								? "rejected"
+								: input.status === "confirmed"
+									? "validated"
+									: "candidate",
+					},
+					overlayScope,
+					"workspace",
+				);
+			}
 			return {
 				content: [{ type: "text", text: promotionText }],
 				details: {

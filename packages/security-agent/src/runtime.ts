@@ -10,11 +10,14 @@ import {
 } from "./context.js";
 import { assembleResearchContextWindow } from "./context-window.js";
 import { type DebugSpec, loadDebugSpec } from "./debug-spec.js";
+import { type FindingDossierData, FindingDossierStore } from "./finding-dossiers/store.js";
 import { type ResearchGraphHtmlResult, writeResearchGraphHtml } from "./graph-export.js";
 import { type LogicMapData, LogicMapStore, type LogicRecord } from "./logic-map/store.js";
 import { clampThinkingLevel, resolveModel } from "./models.js";
 import { type NotebookData, NotebookStore } from "./notebook/store.js";
 import { SECURITY_SYSTEM_PROMPT } from "./prompt.js";
+import { type ResearchArtifactData, ResearchArtifactStore } from "./research-artifacts/store.js";
+import { ResearchJournalStore, type ResearchOverlayScope } from "./research-journal/store.js";
 import {
 	listSessions,
 	type PersistedCompactionSummary,
@@ -582,8 +585,11 @@ export class SecurityAgentRuntime {
 	readonly cwd: string;
 	readonly stateDir: string;
 	readonly workspaceRoot: string;
+	readonly findingDossiers: FindingDossierStore;
 	readonly logicMap: LogicMapStore;
 	readonly notebook: NotebookStore;
+	readonly researchArtifacts: ResearchArtifactStore;
+	readonly researchJournal: ResearchJournalStore;
 	readonly surfaceMap: SurfaceMapStore;
 	readonly workspaceGraph: WorkspaceGraphStore;
 	readonly contextFiles: WorkspaceContextFile[];
@@ -607,6 +613,9 @@ export class SecurityAgentRuntime {
 		this.contextFiles = loadWorkspaceContextFiles(options.cwd, options.workspaceRoot);
 		this.workspaceRoot = resolveWorkspaceRoot(options.cwd, this.contextFiles, options.workspaceRoot);
 		this.workspaceGraph = new WorkspaceGraphStore(this.workspaceRoot);
+		this.researchJournal = new ResearchJournalStore(this.workspaceRoot);
+		this.researchArtifacts = new ResearchArtifactStore(this.workspaceRoot, this.researchJournal);
+		this.findingDossiers = new FindingDossierStore(this.workspaceRoot, this.researchJournal);
 		this.planState = {};
 		this.debugSpec = options.debugSpecPath ? loadDebugSpec(options.debugSpecPath) : undefined;
 		this.validationSpec = options.validationSpecPath ? loadValidationSpec(options.validationSpecPath) : undefined;
@@ -622,11 +631,15 @@ export class SecurityAgentRuntime {
 				tools: createSecurityTools({
 					cwd: this.cwd,
 					artifactsDir: join(this.stateDir, ".pire", "artifacts"),
+					findingDossiers: this.findingDossiers,
+					journal: this.researchJournal,
 					logicMap: this.logicMap,
 					notebook: this.notebook,
+					researchArtifacts: this.researchArtifacts,
 					surfaceMap: this.surfaceMap,
 					workspaceGraph: this.workspaceGraph,
 					planState: this.planState,
+					getOverlayScope: () => this.getOverlayScope(),
 					debugSpec: this.debugSpec,
 					validationSpec: this.validationSpec,
 					validationState: this.validationState,
@@ -662,6 +675,21 @@ export class SecurityAgentRuntime {
 		this.refreshContextEstimate();
 	}
 
+	private getOverlayScope(): ResearchOverlayScope {
+		return {
+			sessionId: this.sessionManager.getSessionId(),
+			sessionLineageIds: this.sessionManager.getSessionLineageIds(),
+		};
+	}
+
+	private readResearchArtifacts(): ResearchArtifactData {
+		return this.researchArtifacts.read(this.getOverlayScope());
+	}
+
+	private readFindingDossiers(): FindingDossierData {
+		return this.findingDossiers.read(this.getOverlayScope());
+	}
+
 	private buildResearchContextWindow(messages: AgentMessage[]) {
 		const recommendedActionsText = this.getStartupRecommendedActions();
 		const persistedCompactionSummary = this.persistedCompactionSummary ?? this.sessionManager.getLatestCompaction();
@@ -673,6 +701,8 @@ export class SecurityAgentRuntime {
 				? `Compacted from ${persistedCompactionSummary.tokensBefore.toLocaleString()} estimated tokens earlier in this branch.\n${persistedCompactionSummary.summary}`
 				: undefined,
 			notebook: this.notebook.read(),
+			researchArtifacts: this.readResearchArtifacts(),
+			findingDossiers: this.readFindingDossiers(),
 			surfaceMap: this.surfaceMap.read(),
 			logicMap: this.logicMap.read(),
 			workspaceGraph: this.workspaceGraph.read(),

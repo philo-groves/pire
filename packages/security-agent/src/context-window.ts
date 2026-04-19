@@ -1,8 +1,10 @@
 import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Api, AssistantMessage, Model, ToolResultMessage, UserMessage } from "@mariozechner/pi-ai";
 import type { WorkspaceContextFile } from "./context.js";
+import type { FindingDossierData, FindingDossierRecord } from "./finding-dossiers/store.js";
 import type { LogicMapData, LogicRecord } from "./logic-map/store.js";
 import type { NotebookData } from "./notebook/store.js";
+import type { ResearchArtifactData, ResearchArtifactRecord } from "./research-artifacts/store.js";
 import type { SurfaceMapData, SurfaceRecord } from "./surface-map/store.js";
 import type { ResearchPlan } from "./tools/plan.js";
 import type { WorkspaceGraphData, WorkspaceGraphNode } from "./workspace-graph/store.js";
@@ -99,6 +101,8 @@ export interface AssembleResearchContextOptions {
 	recommendedActionsText?: string;
 	persistedCompactionSummary?: string;
 	notebook: NotebookData;
+	researchArtifacts: ResearchArtifactData;
+	findingDossiers: FindingDossierData;
 	surfaceMap: SurfaceMapData;
 	logicMap: LogicMapData;
 	workspaceGraph: WorkspaceGraphData;
@@ -480,6 +484,150 @@ function selectNotebookEntries(
 		.map((entry) => [entry.key, entry.value]);
 }
 
+function researchArtifactKindPriority(kind: ResearchArtifactRecord["kind"]): number {
+	switch (kind) {
+		case "proof":
+			return 10;
+		case "repro":
+			return 9;
+		case "finding_note":
+			return 8;
+		case "negative_result":
+			return 7;
+		case "hypothesis":
+			return 6;
+		case "report_note":
+			return 5;
+	}
+}
+
+function researchArtifactStatusPriority(status: ResearchArtifactRecord["status"]): number {
+	switch (status) {
+		case "validated":
+			return 9;
+		case "active":
+			return 7;
+		case "superseded":
+			return 3;
+		case "rejected":
+			return 1;
+	}
+}
+
+function selectRelevantResearchArtifacts(
+	researchArtifacts: ResearchArtifactData,
+	relevanceTerms: readonly string[],
+	selectedSurfaces: readonly SurfaceRecord[],
+	selectedRules: readonly LogicRecord[],
+	limit = 5,
+): ResearchArtifactRecord[] {
+	const selectedSurfaceIds = new Set(selectedSurfaces.map((surface) => surface.id));
+	const selectedRuleIds = new Set(selectedRules.map((rule) => rule.id));
+
+	return Object.values(researchArtifacts.artifacts)
+		.map((artifact) => ({
+			artifact,
+			score:
+				researchArtifactKindPriority(artifact.kind) * 10 +
+				researchArtifactStatusPriority(artifact.status) * 8 +
+				artifact.surfaces.filter((surfaceId) => selectedSurfaceIds.has(surfaceId)).length * 14 +
+				artifact.logicRuleIds.filter((ruleId) => selectedRuleIds.has(ruleId)).length * 12 +
+				textOverlapScore(
+					[
+						artifact.id,
+						artifact.title,
+						artifact.summary,
+						artifact.content ?? "",
+						...artifact.surfaces,
+						...artifact.findingIds,
+						...artifact.logicRuleIds,
+						...artifact.commands,
+						...artifact.artifactPaths,
+						...artifact.tags,
+					].join("\n"),
+					relevanceTerms,
+				) *
+					6,
+		}))
+		.filter((entry) => entry.score > 0)
+		.sort((left, right) => {
+			if (right.score !== left.score) {
+				return right.score - left.score;
+			}
+			return right.artifact.updatedAt.localeCompare(left.artifact.updatedAt);
+		})
+		.slice(0, limit)
+		.map((entry) => entry.artifact);
+}
+
+function findingDossierStatusPriority(status: FindingDossierRecord["status"]): number {
+	switch (status) {
+		case "ready_for_report":
+			return 10;
+		case "validated":
+			return 9;
+		case "candidate":
+			return 7;
+		case "blocked":
+			return 4;
+		case "reported":
+			return 3;
+		case "rejected":
+			return 1;
+	}
+}
+
+function selectRelevantFindingDossiers(
+	findingDossiers: FindingDossierData,
+	relevanceTerms: readonly string[],
+	selectedSurfaces: readonly SurfaceRecord[],
+	selectedRules: readonly LogicRecord[],
+	limit = 4,
+): FindingDossierRecord[] {
+	const selectedSurfaceIds = new Set(selectedSurfaces.map((surface) => surface.id));
+	const selectedRuleIds = new Set(selectedRules.map((rule) => rule.id));
+
+	return Object.values(findingDossiers.dossiers)
+		.map((dossier) => ({
+			dossier,
+			score:
+				findingDossierStatusPriority(dossier.status) * 10 +
+				dossier.surfaces.filter((surfaceId) => selectedSurfaceIds.has(surfaceId)).length * 14 +
+				dossier.logicRuleIds.filter((ruleId) => selectedRuleIds.has(ruleId)).length * 12 +
+				textOverlapScore(
+					[
+						dossier.id,
+						dossier.findingId ?? "",
+						dossier.title,
+						dossier.claim,
+						dossier.target ?? "",
+						dossier.targetScope ?? "",
+						dossier.impact ?? "",
+						dossier.trigger ?? "",
+						...dossier.surfaces,
+						...dossier.logicRuleIds,
+						...dossier.evidence,
+						...dossier.reproCommands,
+						...dossier.artifactPaths,
+						...dossier.blockers,
+						dossier.reportNotes ?? "",
+						...dossier.tags,
+					].join("\n"),
+					relevanceTerms,
+				) *
+					6,
+		}))
+		.filter((entry) => entry.score > 0)
+		.sort((left, right) => {
+			if (right.score !== left.score) {
+				return right.score - left.score;
+			}
+			return right.dossier.updatedAt.localeCompare(left.dossier.updatedAt);
+		})
+		.slice(0, limit)
+		.map((entry) => entry.dossier);
+}
+
 function collectGraphNeighborIds(
 	workspaceGraph: WorkspaceGraphData,
 	nodeIds: ReadonlySet<string>,
@@ -682,6 +830,66 @@ function formatNotebookEntries(entries: ReadonlyArray<[string, string]>): string
 	return lines.join("\n");
 }
 
+function formatResearchArtifacts(records: readonly ResearchArtifactRecord[]): string | undefined {
+	if (records.length === 0) {
+		return undefined;
+	}
+
+	const lines = ["[Research Artifacts]"];
+	for (const record of records) {
+		lines.push(`- ${record.id} [${record.kind}] status=${record.status}`);
+		lines.push(`  title: ${compactSnippet(record.title, 140)}`);
+		lines.push(`  summary: ${compactSnippet(record.summary || record.content || "", 220)}`);
+		if (record.surfaces.length > 0) {
+			lines.push(`  surfaces: ${compactSnippet(record.surfaces.join(", "), 160)}`);
+		}
+		if (record.findingIds.length > 0) {
+			lines.push(`  findings: ${compactSnippet(record.findingIds.join(", "), 160)}`);
+		}
+		if (record.commands.length > 0) {
+			lines.push(`  commands: ${compactSnippet(record.commands.join(" | "), 180)}`);
+		}
+		if (record.artifactPaths.length > 0) {
+			lines.push(`  artifacts: ${compactSnippet(record.artifactPaths.join(", "), 180)}`);
+		}
+	}
+	return lines.join("\n");
+}
+
+function formatFindingDossiers(records: readonly FindingDossierRecord[]): string | undefined {
+	if (records.length === 0) {
+		return undefined;
+	}
+
+	const lines = ["[Finding Dossiers]"];
+	for (const record of records) {
+		lines.push(`- ${record.id} status=${record.status}`);
+		lines.push(`  title: ${compactSnippet(record.title, 140)}`);
+		lines.push(`  claim: ${compactSnippet(record.claim, 200)}`);
+		if (record.target?.trim()) {
+			lines.push(`  target: ${compactSnippet(record.target, 140)}`);
+		}
+		if (record.impact?.trim()) {
+			lines.push(`  impact: ${compactSnippet(record.impact, 160)}`);
+		}
+		if (record.trigger?.trim()) {
+			lines.push(`  trigger: ${compactSnippet(record.trigger, 180)}`);
+		}
+		if (record.controls.length > 0) {
+			lines.push(
+				`  controls: ${compactSnippet(record.controls.map((control) => `${control.label}=${control.result}`).join(" | "), 180)}`,
+			);
+		}
+		if (record.reproCommands.length > 0) {
+			lines.push(`  repro: ${compactSnippet(record.reproCommands.join(" | "), 180)}`);
+		}
+		if (record.blockers.length > 0) {
+			lines.push(`  blockers: ${compactSnippet(record.blockers.join(" | "), 180)}`);
+		}
+	}
+	return lines.join("\n");
+}
+
 function formatGraphNodes(nodes: readonly WorkspaceGraphNode[]): string | undefined {
 	if (nodes.length === 0) {
 		return undefined;
@@ -705,7 +913,7 @@ function formatDurableContextHeader(cwd: string, latestUserText: string): string
 	const lines = [
 		"[Workspace Context]",
 		`Current working directory: ${cwd}`,
-		"Treat notebook, surface-map, logic-map, and workspace-graph entries below as canonical durable research memory. Older transcript can be compacted before the raw tail.",
+		"Treat notebook, research-artifact, finding-dossier, surface-map, logic-map, and workspace-graph entries below as durable research memory. Older transcript can be compacted before the raw tail.",
 	];
 	if (latestUserText.trim().length > 0) {
 		lines.push(`Current objective: ${latestUserText}`);
@@ -720,12 +928,26 @@ function buildDurableContextText(options: AssembleResearchContextOptions, budget
 	const selectedSurfaces = selectRelevantSurfaces(options.surfaceMap, seedTerms);
 	const selectedRules = selectRelevantRules(options.logicMap, seedTerms, selectedSurfaces);
 	const selectedNotebookEntries = selectNotebookEntries(options.notebook, seedTerms, selectedSurfaces);
+	const selectedArtifacts = selectRelevantResearchArtifacts(
+		options.researchArtifacts,
+		seedTerms,
+		selectedSurfaces,
+		selectedRules,
+	);
+	const selectedDossiers = selectRelevantFindingDossiers(
+		options.findingDossiers,
+		seedTerms,
+		selectedSurfaces,
+		selectedRules,
+	);
 	const graphTerms = tokenize(
 		[
 			latestUserText,
 			planText,
 			...selectedSurfaces.map((surface) => `${surface.id} ${surface.label}`),
 			...selectedRules.map((rule) => `${rule.id} ${rule.label}`),
+			...selectedArtifacts.map((artifact) => `${artifact.id} ${artifact.title} ${artifact.summary}`),
+			...selectedDossiers.map((dossier) => `${dossier.id} ${dossier.title} ${dossier.claim}`),
 		].join("\n"),
 	);
 	const selectedNodes = selectRelevantGraphNodes(options.workspaceGraph, graphTerms, selectedSurfaces, selectedRules);
@@ -762,6 +984,14 @@ function buildDurableContextText(options: AssembleResearchContextOptions, budget
 	appendSection(sections, remainingBudget, {
 		budget: Math.max(1100, Math.floor(budgetTokens * 0.14)),
 		text: formatNotebookEntries(selectedNotebookEntries),
+	});
+	appendSection(sections, remainingBudget, {
+		budget: Math.max(1100, Math.floor(budgetTokens * 0.14)),
+		text: formatResearchArtifacts(selectedArtifacts),
+	});
+	appendSection(sections, remainingBudget, {
+		budget: Math.max(1000, Math.floor(budgetTokens * 0.12)),
+		text: formatFindingDossiers(selectedDossiers),
 	});
 	appendSection(sections, remainingBudget, {
 		budget: Math.max(1100, Math.floor(budgetTokens * 0.14)),

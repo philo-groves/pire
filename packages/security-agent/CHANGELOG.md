@@ -13,6 +13,7 @@
 - Added stored conversation persistence plus `/resume` to reopen previous security-agent sessions from the interactive TUI.
 - Added a block-letter startup banner for `Pi for Reverse Engineers` in the interactive TUI.
 - Added startup `Recommended Actions` cards that summarize next steps from saved notebook, logic-map, and surface-map research when a workspace already has prior security-agent state.
+- Added a branch-aware append-only research journal plus session-overlay-backed typed `research_artifact` and `finding_dossier` stores for hypotheses, proofs, negative results, repros, report notes, and structured finding state.
 
 ### Changed
 - Added configurable Escape-based run abort support and show a live `(<elapsed>, esc to abort)` hint directly below the composer while a run is active.
@@ -61,3 +62,4 @@
 - Raised the security-agent fallback context-window estimate from `128k` to `272k` when the active model does not expose an explicit context limit.
 - Restore the last saved `/effort` value on startup from the most recent matching workspace session when no explicit `--thinking` flag is provided, and flush explicit `/effort` or `/model` changes immediately so they survive a restart before the next assistant reply.
 - Allow eligible OpenAI GPT-5 runs to keep roughly `100k` more prompt context before compaction by applying a soft overflow allowance above the declared `272k` context window while preserving the existing next-turn reserve heuristics.
+- Inject typed research artifacts and finding dossiers into the security-agent working context, and wire notebook/surface/logic/finding mutations through the append-only journal for later branch-aware reconstruction.
