@@ -56,6 +56,8 @@ export class SecurityAgentRuntime {
 	readonly cwd: string;
 	readonly stateDir: string;
 	readonly workspaceRoot: string;
+	readonly model: Model<Api>;
+	readonly thinkingLevel: ThinkingLevel;
 	readonly logicMap: LogicMapStore;
 	readonly notebook: NotebookStore;
 	readonly surfaceMap: SurfaceMapStore;
@@ -72,6 +74,8 @@ export class SecurityAgentRuntime {
 	constructor(options: SecurityAgentRuntimeOptions) {
 		this.cwd = options.cwd;
 		this.stateDir = options.stateDir ?? options.cwd;
+		this.model = options.model;
+		this.thinkingLevel = options.thinkingLevel;
 		this.logicMap = new LogicMapStore(this.stateDir);
 		this.notebook = new NotebookStore(this.stateDir);
 		this.surfaceMap = new SurfaceMapStore(this.stateDir);
@@ -183,6 +187,14 @@ export class SecurityAgentRuntime {
 		const startingAttempts = this.validationState?.attempts ?? 0;
 		await this.agent.continue();
 		await this.runProofRepairLoop(startingAttempts);
+	}
+
+	abort(): void {
+		this.agent.abort();
+	}
+
+	waitForIdle(): Promise<void> {
+		return this.agent.waitForIdle();
 	}
 
 	private async runProofRepairLoop(startingAttempts: number): Promise<void> {

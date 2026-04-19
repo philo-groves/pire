@@ -4,6 +4,7 @@ import { stderr, stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Api, Model } from "@mariozechner/pi-ai";
+import { runInteractiveTui } from "./interactive-tui.js";
 import { clampThinkingLevel, parseThinkingLevel, resolveModel } from "./models.js";
 import { SecurityAgentRuntime } from "./runtime.js";
 
@@ -111,23 +112,28 @@ async function readStdinPrompt(): Promise<string | undefined> {
 	return text.length > 0 ? text : undefined;
 }
 
-function attachEventSinks(
-	runtime: SecurityAgentRuntime,
-	mode: "text" | "json",
-	sessionDir: string | undefined,
-): () => void {
+function attachEventLogSink(runtime: SecurityAgentRuntime, sessionDir: string | undefined): () => void {
 	if (sessionDir && !existsSync(sessionDir)) {
 		mkdirSync(sessionDir, { recursive: true });
 	}
 
 	const eventStream = sessionDir ? createWriteStream(join(sessionDir, "events.jsonl"), { flags: "a" }) : undefined;
-	let wroteAssistantText = false;
-
 	const unsubscribe = runtime.subscribe((event) => {
 		if (eventStream) {
 			eventStream.write(`${JSON.stringify(event)}\n`);
 		}
+	});
 
+	return () => {
+		unsubscribe();
+		eventStream?.end();
+	};
+}
+
+function attachStdoutSink(runtime: SecurityAgentRuntime, mode: "text" | "json"): () => void {
+	let wroteAssistantText = false;
+
+	const unsubscribe = runtime.subscribe((event) => {
 		if (mode === "json") {
 			stdout.write(`${JSON.stringify(event)}\n`);
 			return;
@@ -147,7 +153,6 @@ function attachEventSinks(
 
 	return () => {
 		unsubscribe();
-		eventStream?.end();
 	};
 }
 
@@ -157,7 +162,7 @@ async function runPromptSequence(runtime: SecurityAgentRuntime, prompts: string[
 	}
 }
 
-async function runInteractive(runtime: SecurityAgentRuntime): Promise<void> {
+async function runReadlineInteractive(runtime: SecurityAgentRuntime): Promise<void> {
 	const reader = createInterface({
 		input: stdin,
 		output: stdout,
@@ -208,11 +213,16 @@ export async function runCli(argv: string[]): Promise<number> {
 		validationSpecPath: args.validationSpecPath,
 		proofRepairAttempts: args.proofRepairAttempts,
 	});
-	const detachSinks = attachEventSinks(runtime, args.mode, args.sessionDir);
+	const detachEventLog = attachEventLogSink(runtime, args.sessionDir);
 
 	try {
 		if (prompts.length > 0) {
-			await runPromptSequence(runtime, prompts);
+			const detachStdout = attachStdoutSink(runtime, args.mode);
+			try {
+				await runPromptSequence(runtime, prompts);
+			} finally {
+				detachStdout();
+			}
 			return 0;
 		}
 
@@ -220,10 +230,19 @@ export async function runCli(argv: string[]): Promise<number> {
 			throw new Error("No prompt provided");
 		}
 
-		await runInteractive(runtime);
+		if (args.mode === "text" && stdin.isTTY && stdout.isTTY) {
+			await runInteractiveTui(runtime);
+		} else {
+			const detachStdout = attachStdoutSink(runtime, args.mode);
+			try {
+				await runReadlineInteractive(runtime);
+			} finally {
+				detachStdout();
+			}
+		}
 		return 0;
 	} finally {
-		detachSinks();
+		detachEventLog();
 	}
 }
 
