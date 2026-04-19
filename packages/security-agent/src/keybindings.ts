@@ -6,6 +6,7 @@ import {
 } from "@mariozechner/pi-tui";
 
 export interface SecurityAgentAppKeybindings {
+	"app.abort": true;
 	"app.exit": true;
 	"app.plan.scrollUp": true;
 	"app.plan.scrollDown": true;
@@ -19,6 +20,10 @@ declare module "@mariozechner/pi-tui" {
 
 export const SECURITY_AGENT_KEYBINDINGS = {
 	...TUI_KEYBINDINGS,
+	"app.abort": {
+		defaultKeys: "escape",
+		description: "Abort the active run",
+	},
 	"app.exit": {
 		defaultKeys: "ctrl+d",
 		description: "Exit the console",

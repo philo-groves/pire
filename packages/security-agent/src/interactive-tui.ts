@@ -431,6 +431,17 @@ function formatClock(timestamp: number): string {
 	}).format(new Date(timestamp));
 }
 
+function formatElapsed(milliseconds: number): string {
+	const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const seconds = totalSeconds % 60;
+	if (hours > 0) {
+		return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+	}
+	return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 function formatSessionTimestamp(timestamp: Date): string {
 	return timestamp.toISOString().slice(0, 16).replace("T", " ");
 }
@@ -1086,6 +1097,7 @@ function keyHint(
 		| "tui.select.down"
 		| "tui.select.confirm"
 		| "tui.select.cancel"
+		| "app.abort"
 		| "app.exit"
 		| "app.plan.scrollUp"
 		| "app.plan.scrollDown"
@@ -1112,7 +1124,9 @@ class SecurityConsoleApp implements Component, Focusable {
 	private resumeSelector?: ResumeSelectorState;
 	private oauthSelector?: OAuthSelectorState;
 	private oauthDialog?: OAuthDialogState;
+	private activeRunStartedAt?: number;
 	private planAnimationTimer?: NodeJS.Timeout;
+	private runTimer?: NodeJS.Timeout;
 	private _focused = false;
 
 	get focused(): boolean {
@@ -1190,6 +1204,7 @@ class SecurityConsoleApp implements Component, Focusable {
 	dispose(): void {
 		this.unsubscribe();
 		this.stopPlanAnimation();
+		this.stopRunTimer();
 	}
 
 	invalidate(): void {
@@ -1227,6 +1242,11 @@ class SecurityConsoleApp implements Component, Focusable {
 
 		const editorText = this.editor.getText();
 		const isBusy = this.runtime.state.isStreaming;
+		if (isBusy && keybindings.matches(data, "app.abort")) {
+			this.runtime.abort();
+			this.ui.requestRender();
+			return;
+		}
 		if (keybindings.matches(data, "app.exit")) {
 			if (isBusy) {
 				this.setStatus("Wait for the active run to finish before exiting");
@@ -1865,9 +1885,13 @@ class SecurityConsoleApp implements Component, Focusable {
 	private handleAgentEvent(event: AgentEvent): void {
 		switch (event.type) {
 			case "agent_start":
+				this.activeRunStartedAt ??= Date.now();
+				this.startRunTimer();
 				this.setStatus("Agent run in progress");
 				break;
 			case "agent_end":
+				this.activeRunStartedAt = undefined;
+				this.stopRunTimer();
 				this.setStatus(this.runtime.state.errorMessage ?? "Agent idle");
 				break;
 			case "turn_start":
@@ -2266,6 +2290,23 @@ class SecurityConsoleApp implements Component, Focusable {
 		this.planAnimationTimer = undefined;
 	}
 
+	private startRunTimer(): void {
+		if (this.runTimer) {
+			return;
+		}
+		this.runTimer = setInterval(() => {
+			this.ui.requestRender();
+		}, 1000);
+	}
+
+	private stopRunTimer(): void {
+		if (!this.runTimer) {
+			return;
+		}
+		clearInterval(this.runTimer);
+		this.runTimer = undefined;
+	}
+
 	private renderTimeline(width: number): string[] {
 		const contentWidth = Math.max(1, width - 2);
 		if (this.timeline.length === 0) {
@@ -2485,10 +2526,16 @@ class SecurityConsoleApp implements Component, Focusable {
 		return this.renderComposer(width);
 	}
 
-	private renderAppFooter(): string {
+	private renderAppFooter(width: number): string {
 		const workspaceLabel = forceTildeHome(formatFooterWorkspacePath(this.runtime.workspaceRoot));
 		const modelLabel = `${this.runtime.state.model.id} ${this.runtime.state.thinkingLevel}`;
-		return styles.dim(` ${modelLabel} • ${workspaceLabel} • ${keyHint("app.exit")} exit`);
+		const left = styles.dim(` ${modelLabel} • ${workspaceLabel} • ${keyHint("app.exit")} exit`);
+		if (!this.activeRunStartedAt) {
+			return fitLine(left, width);
+		}
+		const abortHint = keyHint("app.abort").replaceAll("escape", "esc");
+		const right = styles.dim(`(${formatElapsed(Date.now() - this.activeRunStartedAt)}, ${abortHint} to abort)`);
+		return renderAlignedLine(left, right, width);
 	}
 
 	private renderComposer(width: number): string[] {
@@ -2503,14 +2550,15 @@ class SecurityConsoleApp implements Component, Focusable {
 				break;
 			}
 		}
-		return [
+		const composerLines = [
 			renderFilledLine("", width, composerSurface.paddingX),
 			...(editorLines.length > 0 ? editorLines : [""]).map((line) =>
 				renderFilledLine(line, width, composerSurface.paddingX),
 			),
 			renderFilledLine("", width, composerSurface.paddingX),
-			this.renderAppFooter(),
 		];
+		composerLines.push(this.renderAppFooter(width));
+		return composerLines;
 	}
 
 	private renderOAuthSelector(width: number): string[] {
@@ -2550,7 +2598,7 @@ class SecurityConsoleApp implements Component, Focusable {
 				lines,
 				filledTones.snapshotCard,
 			),
-			this.renderAppFooter(),
+			this.renderAppFooter(width),
 		];
 	}
 
@@ -2598,7 +2646,7 @@ class SecurityConsoleApp implements Component, Focusable {
 				lines,
 				filledTones.snapshotCard,
 			),
-			this.renderAppFooter(),
+			this.renderAppFooter(width),
 		];
 	}
 
@@ -2645,7 +2693,7 @@ class SecurityConsoleApp implements Component, Focusable {
 				lines,
 				filledTones.snapshotCard,
 			),
-			this.renderAppFooter(),
+			this.renderAppFooter(width),
 		];
 	}
 
