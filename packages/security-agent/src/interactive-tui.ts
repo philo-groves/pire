@@ -32,7 +32,12 @@ import type { SecurityAgentRuntime } from "./runtime.js";
 import type { SurfaceRecord } from "./surface-map/store.js";
 import type { ResearchPlan } from "./tools/plan.js";
 
-type TimelineEntry = UserTimelineEntry | AssistantTimelineEntry | ToolTimelineEntry | NoticeTimelineEntry;
+type TimelineEntry =
+	| BannerTimelineEntry
+	| UserTimelineEntry
+	| AssistantTimelineEntry
+	| ToolTimelineEntry
+	| NoticeTimelineEntry;
 type ToolStatus = "running" | "ok" | "error";
 
 interface TimelineEntryBase {
@@ -71,6 +76,11 @@ interface NoticeTimelineEntry extends TimelineEntryBase {
 	label: string;
 	text: string;
 	tone: "neutral" | "warning" | "error" | "success";
+}
+
+interface BannerTimelineEntry extends TimelineEntryBase {
+	kind: "banner";
+	lines: string[];
 }
 
 type BoxTone = {
@@ -207,6 +217,21 @@ const filledTones = {
 		error: (text: string) => text,
 	},
 } as const satisfies Record<string, FilledTone>;
+
+const startupBannerLines = [
+	"██████╗ ██╗    ███████╗ ██████╗ ██████╗",
+	"██╔══██╗██║    ██╔════╝██╔═══██╗██╔══██╗",
+	"██████╔╝██║    █████╗  ██║   ██║██████╔╝",
+	"██╔═══╝ ██║    ██╔══╝  ██║   ██║██╔══██╗",
+	"██║     ██║    ██║     ╚██████╔╝██║  ██║",
+	"╚═╝     ╚═╝    ╚═╝      ╚═════╝ ╚═╝  ╚═╝",
+	"██████╗ ███████╗██╗   ██╗███████╗██████╗ ███████╗███████╗    ███████╗███╗   ██╗ ██████╗ ██╗███╗   ██╗███████╗███████╗██████╗ ███████╗",
+	"██╔══██╗██╔════╝██║   ██║██╔════╝██╔══██╗██╔════╝██╔════╝    ██╔════╝████╗  ██║██╔════╝ ██║████╗  ██║██╔════╝██╔════╝██╔══██╗██╔════╝",
+	"██████╔╝█████╗  ██║   ██║█████╗  ██████╔╝███████╗█████╗      █████╗  ██╔██╗ ██║██║  ███╗██║██╔██╗ ██║█████╗  █████╗  ██████╔╝███████╗",
+	"██╔══██╗██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗╚════██║██╔══╝      ██╔══╝  ██║╚██╗██║██║   ██║██║██║╚██╗██║██╔══╝  ██╔══╝  ██╔══██╗╚════██║",
+	"██║  ██║███████╗ ╚████╔╝ ███████╗██║  ██║███████║███████╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗███████╗██║  ██║███████║",
+	"╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝╚═╝  ╚═╝╚══════╝",
+] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null;
@@ -756,6 +781,7 @@ class SecurityConsoleApp implements Component, Focusable {
 			this.handleAgentEvent(event);
 		});
 
+		this.pushStartupBanner();
 		this.pushNotice(
 			"session",
 			`${formatRelativePath(this.runtime.workspaceRoot, this.runtime.cwd)} attached to ${basename(this.runtime.workspaceRoot)}. ${this.runtime.contextFiles.length} context file${this.runtime.contextFiles.length === 1 ? "" : "s"} loaded.`,
@@ -1471,6 +1497,15 @@ class SecurityConsoleApp implements Component, Focusable {
 		});
 	}
 
+	private pushStartupBanner(): void {
+		this.appendTimeline({
+			id: `banner:${Date.now()}:${this.timeline.length}`,
+			kind: "banner",
+			timestamp: Date.now(),
+			lines: startupBannerLines.map((line) => styles.yellow(line)),
+		});
+	}
+
 	private setStatus(text: string): void {
 		void text;
 	}
@@ -1550,6 +1585,8 @@ class SecurityConsoleApp implements Component, Focusable {
 
 	private renderTimelineEntry(entry: TimelineEntry, width: number): string[] {
 		switch (entry.kind) {
+			case "banner":
+				return this.renderBannerEntry(entry, width);
 			case "user":
 				return this.renderUserEntry(entry, width);
 			case "assistant":
@@ -1559,6 +1596,11 @@ class SecurityConsoleApp implements Component, Focusable {
 			case "notice":
 				return this.renderNoticeEntry(entry, width);
 		}
+	}
+
+	private renderBannerEntry(entry: BannerTimelineEntry, width: number): string[] {
+		void width;
+		return entry.lines;
 	}
 
 	private renderUserEntry(entry: UserTimelineEntry, width: number): string[] {
