@@ -1,5 +1,6 @@
 import { type Dirent, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, relative, resolve } from "node:path";
+import { isWorkspaceContextPath } from "../context.js";
 import type { WorkspaceGraphEdgeInput, WorkspaceGraphNodeInput, WorkspaceGraphSeed } from "./store.js";
 
 const IGNORED_DIRS = new Set([
@@ -279,6 +280,9 @@ function analyzeCandidate(workspaceRoot: string, filePath: string): SeedCandidat
 	}
 
 	const lowerPath = relativePath.toLowerCase();
+	if (isWorkspaceContextPath(relativePath)) {
+		return null;
+	}
 	const kindScores = new Map<string, number>();
 	const tags = new Set<string>();
 	const reasons: string[] = [];

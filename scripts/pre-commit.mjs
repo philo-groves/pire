@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 
 const BIOME_EXTENSIONS = new Set([
 	".cjs",
@@ -45,6 +46,19 @@ function capture(command, args) {
 	return result.stdout;
 }
 
+function resolveLocalNodeScript(path) {
+	const resolvedPath = resolve(path);
+	if (!existsSync(resolvedPath)) {
+		process.stderr.write(`Missing local tool: ${resolvedPath}\n`);
+		process.exit(1);
+	}
+	return resolvedPath;
+}
+
+const node = process.execPath;
+const biomeScript = resolveLocalNodeScript("node_modules/@biomejs/biome/bin/biome");
+const tsgoScript = resolveLocalNodeScript("node_modules/@typescript/native-preview/bin/tsgo.js");
+
 function isBiomeFile(file) {
 	const extension = file.includes(".") ? file.slice(file.lastIndexOf(".")) : "";
 	return BIOME_EXTENSIONS.has(extension);
@@ -80,7 +94,7 @@ if (stagedFiles.length === 0) {
 
 const biomeFiles = stagedFiles.filter((file) => existsSync(file) && isBiomeFile(file));
 if (biomeFiles.length > 0) {
-	run("npx", ["--no-install", "biome", "check", "--write", "--error-on-warnings", ...biomeFiles]);
+	run(node, [biomeScript, "check", "--write", "--error-on-warnings", ...biomeFiles]);
 }
 
 let runBrowserSmoke = false;
@@ -130,7 +144,7 @@ for (const file of stagedFiles) {
 }
 
 for (const packageName of packagesToTypecheck) {
-	run("npx", ["--no-install", "tsgo", "-p", `packages/${packageName}/tsconfig.build.json`, "--noEmit"]);
+	run(node, [tsgoScript, "-p", `packages/${packageName}/tsconfig.build.json`, "--noEmit"]);
 }
 
 if (runWebUiCheck) {

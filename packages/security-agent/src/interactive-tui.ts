@@ -1,17 +1,21 @@
 import { spawn } from "node:child_process";
 import { homedir, userInfo } from "node:os";
-import { basename, relative, resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import type { AgentEvent, AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, TextContent } from "@mariozechner/pi-ai";
 import type { OAuthProviderInterface } from "@mariozechner/pi-ai/oauth";
 import {
 	CombinedAutocompleteProvider,
 	type Component,
+	type DefaultTextStyle,
 	Editor,
 	type EditorTheme,
 	type Focusable,
 	getKeybindings,
+	hyperlink,
 	Input,
+	Markdown,
+	type MarkdownTheme,
 	ProcessTerminal,
 	setKeybindings,
 	TUI,
@@ -29,8 +33,9 @@ import {
 import { createSecurityAgentKeybindings } from "./keybindings.js";
 import { parseThinkingLevel, resolveModelCommandInput } from "./models.js";
 import type { SecurityAgentRuntime } from "./runtime.js";
+import type { SessionInfo } from "./session-manager.js";
 import type { SurfaceRecord } from "./surface-map/store.js";
-import type { ResearchPlan } from "./tools/plan.js";
+import { stripPlanCompletionMarker } from "./tools/plan.js";
 
 type TimelineEntry =
 	| BannerTimelineEntry
@@ -55,6 +60,9 @@ interface AssistantTimelineEntry extends TimelineEntryBase {
 	text: string;
 	thinking: string;
 	streaming: boolean;
+	title?: string;
+	metaText?: string | null;
+	statusLabel?: string | null;
 	stopReason?: AssistantMessage["stopReason"];
 	errorMessage?: string;
 	usage?: AssistantMessage["usage"];
@@ -101,6 +109,9 @@ type FilledTone = {
 	error: (text: string) => string;
 };
 
+type ColorMode = "truecolor" | "256color";
+type RgbColor = { r: number; g: number; b: number };
+
 interface OAuthSelectorState {
 	mode: "login" | "logout";
 	providers: OAuthProviderInterface[];
@@ -127,6 +138,11 @@ interface OAuthDialogState {
 	cancelling: boolean;
 }
 
+interface ResumeSelectorState {
+	sessions: SessionInfo[];
+	selectedIndex: number;
+}
+
 function sgr(codes: string, text: string): string {
 	return `\x1b[${codes}m${text}\x1b[0m`;
 }
@@ -136,6 +152,7 @@ const styles = {
 	bright: (text: string) => sgr("1;38;5;231", text),
 	dim: (text: string) => sgr("2;38;5;244", text),
 	subtle: (text: string) => sgr("38;5;246", text),
+	primary: (text: string) => sgr("38;5;24", text),
 	red: (text: string) => sgr("38;5;203", text),
 	amber: (text: string) => sgr("38;5;215", text),
 	gold: (text: string) => sgr("38;5;220", text),
@@ -147,7 +164,7 @@ const styles = {
 	bgBadge: (label: string, fg: number, bg: number) => sgr(`1;38;5;${fg};48;5;${bg}`, ` ${label} `),
 };
 
-const brandBadge = (label: string): string => styles.bgBadge(label, 232, 226);
+const brandBadge = (label: string): string => styles.bgBadge(label, 231, 24);
 
 const composerSurface = {
 	bg: 235,
@@ -157,9 +174,11 @@ const composerSurface = {
 
 const planPanelVisibleLimit = 2;
 const surfacePanelVisibleLimit = 3;
+const resumePanelVisibleLimit = 8;
+const planAnimationIntervalMs = 160;
 
 const tones = {
-	user: { border: styles.yellow, accent: styles.yellow, muted: styles.subtle },
+	user: { border: styles.primary, accent: styles.primary, muted: styles.subtle },
 	assistant: { border: styles.cyan, accent: styles.cyan, muted: styles.subtle },
 	tool: { border: styles.amber, accent: styles.amber, muted: styles.subtle },
 	toolError: { border: styles.red, accent: styles.red, muted: styles.subtle },
@@ -168,7 +187,7 @@ const tones = {
 	warning: { border: styles.amber, accent: styles.yellow, muted: styles.subtle },
 	error: { border: styles.red, accent: styles.red, muted: styles.subtle },
 	success: { border: styles.green, accent: styles.green, muted: styles.subtle },
-	card: { border: styles.subtle, accent: styles.yellow, muted: styles.subtle },
+	card: { border: styles.subtle, accent: styles.primary, muted: styles.subtle },
 } as const satisfies Record<string, BoxTone>;
 
 const filledTones = {
@@ -185,13 +204,13 @@ const filledTones = {
 	},
 	assistantSuccess: {
 		fg: 231,
-		bg: "48;2;26;25;12",
+		bg: "48;2;10;14;20",
 		title: (text: string) => sgr("1;38;5;231", text),
-		meta: (text: string) => sgr("38;5;223", text),
-		label: (text: string) => sgr("38;5;229", text),
-		body: (text: string) => sgr("38;5;230", text),
-		status: (text: string) => sgr("1;38;5;226", text),
-		thinking: (text: string) => sgr("3;38;5;222", text),
+		meta: (text: string) => sgr("38;5;152", text),
+		label: (text: string) => sgr("38;5;189", text),
+		body: (text: string) => sgr("38;5;255", text),
+		status: (text: string) => sgr("1;38;5;117", text),
+		thinking: (text: string) => sgr("3;38;5;153", text),
 		error: (text: string) => sgr("38;5;224", text),
 	},
 	assistantError: {
@@ -204,6 +223,50 @@ const filledTones = {
 		status: (text: string) => sgr("1;38;5;210", text),
 		thinking: (text: string) => sgr("3;38;5;224", text),
 		error: (text: string) => sgr("1;38;5;231", text),
+	},
+	toolPending: {
+		fg: 231,
+		bg: "48;2;24;18;10",
+		title: (text: string) => sgr("1;38;5;231", text),
+		meta: (text: string) => sgr("38;5;248", text),
+		label: (text: string) => sgr("38;5;223", text),
+		body: (text: string) => sgr("38;5;252", text),
+		status: (text: string) => sgr("1;38;5;215", text),
+		thinking: (text: string) => sgr("3;38;5;250", text),
+		error: (text: string) => sgr("38;5;217", text),
+	},
+	toolSuccess: {
+		fg: 231,
+		bg: "48;2;11;16;20",
+		title: (text: string) => sgr("1;38;5;231", text),
+		meta: (text: string) => sgr("38;5;151", text),
+		label: (text: string) => sgr("38;5;189", text),
+		body: (text: string) => sgr("38;5;255", text),
+		status: (text: string) => sgr("1;38;5;114", text),
+		thinking: (text: string) => sgr("3;38;5;153", text),
+		error: (text: string) => sgr("38;5;224", text),
+	},
+	toolError: {
+		fg: 231,
+		bg: "48;2;38;12;14",
+		title: (text: string) => sgr("1;38;5;231", text),
+		meta: (text: string) => sgr("38;5;224", text),
+		label: (text: string) => sgr("38;5;217", text),
+		body: (text: string) => sgr("38;5;224", text),
+		status: (text: string) => sgr("1;38;5;210", text),
+		thinking: (text: string) => sgr("3;38;5;224", text),
+		error: (text: string) => sgr("1;38;5;231", text),
+	},
+	thinkingCard: {
+		fg: 252,
+		bg: "48;2;12;12;14",
+		title: (text: string) => sgr("1;38;5;250", text),
+		meta: (text: string) => sgr("38;5;243", text),
+		label: (text: string) => sgr("38;5;247", text),
+		body: (text: string) => sgr("38;5;246", text),
+		status: (text: string) => sgr("38;5;246", text),
+		thinking: (text: string) => sgr("3;38;5;246", text),
+		error: (text: string) => sgr("38;5;217", text),
 	},
 	snapshotCard: {
 		fg: 252,
@@ -219,18 +282,12 @@ const filledTones = {
 } as const satisfies Record<string, FilledTone>;
 
 const startupBannerLines = [
-	"██████╗ ██╗    ███████╗ ██████╗ ██████╗",
-	"██╔══██╗██║    ██╔════╝██╔═══██╗██╔══██╗",
-	"██████╔╝██║    █████╗  ██║   ██║██████╔╝",
-	"██╔═══╝ ██║    ██╔══╝  ██║   ██║██╔══██╗",
-	"██║     ██║    ██║     ╚██████╔╝██║  ██║",
-	"╚═╝     ╚═╝    ╚═╝      ╚═════╝ ╚═╝  ╚═╝",
-	"██████╗ ███████╗██╗   ██╗███████╗██████╗ ███████╗███████╗    ███████╗███╗   ██╗ ██████╗ ██╗███╗   ██╗███████╗███████╗██████╗ ███████╗",
-	"██╔══██╗██╔════╝██║   ██║██╔════╝██╔══██╗██╔════╝██╔════╝    ██╔════╝████╗  ██║██╔════╝ ██║████╗  ██║██╔════╝██╔════╝██╔══██╗██╔════╝",
-	"██████╔╝█████╗  ██║   ██║█████╗  ██████╔╝███████╗█████╗      █████╗  ██╔██╗ ██║██║  ███╗██║██╔██╗ ██║█████╗  █████╗  ██████╔╝███████╗",
-	"██╔══██╗██╔══╝  ╚██╗ ██╔╝██╔══╝  ██╔══██╗╚════██║██╔══╝      ██╔══╝  ██║╚██╗██║██║   ██║██║██║╚██╗██║██╔══╝  ██╔══╝  ██╔══██╗╚════██║",
-	"██║  ██║███████╗ ╚████╔╝ ███████╗██║  ██║███████║███████╗    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗███████╗██║  ██║███████║",
-	"╚═╝  ╚═╝╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═╝╚══════╝╚══════╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝╚══════╝╚═╝  ╚═╝╚══════╝",
+	"██████╗ ██╗    ███████╗ ██████╗ ██████╗     ██████╗ ███████╗",
+	"██╔══██╗██║    ██╔════╝██╔═══██╗██╔══██╗    ██╔══██╗██╔════╝",
+	"██████╔╝██║    █████╗  ██║   ██║██████╔╝    ██████╔╝█████╗  ",
+	"██╔═══╝ ██║    ██╔══╝  ██║   ██║██╔══██╗    ██╔══██╗██╔══╝  ",
+	"██║     ██║    ██║     ╚██████╔╝██║  ██║    ██║  ██║███████╗",
+	"╚═╝     ╚═╝    ╚═╝      ╚═════╝ ╚═╝  ╚═╝    ╚═╝  ╚═╝╚══════╝",
 ] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -317,6 +374,39 @@ function flattenWrappedLines(text: string, width: number): string[] {
 	return result;
 }
 
+function createMarkdownTheme(textStyle: (text: string) => string): MarkdownTheme {
+	return {
+		heading: textStyle,
+		link: textStyle,
+		linkUrl: styles.subtle,
+		code: textStyle,
+		codeBlock: textStyle,
+		codeBlockBorder: styles.subtle,
+		quote: textStyle,
+		quoteBorder: styles.subtle,
+		hr: styles.subtle,
+		listBullet: (text: string) => textStyle(text.replace(/^- /, "• ")),
+		bold: (text: string) => sgr("1", text),
+		italic: (text: string) => sgr("3", text),
+		strikethrough: (text: string) => sgr("9", text),
+		underline: (text: string) => sgr("4", text),
+	};
+}
+
+function renderMarkdownLines(
+	text: string,
+	width: number,
+	textStyle: (text: string) => string,
+	defaultTextStyle?: DefaultTextStyle,
+): string[] {
+	if (text.trim().length === 0) {
+		return [""];
+	}
+
+	const markdown = new Markdown(text, 0, 0, createMarkdownTheme(textStyle), defaultTextStyle);
+	return markdown.render(Math.max(1, width));
+}
+
 function limitLines(lines: string[], maxLines: number, trailer: string): string[] {
 	if (lines.length <= maxLines) {
 		return lines;
@@ -339,6 +429,16 @@ function formatClock(timestamp: number): string {
 		second: "2-digit",
 		hour12: false,
 	}).format(new Date(timestamp));
+}
+
+function formatSessionTimestamp(timestamp: Date): string {
+	return timestamp.toISOString().slice(0, 16).replace("T", " ");
+}
+
+function getTimelineTimestamp(message: AgentMessage): number {
+	return typeof (message as { timestamp?: unknown }).timestamp === "number"
+		? ((message as { timestamp: number }).timestamp ?? Date.now())
+		: Date.now();
 }
 
 function formatCount(value: number): string {
@@ -461,17 +561,6 @@ function forceTildeHome(text: string): string {
 	return result;
 }
 
-function formatRelativePath(basePath: string, targetPath: string): string {
-	const relativePath = relative(basePath, targetPath);
-	if (relativePath.length === 0) {
-		return ".";
-	}
-	if (!relativePath.startsWith("..")) {
-		return `./${relativePath}`;
-	}
-	return formatPath(targetPath);
-}
-
 function openExternalUrl(url: string): void {
 	try {
 		if (process.platform === "win32") {
@@ -557,6 +646,30 @@ function renderFilledBlock(width: number, title: string, lines: string[], tone: 
 	];
 }
 
+function renderCompactFilledBlock(
+	width: number,
+	title: string,
+	lines: string[],
+	tone: FilledTone,
+	paddingX = 1,
+): string[] {
+	const innerWidth = Math.max(1, width - paddingX * 2);
+	const wrappedLines: string[] = [];
+
+	for (const line of lines.length > 0 ? lines : [""]) {
+		if (line.length === 0) {
+			wrappedLines.push("");
+			continue;
+		}
+		wrappedLines.push(...flattenWrappedLines(line, innerWidth));
+	}
+
+	return [
+		renderFilledLine(title, width, paddingX, tone.fg, tone.bg),
+		...wrappedLines.map((line) => renderFilledLine(line, width, paddingX, tone.fg, tone.bg)),
+	];
+}
+
 function renderRailBlock(width: number, title: string, lines: string[], tone: BoxTone): string[] {
 	const innerWidth = Math.max(1, width - 2);
 	const wrappedLines: string[] = [];
@@ -574,11 +687,182 @@ function renderRailBlock(width: number, title: string, lines: string[], tone: Bo
 	];
 }
 
+function padBlockLines(lines: string[], width: number, paddingX = 1): string[] {
+	const innerWidth = Math.max(1, width - paddingX * 2);
+	const padding = " ".repeat(Math.max(0, paddingX));
+	return lines.map((line) => `${padding}${fitLine(line, innerWidth)}${padding}`);
+}
+
+function detectColorMode(): ColorMode {
+	const colorterm = process.env.COLORTERM;
+	if (colorterm === "truecolor" || colorterm === "24bit") {
+		return "truecolor";
+	}
+	if (process.env.WT_SESSION) {
+		return "truecolor";
+	}
+	const term = process.env.TERM || "";
+	if (term === "dumb" || term === "" || term === "linux") {
+		return "256color";
+	}
+	if (process.env.TERM_PROGRAM === "Apple_Terminal") {
+		return "256color";
+	}
+	if (term === "screen" || term.startsWith("screen-") || term.startsWith("screen.")) {
+		return "256color";
+	}
+	return "truecolor";
+}
+
+const colorMode = detectColorMode();
+const cubeValues = [0, 95, 135, 175, 215, 255];
+const grayValues = Array.from({ length: 24 }, (_, index) => 8 + index * 10);
+const phaseGradientStops: readonly RgbColor[] = [
+	{ r: 190, g: 197, b: 208 },
+	{ r: 118, g: 148, b: 194 },
+	{ r: 126, g: 187, b: 255 },
+	{ r: 195, g: 221, b: 255 },
+	{ r: 118, g: 148, b: 194 },
+	{ r: 190, g: 197, b: 208 },
+];
+const stepGradientStops: readonly RgbColor[] = [
+	{ r: 124, g: 132, b: 144 },
+	{ r: 92, g: 119, b: 158 },
+	{ r: 112, g: 166, b: 226 },
+	{ r: 168, g: 196, b: 231 },
+	{ r: 92, g: 119, b: 158 },
+	{ r: 124, g: 132, b: 144 },
+];
+
+function findClosestCubeIndex(value: number): number {
+	let minDistance = Infinity;
+	let minIndex = 0;
+	for (const [index, candidate] of cubeValues.entries()) {
+		const distance = Math.abs(value - candidate);
+		if (distance < minDistance) {
+			minDistance = distance;
+			minIndex = index;
+		}
+	}
+	return minIndex;
+}
+
+function findClosestGrayIndex(value: number): number {
+	let minDistance = Infinity;
+	let minIndex = 0;
+	for (const [index, candidate] of grayValues.entries()) {
+		const distance = Math.abs(value - candidate);
+		if (distance < minDistance) {
+			minDistance = distance;
+			minIndex = index;
+		}
+	}
+	return minIndex;
+}
+
+function colorDistance(left: RgbColor, right: RgbColor): number {
+	const red = left.r - right.r;
+	const green = left.g - right.g;
+	const blue = left.b - right.b;
+	return red * red * 0.299 + green * green * 0.587 + blue * blue * 0.114;
+}
+
+function rgbTo256(color: RgbColor): number {
+	const redIndex = findClosestCubeIndex(color.r);
+	const greenIndex = findClosestCubeIndex(color.g);
+	const blueIndex = findClosestCubeIndex(color.b);
+	const cubeColor = {
+		r: cubeValues[redIndex]!,
+		g: cubeValues[greenIndex]!,
+		b: cubeValues[blueIndex]!,
+	};
+	const cubeDistance = colorDistance(color, cubeColor);
+	const grayValue = Math.round(0.299 * color.r + 0.587 * color.g + 0.114 * color.b);
+	const grayIndex = findClosestGrayIndex(grayValue);
+	const grayColor = {
+		r: grayValues[grayIndex]!,
+		g: grayValues[grayIndex]!,
+		b: grayValues[grayIndex]!,
+	};
+	const grayDistance = colorDistance(color, grayColor);
+	const spread = Math.max(color.r, color.g, color.b) - Math.min(color.r, color.g, color.b);
+	if (spread < 10 && grayDistance < cubeDistance) {
+		return 232 + grayIndex;
+	}
+	return 16 + 36 * redIndex + 6 * greenIndex + blueIndex;
+}
+
+function colorTextRgb(text: string, color: RgbColor, bold = false): string {
+	if (colorMode === "truecolor") {
+		return sgr(`${bold ? "1;" : ""}38;2;${color.r};${color.g};${color.b}`, text);
+	}
+	return sgr(`${bold ? "1;" : ""}38;5;${rgbTo256(color)}`, text);
+}
+
+function mixChannel(left: number, right: number, ratio: number): number {
+	return Math.round(left + (right - left) * ratio);
+}
+
+function mixRgb(left: RgbColor, right: RgbColor, ratio: number): RgbColor {
+	return {
+		r: mixChannel(left.r, right.r, ratio),
+		g: mixChannel(left.g, right.g, ratio),
+		b: mixChannel(left.b, right.b, ratio),
+	};
+}
+
+function sampleGradient(stops: readonly RgbColor[], position: number): RgbColor {
+	if (stops.length === 0) {
+		return { r: 255, g: 255, b: 255 };
+	}
+	if (stops.length === 1) {
+		return stops[0]!;
+	}
+	const normalizedPosition = ((position % 1) + 1) % 1;
+	const scaledPosition = normalizedPosition * (stops.length - 1);
+	const leftIndex = Math.floor(scaledPosition);
+	const rightIndex = Math.min(stops.length - 1, leftIndex + 1);
+	const ratio = scaledPosition - leftIndex;
+	return mixRgb(stops[leftIndex]!, stops[rightIndex]!, ratio);
+}
+
+function renderAnimatedGradientText(text: string, frame: number, stops: readonly RgbColor[], bold = false): string {
+	const chars = Array.from(text);
+	if (chars.length === 0) {
+		return "";
+	}
+	const phase = frame * 0.07;
+	const span = Math.max(8, chars.length + 10);
+	return chars
+		.map((char, index) => {
+			const position = (index / span + phase) % 1;
+			return colorTextRgb(char, sampleGradient(stops, position), bold);
+		})
+		.join("");
+}
+
 function formatUsage(usage: AssistantMessage["usage"] | undefined): string {
 	if (!usage) {
 		return "usage unavailable";
 	}
+	const cacheRead = usage.cacheRead ?? 0;
+	const cacheWrite = usage.cacheWrite ?? 0;
+	if (usage.input === 0 && usage.output === 0 && cacheRead === 0 && cacheWrite === 0 && usage.cost.total === 0) {
+		return "usage unavailable";
+	}
 	return `${formatCount(usage.input)} in | ${formatCount(usage.output)} out | $${usage.cost.total.toFixed(3)}`;
+}
+
+function formatUsageMetrics(usage: AssistantMessage["usage"] | undefined): string | undefined {
+	if (!usage) {
+		return undefined;
+	}
+	const cacheRead = usage.cacheRead ?? 0;
+	const cacheWrite = usage.cacheWrite ?? 0;
+	if (usage.input === 0 && usage.output === 0 && cacheRead === 0 && cacheWrite === 0 && usage.cost.total === 0) {
+		return undefined;
+	}
+	return formatUsage(usage);
 }
 
 function summarizeToolArgs(toolName: string, args: unknown): string {
@@ -600,6 +884,46 @@ function summarizeToolArgs(toolName: string, args: unknown): string {
 		case "validate_artifact":
 			if (typeof args.artifact_path === "string") {
 				return clampText(args.artifact_path, 220);
+			}
+			break;
+		case "notebook_write":
+			if (typeof args.key === "string") {
+				return clampText(`write ${args.key}`, 220);
+			}
+			break;
+		case "notebook_append":
+			if (typeof args.key === "string") {
+				return clampText(`append ${args.key}`, 220);
+			}
+			break;
+		case "notebook_read":
+			return typeof args.key === "string" ? clampText(`read ${args.key}`, 220) : "read notebook";
+		case "notebook_delete":
+			if (typeof args.key === "string") {
+				return clampText(`delete ${args.key}`, 220);
+			}
+			break;
+		case "surface_map":
+		case "logic_map":
+		case "workspace_graph":
+		case "finding_gate": {
+			const action = typeof args.action === "string" ? args.action : "run";
+			const target =
+				typeof args.id === "string"
+					? args.id
+					: typeof args.label === "string"
+						? args.label
+						: typeof args.query === "string"
+							? args.query
+							: undefined;
+			return clampText(target ? `${action} ${target}` : action, 220);
+		}
+		case "plan":
+			if (args.clear === true) {
+				return "clear plan";
+			}
+			if (Array.isArray(args.phases)) {
+				return `${args.phases.length} phases`;
 			}
 			break;
 	}
@@ -635,11 +959,72 @@ function formatToolOutputSummary(toolName: string, details: unknown, isError: bo
 	}
 
 	if (toolName === "plan") {
-		const phases = typeof details.phases === "number" ? `${details.phases} phases` : "plan updated";
-		return [styles.cyan(phases)];
+		if (details.cleared === true) {
+			return [styles.green("plan cleared")];
+		}
+		return [];
+	}
+
+	if (
+		toolName === "notebook_write" ||
+		toolName === "notebook_append" ||
+		toolName === "notebook_delete" ||
+		toolName === "notebook_read"
+	) {
+		const key = typeof details.key === "string" ? `"${details.key}"` : "notebook";
+		const entries = typeof details.entries === "number" ? `${details.entries} entries` : undefined;
+		return [entries ? `${styles.text(key)} ${styles.dim(`| ${entries}`)}` : styles.text(key)];
+	}
+
+	if (toolName === "surface_map") {
+		const id = typeof details.id === "string" ? details.id : "surface map";
+		const surfaces = typeof details.surfaces === "number" ? `${details.surfaces} tracked` : undefined;
+		return [surfaces ? `${styles.text(id)} ${styles.dim(`| ${surfaces}`)}` : styles.text(id)];
+	}
+
+	if (toolName === "logic_map") {
+		const id = typeof details.id === "string" ? details.id : "logic map";
+		const rules = typeof details.rules === "number" ? `${details.rules} rules` : undefined;
+		return [rules ? `${styles.text(id)} ${styles.dim(`| ${rules}`)}` : styles.text(id)];
+	}
+
+	if (toolName === "workspace_graph") {
+		const nodes = typeof details.nodes === "number" ? `${details.nodes} nodes` : "workspace graph";
+		const exact = typeof details.exact === "number" ? `${details.exact} exact` : undefined;
+		const related = typeof details.related === "number" ? `${details.related} related` : undefined;
+		const parts = [nodes, exact, related].filter((part) => typeof part === "string");
+		return [styles.text(parts.join(" | "))];
+	}
+
+	if (toolName === "finding_gate") {
+		const recommendation =
+			typeof details.recommendation === "string" ? details.recommendation.replaceAll("_", " ") : "reviewed";
+		const findingId = typeof details.findingId === "string" ? details.findingId : undefined;
+		return [
+			findingId ? `${styles.text(recommendation)} ${styles.dim(`| ${findingId}`)}` : styles.text(recommendation),
+		];
 	}
 
 	return [isError ? styles.red("execution failed") : styles.green("execution complete")];
+}
+
+function shouldShowToolPreview(entry: ToolTimelineEntry): boolean {
+	if (entry.output.trim().length === 0) {
+		return false;
+	}
+
+	if (
+		entry.toolName === "notebook_write" ||
+		entry.toolName === "notebook_append" ||
+		entry.toolName === "notebook_delete" ||
+		entry.toolName === "logic_map" ||
+		entry.toolName === "surface_map" ||
+		entry.toolName === "plan"
+	) {
+		return false;
+	}
+
+	return true;
 }
 
 function previewContentText(text: string, lineWidth: number, maxLines: number): string[] {
@@ -724,8 +1109,10 @@ class SecurityConsoleApp implements Component, Focusable {
 	private planScrollOffset = 0;
 	private showSurfaces = false;
 	private surfaceScrollOffset = 0;
+	private resumeSelector?: ResumeSelectorState;
 	private oauthSelector?: OAuthSelectorState;
 	private oauthDialog?: OAuthDialogState;
+	private planAnimationTimer?: NodeJS.Timeout;
 	private _focused = false;
 
 	get focused(): boolean {
@@ -745,10 +1132,10 @@ class SecurityConsoleApp implements Component, Focusable {
 		private readonly ui: TUI,
 	) {
 		const editorTheme: EditorTheme = {
-			borderColor: styles.yellow,
+			borderColor: styles.primary,
 			selectList: {
-				selectedPrefix: (text) => styles.yellow(text),
-				selectedText: (text) => sgr("1;38;5;231;48;2;42;39;8", text),
+				selectedPrefix: (text) => styles.primary(text),
+				selectedText: (text) => sgr("1;38;5;231;48;5;24", text),
 				description: (text) => styles.subtle(text),
 				scrollInfo: (text) => styles.subtle(text),
 				noMatch: (text) => styles.subtle(text),
@@ -762,6 +1149,9 @@ class SecurityConsoleApp implements Component, Focusable {
 					{ name: "login", description: "Login with an OAuth provider" },
 					{ name: "logout", description: "Logout from an OAuth provider" },
 					{ name: "new", description: "Start a new conversation" },
+					{ name: "option", description: "Choose a recommended option" },
+					{ name: "graph", description: "Export the current research graph to HTML" },
+					{ name: "resume", description: "Resume a stored conversation" },
 					{ name: "status", description: "Ask the agent for a status summary" },
 					{ name: "model", description: "Show or change the active model" },
 					{ name: "effort", description: "Show or change the reasoning effort" },
@@ -782,11 +1172,7 @@ class SecurityConsoleApp implements Component, Focusable {
 		});
 
 		this.pushStartupBanner();
-		this.pushNotice(
-			"session",
-			`${formatRelativePath(this.runtime.workspaceRoot, this.runtime.cwd)} attached to ${basename(this.runtime.workspaceRoot)}. ${this.runtime.contextFiles.length} context file${this.runtime.contextFiles.length === 1 ? "" : "s"} loaded.`,
-			"neutral",
-		);
+		this.pushStartupRecommendations();
 		if (this.runtime.validationSpec) {
 			this.pushNotice(
 				"validation",
@@ -794,6 +1180,7 @@ class SecurityConsoleApp implements Component, Focusable {
 				"success",
 			);
 		}
+		this.syncPlanAnimation();
 	}
 
 	waitForExit(): Promise<void> {
@@ -802,6 +1189,7 @@ class SecurityConsoleApp implements Component, Focusable {
 
 	dispose(): void {
 		this.unsubscribe();
+		this.stopPlanAnimation();
 	}
 
 	invalidate(): void {
@@ -819,6 +1207,11 @@ class SecurityConsoleApp implements Component, Focusable {
 
 		if (this.oauthSelector) {
 			this.handleOAuthSelectorInput(data);
+			return;
+		}
+
+		if (this.resumeSelector) {
+			this.handleResumeSelectorInput(data);
 			return;
 		}
 
@@ -866,13 +1259,22 @@ class SecurityConsoleApp implements Component, Focusable {
 	}
 
 	render(width: number): string[] {
+		this.syncPlanAnimation();
 		const effectiveWidth = Math.max(48, width);
+		const planPanel = this.renderPlanPanel(effectiveWidth);
 		const snapshot = this.renderSnapshot(effectiveWidth);
 		this.editor.disableSubmit = this.runtime.state.isStreaming;
 		this.editor.borderColor = styles.subtle;
 		const composer = this.renderActiveInputSection(effectiveWidth);
 		const timeline = this.renderTimeline(effectiveWidth);
-		const bottomSections = snapshot.length > 0 ? ["", ...snapshot, "", ...composer] : ["", ...composer];
+		const bottomSections: string[] = [];
+		if (planPanel.length > 0) {
+			bottomSections.push("", ...planPanel);
+		}
+		if (snapshot.length > 0) {
+			bottomSections.push("", ...snapshot);
+		}
+		bottomSections.push("", ...composer);
 		const spacerCount = Math.max(0, this.ui.terminal.rows - (timeline.length + bottomSections.length));
 		return [...Array.from({ length: spacerCount }, () => ""), ...timeline, ...bottomSections];
 	}
@@ -887,6 +1289,10 @@ class SecurityConsoleApp implements Component, Focusable {
 			this.ui.requestRender();
 			return;
 		}
+		await this.dispatchPrompt(prompt);
+	}
+
+	private async dispatchPrompt(prompt: string): Promise<void> {
 		if (this.runtime.state.isStreaming) {
 			this.setStatus("Run already active. Wait for it to finish.");
 			return;
@@ -919,6 +1325,15 @@ class SecurityConsoleApp implements Component, Focusable {
 			case "/new":
 				this.handleNewCommand();
 				return true;
+			case "/option":
+				this.handleOptionCommand(args);
+				return true;
+			case "/graph":
+				void this.handleGraphCommand(args);
+				return true;
+			case "/resume":
+				this.handleResumeCommand(args);
+				return true;
 			case "/surfaces":
 				this.showSurfaces = !this.showSurfaces;
 				if (this.showSurfaces) {
@@ -934,6 +1349,44 @@ class SecurityConsoleApp implements Component, Focusable {
 			default:
 				return false;
 		}
+	}
+
+	private handleOptionCommand(args: string): void {
+		const option = args.trim();
+		if (option.length === 0) {
+			this.pushNotice("option", "Usage: /option <letter|number>", "warning");
+			return;
+		}
+
+		if (!/^[a-z0-9]+$/i.test(option)) {
+			this.pushNotice("option", `Invalid option "${option}". Use a letter or number.`, "error");
+			return;
+		}
+
+		void this.dispatchPrompt(`Let's go with option ${option}`);
+	}
+
+	private async handleGraphCommand(args: string): Promise<void> {
+		if (args.trim().length > 0) {
+			this.pushNotice("graph", "Usage: /graph", "warning");
+			this.ui.requestRender();
+			return;
+		}
+
+		try {
+			const result = await this.runtime.exportResearchGraphHtml();
+			const statsLabel = `${result.nodeCount} nodes | ${result.edgeCount} edges`;
+			this.pushNotice(
+				"graph",
+				`Research graph exported to ${hyperlink(result.url, result.url)} (${statsLabel}).`,
+				result.nodeCount === 0 ? "warning" : "success",
+			);
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.pushNotice("graph", `Failed to export research graph: ${message}`, "error");
+		}
+
+		this.ui.requestRender();
 	}
 
 	private handleModelCommand(args: string): void {
@@ -1042,29 +1495,123 @@ class SecurityConsoleApp implements Component, Focusable {
 			this.pushNotice("new", "Wait for the active run to finish before starting a new conversation.", "warning");
 			return;
 		}
-		if (this.oauthDialog || this.oauthSelector) {
-			this.pushNotice("new", "Finish the active OAuth flow before starting a new conversation.", "warning");
+		if (this.oauthDialog || this.oauthSelector || this.resumeSelector) {
+			this.pushNotice(
+				"new",
+				"Finish the active selector or OAuth flow before starting a new conversation.",
+				"warning",
+			);
 			return;
 		}
 
-		this.runtime.reset();
-		this.timeline.length = 0;
-		this.toolsById.clear();
-		this.currentAssistantId = undefined;
-		this.runningTools = 0;
-		this.planScrollOffset = 0;
-		this.surfaceScrollOffset = 0;
-		this.editor.setText("");
+		this.runtime.startNewConversation();
+		this.resetConversationView();
 		this.pushNotice(
 			"session",
-			`Started a new conversation in ${basename(this.runtime.workspaceRoot)}. Workspace notes and surface state were preserved.`,
+			`Started a new stored conversation in ${basename(this.runtime.workspaceRoot)}. Workspace notes and surface state were preserved.`,
 			"neutral",
 		);
+		this.pushStartupRecommendations();
 		this.ui.requestRender();
 	}
 
+	private handleResumeCommand(args: string): void {
+		if (this.runtime.state.isStreaming) {
+			this.pushNotice(
+				"resume",
+				"Wait for the active run to finish before resuming another conversation.",
+				"warning",
+			);
+			return;
+		}
+		if (this.oauthDialog || this.oauthSelector) {
+			this.pushNotice("resume", "Finish the active OAuth flow before resuming another conversation.", "warning");
+			return;
+		}
+
+		const sessionArg = args.trim();
+		if (sessionArg.length === 0) {
+			this.openResumeSelector();
+			return;
+		}
+
+		const session = this.runtime.resolveStoredConversation(sessionArg);
+		if (!session) {
+			this.pushNotice("resume", `No stored conversation matched "${sessionArg}".`, "error");
+			return;
+		}
+
+		this.resumeStoredConversation(session.path);
+	}
+
+	private openResumeSelector(): void {
+		const sessions = this.runtime.listStoredConversations();
+		if (sessions.length === 0) {
+			this.pushNotice("resume", "No stored conversations were found for this workspace.", "warning");
+			return;
+		}
+
+		this.resumeSelector = {
+			sessions,
+			selectedIndex: 0,
+		};
+		this.ui.requestRender();
+	}
+
+	private handleResumeSelectorInput(data: string): void {
+		const selector = this.resumeSelector;
+		if (!selector) {
+			return;
+		}
+
+		const keybindings = getKeybindings();
+		if (keybindings.matches(data, "tui.select.up")) {
+			selector.selectedIndex = Math.max(0, selector.selectedIndex - 1);
+			this.ui.requestRender();
+			return;
+		}
+
+		if (keybindings.matches(data, "tui.select.down")) {
+			selector.selectedIndex = Math.min(selector.sessions.length - 1, selector.selectedIndex + 1);
+			this.ui.requestRender();
+			return;
+		}
+
+		if (keybindings.matches(data, "tui.select.confirm")) {
+			const session = selector.sessions[selector.selectedIndex];
+			this.resumeSelector = undefined;
+			this.ui.requestRender();
+			if (session) {
+				this.resumeStoredConversation(session.path);
+			}
+			return;
+		}
+
+		if (keybindings.matches(data, "tui.select.cancel")) {
+			this.resumeSelector = undefined;
+			this.ui.requestRender();
+		}
+	}
+
+	private resumeStoredConversation(sessionPath: string): void {
+		try {
+			const session = this.runtime.resumeStoredConversation(sessionPath);
+			this.resetConversationView();
+			this.restoreConversationTimeline();
+			this.pushNotice(
+				"resume",
+				`Resumed conversation ${session.id.slice(0, 8)} from ${formatSessionTimestamp(session.modified)}.`,
+				"success",
+			);
+			this.ui.requestRender();
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.pushNotice("resume", message, "error");
+		}
+	}
+
 	private openOAuthSelector(mode: "login" | "logout"): void {
-		if (this.oauthDialog) {
+		if (this.oauthDialog || this.resumeSelector) {
 			this.pushNotice("auth", "Finish the active OAuth flow before opening another auth command.", "warning");
 			return;
 		}
@@ -1472,6 +2019,52 @@ class SecurityConsoleApp implements Component, Focusable {
 		this.setStatus(isError ? `${entry.toolName} returned an error` : `${entry.toolName} completed successfully`);
 	}
 
+	private resetConversationView(): void {
+		this.timeline.length = 0;
+		this.toolsById.clear();
+		this.currentAssistantId = undefined;
+		this.runningTools = 0;
+		this.planScrollOffset = 0;
+		this.surfaceScrollOffset = 0;
+		this.editor.setText("");
+	}
+
+	private restoreConversationTimeline(): void {
+		for (const message of this.runtime.conversationMessages) {
+			if (!("role" in message)) {
+				continue;
+			}
+
+			if (message.role === "user") {
+				this.appendTimeline({
+					id: `user:${getTimelineTimestamp(message)}:${this.timeline.length}`,
+					kind: "user",
+					timestamp: getTimelineTimestamp(message),
+					text: extractMessageText(message),
+				});
+				continue;
+			}
+
+			if (message.role !== "assistant") {
+				continue;
+			}
+
+			const content = extractAssistantContent(message);
+			this.appendTimeline({
+				id: `assistant:${getTimelineTimestamp(message)}:${this.timeline.length}`,
+				kind: "assistant",
+				timestamp: getTimelineTimestamp(message),
+				text: content.text,
+				thinking: content.thinking,
+				streaming: false,
+				stopReason: message.stopReason,
+				errorMessage: message.errorMessage,
+				usage: message.usage,
+				toolCalls: content.toolCalls,
+			});
+		}
+	}
+
 	private rememberTool(toolName: string): void {
 		const normalized = toolName.trim();
 		if (normalized.length === 0) {
@@ -1503,7 +2096,27 @@ class SecurityConsoleApp implements Component, Focusable {
 			id: `banner:${Date.now()}:${this.timeline.length}`,
 			kind: "banner",
 			timestamp: Date.now(),
-			lines: startupBannerLines.map((line) => styles.yellow(line)),
+			lines: startupBannerLines.map((line) => styles.primary(line)),
+		});
+	}
+
+	private pushStartupRecommendations(): void {
+		const text = this.runtime.getStartupRecommendedActions();
+		if (!text) {
+			return;
+		}
+
+		this.appendTimeline({
+			id: `recommended:${Date.now()}:${this.timeline.length}`,
+			kind: "assistant",
+			timestamp: Date.now(),
+			text,
+			thinking: "",
+			streaming: false,
+			title: "Recommended Actions",
+			metaText: null,
+			statusLabel: null,
+			toolCalls: 0,
 		});
 	}
 
@@ -1512,17 +2125,12 @@ class SecurityConsoleApp implements Component, Focusable {
 	}
 
 	private renderSnapshot(width: number): string[] {
-		const sections: Array<{ title: string; lines: string[] }> = [];
-		if (this.hasPlan()) {
-			sections.push({
-				title: `${brandBadge("PLAN")} ${styles.bright("execution")}`,
-				lines: this.renderPlanLines(this.runtime.planState.current),
-			});
-		}
+		const sections: Array<{ title: string; lines: string[]; tone: FilledTone }> = [];
 		if (this.showSurfaces) {
 			sections.push({
 				title: `${brandBadge("SURFACES")} ${styles.bright("priority targets")}`,
 				lines: this.renderSurfaceLines(this.runtime.surfaceMap.read().surfaces),
+				tone: filledTones.snapshotCard,
 			});
 		}
 		if (sections.length === 0) {
@@ -1534,7 +2142,7 @@ class SecurityConsoleApp implements Component, Focusable {
 		for (let index = 0; index < sections.length; index += columnCount) {
 			const chunk = sections.slice(index, index + columnCount);
 			if (chunk.length === 1) {
-				rows.push(...renderFilledBlock(width, chunk[0]!.title, chunk[0]!.lines, filledTones.snapshotCard));
+				rows.push(...renderFilledBlock(width, chunk[0]!.title, chunk[0]!.lines, chunk[0]!.tone));
 			} else {
 				const totalGap = gap * (chunk.length - 1);
 				const availableWidth = Math.max(chunk.length, width - totalGap);
@@ -1543,10 +2151,10 @@ class SecurityConsoleApp implements Component, Focusable {
 					columnIndex === chunk.length - 1 ? availableWidth - baseWidth * (chunk.length - 1) : baseWidth,
 				);
 				const columns = chunk.map((section, columnIndex) =>
-					renderFilledBlock(widths[columnIndex]!, section.title, section.lines, filledTones.snapshotCard),
+					renderFilledBlock(widths[columnIndex]!, section.title, section.lines, section.tone),
 				);
-				const blankLines = widths.map((columnWidth) =>
-					renderFilledLine("", columnWidth, 1, filledTones.snapshotCard.fg, filledTones.snapshotCard.bg),
+				const blankLines = chunk.map((section, columnIndex) =>
+					renderFilledLine("", widths[columnIndex]!, 1, section.tone.fg, section.tone.bg),
 				);
 				const maxHeight = Math.max(...columns.map((column) => column.length));
 
@@ -1563,17 +2171,118 @@ class SecurityConsoleApp implements Component, Focusable {
 		return rows;
 	}
 
-	private renderTimeline(width: number): string[] {
-		if (this.timeline.length === 0) {
-			return renderRailBlock(
-				width,
-				styles.bright("no activity yet"),
-				[styles.dim("Submit a prompt to begin.")],
-				tones.notice,
+	private renderPlanPanel(width: number): string[] {
+		const plan = this.runtime.planState.current;
+		if (!plan || plan.phases.length === 0) {
+			return [];
+		}
+
+		const maxOffset = Math.max(0, plan.phases.length - planPanelVisibleLimit);
+		const offset = Math.max(0, Math.min(this.planScrollOffset, maxOffset));
+		if (offset !== this.planScrollOffset) {
+			this.planScrollOffset = offset;
+		}
+
+		const visiblePhases = plan.phases.slice(offset, offset + planPanelVisibleLimit);
+		const animationFrame = Math.floor(Date.now() / planAnimationIntervalMs);
+		const lines: string[] = [];
+		for (const phase of visiblePhases) {
+			const animateParallelSteps = phase.parallelSteps && phase.status === "in_progress";
+			const normalizedSteps = phase.steps.map((step) => ({
+				text: stripPlanCompletionMarker(step.text),
+				status: step.status,
+			}));
+			const phaseComplete = phase.status === "completed";
+			const phaseMarker = phaseComplete ? styles.green("■") : styles.subtle("■");
+			const phaseLabel =
+				phase.status === "in_progress"
+					? renderAnimatedGradientText(phase.name, animationFrame, phaseGradientStops, true)
+					: styles.bright(phase.name);
+			lines.push(
+				phase.parallelSteps
+					? `${phaseMarker} ${phaseLabel} ${styles.dim("[parallel]")}`
+					: `${phaseMarker} ${phaseLabel}`,
+			);
+			for (const step of normalizedSteps) {
+				const stepMarker = step.status === "completed" ? styles.green("■") : styles.subtle("■");
+				const stepPrefix = `  ${stepMarker} `;
+				const stepIndent = "    ";
+				const stepText = step.text.length > 0 ? step.text : "Untitled step";
+				const wrappedSteps = wrapTextWithAnsi(stepText, Math.max(1, width - visibleWidth(stepPrefix)));
+				if (wrappedSteps.length === 0) {
+					continue;
+				}
+				const animateStep = step.status === "in_progress" || (animateParallelSteps && step.status !== "completed");
+				let charOffset = 0;
+				for (const [stepIndex, wrappedStep] of wrappedSteps.entries()) {
+					const renderedStep = animateStep
+						? renderAnimatedGradientText(wrappedStep, animationFrame + charOffset, stepGradientStops)
+						: styles.subtle(wrappedStep);
+					lines.push(stepIndex === 0 ? `${stepPrefix}${renderedStep}` : `${stepIndent}${renderedStep}`);
+					charOffset += Array.from(wrappedStep).length;
+				}
+			}
+		}
+		if (plan.phases.length > planPanelVisibleLimit) {
+			lines.push(
+				styles.dim(
+					`${offset + 1}-${offset + visiblePhases.length} of ${plan.phases.length} | ${keyHint("app.plan.scrollUp")}/${keyHint("app.plan.scrollDown")}`,
+				),
 			);
 		}
 
-		const cards = this.timeline.map((entry) => this.renderTimelineEntry(entry, width));
+		return lines;
+	}
+
+	private hasAnimatedPlan(): boolean {
+		const plan = this.runtime.planState.current;
+		return !!plan?.phases.some(
+			(phase) => phase.status === "in_progress" || phase.steps.some((step) => step.status === "in_progress"),
+		);
+	}
+
+	private syncPlanAnimation(): void {
+		if (this.hasAnimatedPlan()) {
+			this.startPlanAnimation();
+			return;
+		}
+		this.stopPlanAnimation();
+	}
+
+	private startPlanAnimation(): void {
+		if (this.planAnimationTimer) {
+			return;
+		}
+		this.planAnimationTimer = setInterval(() => {
+			this.ui.requestRender();
+		}, planAnimationIntervalMs);
+	}
+
+	private stopPlanAnimation(): void {
+		if (!this.planAnimationTimer) {
+			return;
+		}
+		clearInterval(this.planAnimationTimer);
+		this.planAnimationTimer = undefined;
+	}
+
+	private renderTimeline(width: number): string[] {
+		const contentWidth = Math.max(1, width - 2);
+		if (this.timeline.length === 0) {
+			return padBlockLines(
+				renderRailBlock(
+					contentWidth,
+					styles.bright("no activity yet"),
+					[styles.dim("Submit a prompt to begin.")],
+					tones.notice,
+				),
+				width,
+			);
+		}
+
+		const cards = this.timeline
+			.map((entry) => this.renderTimelineEntry(entry, contentWidth))
+			.filter((card) => card.length > 0);
 		const lines: string[] = [];
 		for (const card of cards) {
 			if (lines[lines.length - 1] !== "") {
@@ -1581,7 +2290,7 @@ class SecurityConsoleApp implements Component, Focusable {
 			}
 			lines.push(...card);
 		}
-		return lines;
+		return padBlockLines(lines, width);
 	}
 
 	private renderTimelineEntry(entry: TimelineEntry, width: number): string[] {
@@ -1623,32 +2332,44 @@ class SecurityConsoleApp implements Component, Focusable {
 			: entry.stopReason === "error" || entry.stopReason === "aborted"
 				? filledTones.assistantError
 				: filledTones.assistantSuccess;
-		const thinkingTone = filledTones.assistantPending;
 		const bodyWidth = Math.max(1, width - 2);
+		const responseUsage = formatUsageMetrics(entry.usage);
+		const responseMetaText = `response @ ${formatClock(entry.timestamp)}${responseUsage ? ` | ${responseUsage}` : ""}`;
+		const thoughtMetaText = `thought @ ${formatClock(entry.timestamp)}${responseUsage ? ` | ${responseUsage}` : ""}`;
 		const stateLabel = entry.streaming
 			? "streaming"
 			: entry.stopReason === "error" || entry.stopReason === "aborted"
 				? entry.stopReason
 				: "complete";
 		const blocks: string[] = [];
-		const responseTitle = renderAlignedLine(
-			responseTone.title("AGENT response"),
-			responseTone.status(stateLabel),
-			bodyWidth,
-		);
-		const responseLines: string[] = [
-			responseTone.meta(`agent @ ${formatClock(entry.timestamp)} | ${formatUsage(entry.usage)}`),
-		];
-
-		if (entry.text.trim().length > 0) {
-			responseLines.push("");
-			responseLines.push(...flattenWrappedLines(entry.text, bodyWidth).map((line) => responseTone.body(line)));
+		const defaultMetaText = entry.metaText ?? responseMetaText;
+		const useMetaHeader = entry.title === undefined && entry.metaText !== null;
+		const usePlainResponse = entry.title === undefined && entry.metaText !== null;
+		const responseLabel = useMetaHeader
+			? responseTone.meta(defaultMetaText)
+			: responseTone.title(entry.title ?? "AGENT response");
+		const responseTitle = usePlainResponse
+			? renderAlignedLine("", responseTone.meta(defaultMetaText), width)
+			: entry.statusLabel === null
+				? fitLine(responseLabel, usePlainResponse ? width : bodyWidth)
+				: renderAlignedLine(
+						responseLabel,
+						responseTone.status(entry.statusLabel ?? stateLabel),
+						usePlainResponse ? width : bodyWidth,
+					);
+		const responseLines: string[] = [];
+		if (entry.metaText !== null && !useMetaHeader) {
+			responseLines.push(responseTone.meta(defaultMetaText));
 		}
 
-		if (entry.toolCalls > 0 && entry.text.trim().length === 0) {
-			responseLines.push("");
+		if (entry.text.trim().length > 0) {
+			if (responseLines.length > 0) {
+				responseLines.push("");
+			}
 			responseLines.push(
-				responseTone.meta(`awaiting ${entry.toolCalls} tool execution${entry.toolCalls === 1 ? "" : "s"}`),
+				...renderMarkdownLines(entry.text, bodyWidth, responseTone.body, {
+					color: responseTone.body,
+				}),
 			);
 		}
 
@@ -1663,22 +2384,23 @@ class SecurityConsoleApp implements Component, Focusable {
 		}
 
 		if (entry.thinking.trim().length > 0) {
+			const thinkingLines = limitLines(
+				renderMarkdownLines(entry.thinking, bodyWidth, filledTones.thinkingCard.body, {
+					color: filledTones.thinkingCard.body,
+				}),
+				entry.streaming ? 10 : 6,
+				filledTones.thinkingCard.meta("... thinking truncated"),
+			);
 			const thinkingTitle = renderAlignedLine(
-				thinkingTone.title("THINKING trace"),
-				thinkingTone.status(entry.streaming ? "live" : "captured"),
+				styles.bgBadge("THOUGHT", 231, 245),
+				filledTones.thinkingCard.meta(thoughtMetaText),
 				bodyWidth,
 			);
-			const thinkingLines = limitLines(
-				flattenWrappedLines(entry.thinking, bodyWidth),
-				entry.streaming ? 10 : 6,
-				thinkingTone.meta("... thinking truncated"),
-			).map((line) => thinkingTone.thinking(line));
-			blocks.push(...renderFilledBlock(width, thinkingTitle, thinkingLines, thinkingTone));
+			blocks.push(...renderCompactFilledBlock(width, thinkingTitle, thinkingLines, filledTones.thinkingCard));
 		}
 
 		if (
 			entry.text.trim().length > 0 ||
-			entry.toolCalls > 0 ||
 			(entry.streaming && entry.thinking.trim().length === 0) ||
 			entry.stopReason === "error" ||
 			entry.stopReason === "aborted"
@@ -1686,7 +2408,14 @@ class SecurityConsoleApp implements Component, Focusable {
 			if (blocks.length > 0) {
 				blocks.push("");
 			}
-			blocks.push(...renderFilledBlock(width, responseTitle, responseLines, responseTone));
+			if (usePlainResponse) {
+				blocks.push(responseTitle);
+				if (responseLines.length > 0) {
+					blocks.push(...padBlockLines(responseLines, width));
+				}
+			} else {
+				blocks.push(...renderFilledBlock(width, responseTitle, responseLines, responseTone));
+			}
 		}
 
 		return blocks;
@@ -1694,30 +2423,35 @@ class SecurityConsoleApp implements Component, Focusable {
 
 	private renderToolEntry(entry: ToolTimelineEntry, width: number): string[] {
 		const tone =
-			entry.status === "running" ? tones.tool : entry.status === "error" ? tones.toolError : tones.toolSuccess;
+			entry.status === "running"
+				? filledTones.toolPending
+				: entry.status === "error"
+					? filledTones.toolError
+					: filledTones.toolSuccess;
 		const statusBadge =
 			entry.status === "running"
 				? styles.bgBadge("RUNNING", 232, 208)
 				: entry.status === "error"
 					? styles.bgBadge("ERROR", 231, 160)
 					: styles.bgBadge("OK", 232, 114);
+		const bodyWidth = Math.max(1, width - 2);
+		const title = renderAlignedLine(
+			styles.bgBadge(entry.toolName.toUpperCase(), 231, 24),
+			`${tone.meta(`tool @ ${formatClock(entry.timestamp)}`)} ${styles.dim("|")} ${statusBadge}`,
+			bodyWidth,
+		);
+		const summarizedArgs = summarizeToolArgs(entry.toolName, entry.args);
 		const lines: string[] = [
-			styles.dim(`tool @ ${formatClock(entry.timestamp)} | ${summarizeToolArgs(entry.toolName, entry.args)}`),
+			styles.bright(summarizedArgs),
 			...formatToolOutputSummary(entry.toolName, entry.details, entry.status === "error"),
 		];
 
-		if (entry.output.trim().length > 0) {
+		if (shouldShowToolPreview(entry)) {
 			lines.push("");
-			lines.push(styles.subtle("output preview"));
-			lines.push(...previewContentText(entry.output, Math.max(1, width - 4), 8).map((line) => styles.text(line)));
+			lines.push(...previewContentText(entry.output, bodyWidth, 8).map((line) => tone.body(line)));
 		}
 
-		return renderRailBlock(
-			width,
-			`${styles.bgBadge(entry.toolName.toUpperCase(), 232, 226)} ${styles.bright("operation")} ${styles.dim("|")} ${statusBadge}`,
-			lines,
-			tone,
-		);
+		return renderCompactFilledBlock(width, title, lines, tone);
 	}
 
 	private renderNoticeEntry(entry: NoticeTimelineEntry, width: number): string[] {
@@ -1745,20 +2479,16 @@ class SecurityConsoleApp implements Component, Focusable {
 		if (this.oauthSelector) {
 			return this.renderOAuthSelector(width);
 		}
+		if (this.resumeSelector) {
+			return this.renderResumeSelector(width);
+		}
 		return this.renderComposer(width);
 	}
 
-	private renderAppFooter(width: number): string {
+	private renderAppFooter(): string {
 		const workspaceLabel = forceTildeHome(formatFooterWorkspacePath(this.runtime.workspaceRoot));
 		const modelLabel = `${this.runtime.state.model.id} ${this.runtime.state.thinkingLevel}`;
-		const stateBadge = this.runtime.state.isStreaming
-			? styles.bgBadge("LOCKED", 232, 208)
-			: styles.bgBadge("ARMED", 232, 114);
-		return renderAlignedLine(
-			styles.dim(`${modelLabel} • ${workspaceLabel} • ${keyHint("app.exit")} exit`),
-			stateBadge,
-			width,
-		);
+		return styles.dim(` ${modelLabel} • ${workspaceLabel} • ${keyHint("app.exit")} exit`);
 	}
 
 	private renderComposer(width: number): string[] {
@@ -1779,7 +2509,7 @@ class SecurityConsoleApp implements Component, Focusable {
 				renderFilledLine(line, width, composerSurface.paddingX),
 			),
 			renderFilledLine("", width, composerSurface.paddingX),
-			this.renderAppFooter(width),
+			this.renderAppFooter(),
 		];
 	}
 
@@ -1793,7 +2523,7 @@ class SecurityConsoleApp implements Component, Focusable {
 		const lines =
 			selector.providers.length > 0
 				? selector.providers.map((provider, index) => {
-						const prefix = index === selector.selectedIndex ? styles.yellow("> ") : "  ";
+						const prefix = index === selector.selectedIndex ? styles.primary("> ") : "  ";
 						const name =
 							index === selector.selectedIndex ? styles.bright(provider.name) : styles.text(provider.name);
 						const providerId = styles.dim(`(${provider.id})`);
@@ -1820,7 +2550,7 @@ class SecurityConsoleApp implements Component, Focusable {
 				lines,
 				filledTones.snapshotCard,
 			),
-			this.renderAppFooter(width),
+			this.renderAppFooter(),
 		];
 	}
 
@@ -1868,51 +2598,60 @@ class SecurityConsoleApp implements Component, Focusable {
 				lines,
 				filledTones.snapshotCard,
 			),
-			this.renderAppFooter(width),
+			this.renderAppFooter(),
+		];
+	}
+
+	private renderResumeSelector(width: number): string[] {
+		const selector = this.resumeSelector;
+		if (!selector) {
+			return this.renderComposer(width);
+		}
+
+		const maxOffset = Math.max(0, selector.sessions.length - resumePanelVisibleLimit);
+		const offset = Math.max(0, Math.min(selector.selectedIndex - Math.floor(resumePanelVisibleLimit / 2), maxOffset));
+		const visibleSessions = selector.sessions.slice(offset, offset + resumePanelVisibleLimit);
+		const lines = visibleSessions.flatMap((session, index) => {
+			const sessionIndex = offset + index;
+			const prefix = sessionIndex === selector.selectedIndex ? styles.primary("> ") : "  ";
+			const title =
+				sessionIndex === selector.selectedIndex
+					? styles.bright(compactText(session.name ?? session.firstMessage, 72))
+					: styles.text(compactText(session.name ?? session.firstMessage, 72));
+			const meta = styles.dim(
+				`${session.id.slice(0, 8)} • ${formatSessionTimestamp(session.modified)} • ${session.messageCount} msg`,
+			);
+			return [`${prefix}${title}`, `  ${meta}`];
+		});
+
+		if (selector.sessions.length > resumePanelVisibleLimit) {
+			lines.push(
+				styles.dim(
+					`${offset + 1}-${offset + visibleSessions.length} of ${selector.sessions.length} | ${keyHint("tui.select.up")}/${keyHint("tui.select.down")}`,
+				),
+			);
+		}
+		lines.push("");
+		lines.push(
+			styles.dim(
+				`${keyHint("tui.select.up")}/${keyHint("tui.select.down")} move • ${keyHint("tui.select.confirm")} select • ${keyHint("tui.select.cancel")} cancel`,
+			),
+		);
+
+		return [
+			...renderFilledBlock(
+				width,
+				`${brandBadge("RESUME")} ${styles.bright("stored conversations")}`,
+				lines,
+				filledTones.snapshotCard,
+			),
+			this.renderAppFooter(),
 		];
 	}
 
 	private hasPlan(): boolean {
 		const plan = this.runtime.planState.current;
 		return !!plan && plan.phases.length > 0;
-	}
-
-	private renderPlanLines(plan: ResearchPlan | undefined): string[] {
-		if (!plan || plan.phases.length === 0) {
-			return [
-				styles.subtle("no saved execution plan"),
-				styles.dim("ask the agent to call the plan tool early in the run"),
-			];
-		}
-
-		const maxOffset = Math.max(0, plan.phases.length - planPanelVisibleLimit);
-		const offset = Math.max(0, Math.min(this.planScrollOffset, maxOffset));
-		if (offset !== this.planScrollOffset) {
-			this.planScrollOffset = offset;
-		}
-
-		const visiblePhases = plan.phases.slice(offset, offset + planPanelVisibleLimit);
-		const lines = [styles.dim(`${plan.createdAt.replace("T", " ").slice(0, 19)}Z`)];
-		for (const [index, phase] of visiblePhases.entries()) {
-			lines.push(
-				`${styles.cyan(`${offset + index + 1}. ${phase.name}`)} ${styles.dim(phase.parallelSteps ? "[parallel]" : "[serial]")}`,
-			);
-			const leadStep = phase.steps[0];
-			if (leadStep) {
-				const summary = compactText(leadStep, 72);
-				if (summary.length > 0) {
-					lines.push(styles.dim(summary));
-				}
-			}
-		}
-		if (plan.phases.length > planPanelVisibleLimit) {
-			lines.push(
-				styles.dim(
-					`${offset + 1}-${offset + visiblePhases.length} of ${plan.phases.length} | ${keyHint("app.plan.scrollUp")}/${keyHint("app.plan.scrollDown")}`,
-				),
-			);
-		}
-		return lines;
 	}
 
 	private renderSurfaceLines(surfaces: Record<string, SurfaceRecord>): string[] {

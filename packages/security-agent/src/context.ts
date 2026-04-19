@@ -6,7 +6,8 @@ export interface WorkspaceContextFile {
 	content: string;
 }
 
-const CONTEXT_FILENAMES = ["AGENTS.md", "CLAUDE.md", "SECURITY.md", "SCOPE.md"];
+export const CONTEXT_FILENAMES = ["AGENTS.md", "CLAUDE.md", "SECURITY.md", "SCOPE.md"] as const;
+const CONTEXT_FILENAME_PATTERN = new RegExp(`(^|[\\\\/:\\s])(${CONTEXT_FILENAMES.join("|")})\\b`, "i");
 const WORKSPACE_ROOT_MARKERS = [
 	".git",
 	".pire",
@@ -48,6 +49,14 @@ function hasWorkspaceMarker(dir: string): boolean {
 		}
 	}
 	return false;
+}
+
+export function containsWorkspaceContextReference(value: string): boolean {
+	return CONTEXT_FILENAME_PATTERN.test(value);
+}
+
+export function isWorkspaceContextPath(filePath: string): boolean {
+	return containsWorkspaceContextReference(filePath);
 }
 
 export function detectWorkspaceRoot(cwd: string): string {
@@ -103,6 +112,7 @@ export function loadWorkspaceContextFiles(cwd: string, workspaceRoot?: string): 
 export interface InjectedContextOptions {
 	cwd: string;
 	contextFiles: WorkspaceContextFile[];
+	recommendedActionsText?: string;
 	notebookText: string;
 	surfaceMapText: string;
 	logicMapText: string;
@@ -141,6 +151,16 @@ export function formatInjectedContext(options: InjectedContextOptions): string {
 		for (const file of options.contextFiles) {
 			sections.push("", `## ${file.path}`, "", file.content);
 		}
+	}
+
+	if (options.recommendedActionsText?.trim()) {
+		sections.push(
+			"",
+			"[Recommended Actions]",
+			"Use these option labels if the user refers to a startup recommendation by letter or number. Numeric aliases follow list order: 1=A, 2=B, 3=C, and so on.",
+			"",
+			options.recommendedActionsText,
+		);
 	}
 
 	sections.push("", options.notebookText);

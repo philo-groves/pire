@@ -1,20 +1,29 @@
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { Agent, type AgentEvent, type AgentMessage, type ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { Api, ImageContent, Model, TextContent } from "@mariozechner/pi-ai";
 import { getConfiguredApiKey } from "./auth.js";
 import {
+	containsWorkspaceContextReference,
 	formatInjectedContext,
 	loadWorkspaceContextFiles,
 	resolveWorkspaceRoot,
 	type WorkspaceContextFile,
 } from "./context.js";
 import { type DebugSpec, loadDebugSpec } from "./debug-spec.js";
-import { LogicMapStore } from "./logic-map/store.js";
-import { clampThinkingLevel } from "./models.js";
-import { NotebookStore } from "./notebook/store.js";
+import { type ResearchGraphHtmlResult, writeResearchGraphHtml } from "./graph-export.js";
+import { type LogicMapData, LogicMapStore, type LogicRecord } from "./logic-map/store.js";
+import { clampThinkingLevel, resolveModel } from "./models.js";
+import { type NotebookData, NotebookStore } from "./notebook/store.js";
 import { SECURITY_SYSTEM_PROMPT } from "./prompt.js";
+import {
+	listSessions,
+	readSessionInfo,
+	type SessionContext,
+	type SessionInfo,
+	SessionManager,
+} from "./session-manager.js";
 import { seedSurfaceMapFromWorkspaceGraph } from "./surface-map/seed.js";
-import { SurfaceMapStore } from "./surface-map/store.js";
+import { type SurfaceMapData, SurfaceMapStore, type SurfaceRecord } from "./surface-map/store.js";
 import { createSecurityTools } from "./tools/index.js";
 import type { PlanState } from "./tools/plan.js";
 import {
@@ -25,7 +34,54 @@ import {
 } from "./validation.js";
 import { buildLiveTargetPriorSeed } from "./workspace-graph/live-priors.js";
 import { buildWorkspaceGraphSeed } from "./workspace-graph/seed.js";
-import { WorkspaceGraphStore } from "./workspace-graph/store.js";
+import { type WorkspaceGraphData, type WorkspaceGraphNode, WorkspaceGraphStore } from "./workspace-graph/store.js";
+
+const STALE_RECOMMENDATION_HINTS = [
+	"already closed out",
+	"already closed-loop",
+	"already closed loop",
+	"closed out",
+	"closed-loop",
+	"closed loop",
+	"lowered as non-impactful",
+	"lowered as non impactful",
+	"lowered as",
+	"lowered this adjacent surface",
+	"non-impactful",
+	"non impactful",
+	"ready for write-up",
+	"ready for writeup",
+	"ready for report",
+	"reportable issue",
+	"does not need deeper",
+	"doesn't need deeper",
+	"no deeper work",
+	"best next move is option",
+	"control path",
+	"validated proof",
+	"validated and promoted",
+	"validated exploit",
+	"validated bug",
+	"validated issue",
+	"promoted durable finding",
+	"durable finding exists",
+	"durable finding already exists",
+	"real path proof exists",
+	"real-path proof exists",
+	"remains the validated",
+	"leave deprioritized",
+	"deprioritized unless new evidence reopens it",
+	"target-backed, promoted",
+	"target backed, promoted",
+	"promoted sample bug",
+	"already a target-backed",
+	"already a target backed",
+];
+
+interface ConfirmedFindingCoverage {
+	surfaceIds: Set<string>;
+	findingTexts: string[];
+}
 
 function extractMessageText(message: AgentMessage): string {
 	if (!("content" in message)) {
@@ -42,10 +98,478 @@ function extractMessageText(message: AgentMessage): string {
 		.join("\n");
 }
 
+function compactActionText(text: string, maxChars = 120): string {
+	const compact = text.replace(/\s+/g, " ").trim();
+	if (compact.length <= maxChars) {
+		return compact;
+	}
+	return `${compact.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function ensureSentence(text: string): string {
+	const trimmed = text.trim();
+	if (trimmed.length === 0) {
+		return trimmed;
+	}
+	return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+}
+
+function formatList(values: string[]): string {
+	if (values.length === 0) {
+		return "";
+	}
+	if (values.length === 1) {
+		return values[0]!;
+	}
+	if (values.length === 2) {
+		return `${values[0]!} and ${values[1]!}`;
+	}
+	return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+
+function formatOptionLabel(index: number): string {
+	let value = index;
+	let label = "";
+
+	do {
+		label = String.fromCharCode(65 + (value % 26)) + label;
+		value = Math.floor(value / 26) - 1;
+	} while (value >= 0);
+
+	return label;
+}
+
+function surfaceRecommendationPriority(surface: SurfaceRecord): number {
+	switch (surface.status) {
+		case "active":
+			return 6;
+		case "hot":
+			return 5;
+		case "blocked":
+			return 4;
+		case "candidate":
+			return 3;
+		case "covered":
+		case "confirmed":
+		case "rejected":
+			return 0;
+	}
+}
+
+function logicRecommendationPriority(rule: LogicRecord): number {
+	switch (rule.status) {
+		case "violated":
+			return 5;
+		case "candidate":
+			return 4;
+		case "aligned":
+			return 3;
+		case "confirmed":
+		case "rejected":
+			return 0;
+	}
+}
+
+function compareUpdatedAtDesc(left: { updatedAt: string }, right: { updatedAt: string }): number {
+	return right.updatedAt.localeCompare(left.updatedAt);
+}
+
+function normalizeRecommendationText(value: string): string {
+	return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function shouldUseFindingCoverageKey(value: string): boolean {
+	const normalized = normalizeRecommendationText(value);
+	return normalized.length >= 12 || /[:/._-]/.test(value);
+}
+
+function hasStaleRecommendationSignal(values: Iterable<string>): boolean {
+	const text = normalizeRecommendationText([...values].join(" "));
+	if (text.length === 0) {
+		return false;
+	}
+
+	return STALE_RECOMMENDATION_HINTS.some((hint) => text.includes(hint));
+}
+
+function getSurfaceReason(surface: SurfaceRecord): string | undefined {
+	if (surface.why?.trim()) {
+		return compactActionText(surface.why);
+	}
+	const firstEvidence = surface.evidence.find((entry) => entry.trim().length > 0);
+	return firstEvidence ? compactActionText(firstEvidence) : undefined;
+}
+
+function isStaleRecommendationSurface(surface: SurfaceRecord): boolean {
+	return hasStaleRecommendationSignal([surface.why ?? "", ...surface.evidence]);
+}
+
+function isIgnoredRecommendationSurface(surface: SurfaceRecord): boolean {
+	return [surface.id, surface.label, surface.why ?? "", ...surface.evidence].some((value) =>
+		containsWorkspaceContextReference(value),
+	);
+}
+
+function isStaleRecommendationRule(rule: LogicRecord): boolean {
+	return hasStaleRecommendationSignal([rule.label, rule.intended, rule.implemented, rule.gap, ...rule.evidence]);
+}
+
+function isIgnoredRecommendationRule(rule: LogicRecord): boolean {
+	if (
+		[rule.id, rule.label, rule.intended, rule.implemented, rule.gap, ...rule.evidence].some((value) =>
+			containsWorkspaceContextReference(value),
+		)
+	) {
+		return true;
+	}
+
+	return rule.surfaces.length > 0 && rule.surfaces.every((surface) => containsWorkspaceContextReference(surface));
+}
+
+function isIgnoredRecommendationNode(node: WorkspaceGraphNode): boolean {
+	return [node.id, node.label, node.summary ?? "", node.text, node.path ?? "", ...node.tags].some((value) =>
+		containsWorkspaceContextReference(value),
+	);
+}
+
+function isStaleRecommendationNode(node: WorkspaceGraphNode): boolean {
+	return hasStaleRecommendationSignal([node.label, node.summary ?? "", node.text, ...node.tags]);
+}
+
+function collectConfirmedFindingCoverage(workspaceGraph: WorkspaceGraphData): ConfirmedFindingCoverage {
+	const findingNodes = Object.values(workspaceGraph.nodes).filter(
+		(node) => node.kind === "finding" && node.status === "confirmed",
+	);
+	if (findingNodes.length === 0) {
+		return { surfaceIds: new Set<string>(), findingTexts: [] };
+	}
+
+	const findingIds = new Set(findingNodes.map((node) => node.id));
+	const surfaceIds = new Set<string>();
+	const findingTexts = new Set<string>();
+
+	for (const finding of findingNodes) {
+		for (const value of [finding.id, finding.label, finding.summary ?? "", finding.text, ...finding.tags]) {
+			const normalized = normalizeRecommendationText(value);
+			if (normalized.length > 0) {
+				findingTexts.add(normalized);
+			}
+		}
+
+		for (const tag of finding.tags) {
+			if (tag.includes(":")) {
+				surfaceIds.add(tag.toLowerCase());
+			}
+		}
+	}
+
+	for (const edge of workspaceGraph.edges) {
+		if (edge.relation !== "touches") {
+			continue;
+		}
+		if (findingIds.has(edge.from)) {
+			surfaceIds.add(edge.to.toLowerCase());
+		}
+		if (findingIds.has(edge.to)) {
+			surfaceIds.add(edge.from.toLowerCase());
+		}
+	}
+
+	return {
+		surfaceIds,
+		findingTexts: [...findingTexts],
+	};
+}
+
+function findingCoverageContainsAny(values: Iterable<string>, coverage: ConfirmedFindingCoverage): boolean {
+	for (const value of values) {
+		if (!shouldUseFindingCoverageKey(value)) {
+			continue;
+		}
+		const normalized = normalizeRecommendationText(value);
+		if (normalized.length === 0) {
+			continue;
+		}
+		if (coverage.surfaceIds.has(normalized)) {
+			return true;
+		}
+		if (coverage.findingTexts.some((text) => text.includes(normalized))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function isCoveredRecommendationSurface(surface: SurfaceRecord, coverage: ConfirmedFindingCoverage): boolean {
+	return findingCoverageContainsAny([surface.id, surface.label], coverage);
+}
+
+function isCoveredRecommendationRule(rule: LogicRecord, coverage: ConfirmedFindingCoverage): boolean {
+	return findingCoverageContainsAny([rule.id, rule.label, ...rule.surfaces], coverage);
+}
+
+function isCoveredRecommendationNode(node: WorkspaceGraphNode, coverage: ConfirmedFindingCoverage): boolean {
+	return findingCoverageContainsAny([node.id, node.label, node.path ?? "", ...node.tags], coverage);
+}
+
+function collectTrackedRecommendationKeys(logicMap: LogicMapData, surfaceMap: SurfaceMapData): Set<string> {
+	const tracked = new Set<string>();
+	for (const surface of Object.values(surfaceMap.surfaces)) {
+		tracked.add(surface.id.toLowerCase());
+		tracked.add(surface.label.toLowerCase());
+		for (const adjacentId of surface.adjacent) {
+			tracked.add(adjacentId.toLowerCase());
+		}
+	}
+
+	for (const rule of Object.values(logicMap.rules)) {
+		tracked.add(rule.id.toLowerCase());
+		for (const surfaceId of rule.surfaces) {
+			tracked.add(surfaceId.toLowerCase());
+		}
+	}
+
+	return tracked;
+}
+
+function workspaceExplorationPriority(node: WorkspaceGraphNode): number {
+	let priority = node.score * 10;
+	if (node.status === "hot") {
+		priority += 6;
+	}
+	if (node.id.startsWith("module:")) {
+		priority += 5;
+	}
+
+	switch (node.kind) {
+		case "auth_flow":
+		case "endpoint":
+		case "entrypoint":
+			return priority + 6;
+		case "boundary":
+		case "parser":
+		case "crypto":
+			return priority + 4;
+		default:
+			return priority + 2;
+	}
+}
+
+function buildFreshExplorationAction(node: WorkspaceGraphNode): string {
+	const subject = `${node.label} (${node.id})`;
+	const reason = node.summary?.trim() ? compactActionText(node.summary) : undefined;
+
+	if (node.id.startsWith("module:")) {
+		return ensureSentence(
+			reason
+				? `Open a fresh branch on ${subject}. Start from ${reason}`
+				: `Open a fresh branch on ${subject}. Map its ingress, trust boundaries, and auth assumptions before revisiting lowered paths`,
+		);
+	}
+
+	return ensureSentence(
+		reason
+			? `Explore ${subject} as a fresh branch. Start from ${reason}`
+			: `Explore ${subject} as a fresh branch and decide whether it exposes a stronger ingress or trust-boundary mistake than the already-lowered paths`,
+	);
+}
+
+function buildFreshExplorationActions(
+	logicMap: LogicMapData,
+	surfaceMap: SurfaceMapData,
+	workspaceGraph: WorkspaceGraphData,
+	coverage: ConfirmedFindingCoverage,
+	maxActions: number,
+): string[] {
+	if (maxActions <= 0) {
+		return [];
+	}
+
+	const trackedKeys = collectTrackedRecommendationKeys(logicMap, surfaceMap);
+	const candidates = Object.values(workspaceGraph.nodes)
+		.filter((node) => node.source === "workspace_seed" && node.kind !== "finding")
+		.filter((node) => node.status === "candidate" || node.status === "hot" || node.status === "active")
+		.filter((node) => node.score >= 3)
+		.filter(
+			(node) =>
+				!isIgnoredRecommendationNode(node) &&
+				!isStaleRecommendationNode(node) &&
+				!isCoveredRecommendationNode(node, coverage),
+		)
+		.filter((node) => {
+			const keys = [node.id, node.label, node.path ?? ""].map((value) => value.toLowerCase()).filter(Boolean);
+			if (keys.some((key) => trackedKeys.has(key))) {
+				return false;
+			}
+
+			if (node.path) {
+				const moduleKey = `module:${dirname(node.path).toLowerCase()}`;
+				if (trackedKeys.has(moduleKey)) {
+					return false;
+				}
+			}
+
+			return true;
+		})
+		.sort((left, right) => {
+			const priorityDelta = workspaceExplorationPriority(right) - workspaceExplorationPriority(left);
+			if (priorityDelta !== 0) {
+				return priorityDelta;
+			}
+			return compareUpdatedAtDesc(left, right);
+		});
+
+	return candidates.slice(0, maxActions).map((node) => buildFreshExplorationAction(node));
+}
+
+function buildSurfaceAction(surface: SurfaceRecord): string {
+	const subject = `${surface.label} (${surface.id})`;
+	const reason = getSurfaceReason(surface);
+
+	switch (surface.status) {
+		case "active":
+		case "hot":
+			return ensureSentence(
+				reason
+					? `Drive ${subject} next. Validate ${reason}`
+					: `Drive ${subject} next. Reproduce the path and decide whether it is ready for exploitation work`,
+			);
+		case "blocked":
+			return ensureSentence(
+				reason ? `Unblock ${subject}. Resolve ${reason}` : `Unblock ${subject} before broadening the search`,
+			);
+		case "candidate":
+			return ensureSentence(
+				reason
+					? `Triage ${subject}. Start from ${reason}`
+					: `Triage ${subject} and either promote it, claim it, or reject it quickly`,
+			);
+		case "covered":
+		case "confirmed":
+			return ensureSentence(`Use ${subject} as a control while you verify adjacent paths`);
+		case "rejected":
+			return ensureSentence(`Leave ${subject} deprioritized unless new evidence reopens it`);
+	}
+}
+
+function buildLogicAction(rule: LogicRecord): string {
+	const subject = `${rule.label} (${rule.id})`;
+	const surfaceScope =
+		rule.surfaces.length > 0 ? ` on ${formatList(rule.surfaces.slice(0, 3).map((surface) => `"${surface}"`))}` : "";
+	const gap = rule.gap.trim() || `${rule.intended.trim()} vs ${rule.implemented.trim()}`;
+	return ensureSentence(
+		`Re-test ${subject}${surfaceScope}. Turn this recorded gap into a concrete trigger hypothesis: ${compactActionText(gap)}`,
+	);
+}
+
+function getSavedPlanStep(notebook: NotebookData): string | undefined {
+	const savedPlan = notebook._plan;
+	if (!savedPlan) {
+		return undefined;
+	}
+
+	for (const line of savedPlan.split("\n")) {
+		const trimmed = line.trim();
+		if (trimmed.startsWith("- ")) {
+			return compactActionText(trimmed.slice(2), 120);
+		}
+	}
+
+	return undefined;
+}
+
+export function buildRecommendedActions(
+	notebook: NotebookData,
+	logicMap: LogicMapData,
+	surfaceMap: SurfaceMapData,
+	workspaceGraph: WorkspaceGraphData,
+	maxActions = 4,
+): string | undefined {
+	const confirmedFindingCoverage = collectConfirmedFindingCoverage(workspaceGraph);
+	const notebookKeys = Object.keys(notebook).filter((key) => notebook[key]?.trim().length > 0);
+	const savedPlanStep = getSavedPlanStep(notebook);
+	const noteKeys = notebookKeys.filter((key) => key !== "_plan");
+	const rankedSurfaces = Object.values(surfaceMap.surfaces)
+		.filter(
+			(surface) =>
+				surfaceRecommendationPriority(surface) > 0 &&
+				!isIgnoredRecommendationSurface(surface) &&
+				!isStaleRecommendationSurface(surface) &&
+				!isCoveredRecommendationSurface(surface, confirmedFindingCoverage),
+		)
+		.sort((left, right) => {
+			const priorityDelta = surfaceRecommendationPriority(right) - surfaceRecommendationPriority(left);
+			if (priorityDelta !== 0) {
+				return priorityDelta;
+			}
+			if (right.score !== left.score) {
+				return right.score - left.score;
+			}
+			return compareUpdatedAtDesc(left, right);
+		});
+	const rankedRules = Object.values(logicMap.rules)
+		.filter(
+			(rule) =>
+				logicRecommendationPriority(rule) > 1 &&
+				!isIgnoredRecommendationRule(rule) &&
+				!isStaleRecommendationRule(rule) &&
+				!isCoveredRecommendationRule(rule, confirmedFindingCoverage),
+		)
+		.sort((left, right) => {
+			const priorityDelta = logicRecommendationPriority(right) - logicRecommendationPriority(left);
+			if (priorityDelta !== 0) {
+				return priorityDelta;
+			}
+			return compareUpdatedAtDesc(left, right);
+		});
+
+	const actions: string[] = [];
+	for (const surface of rankedSurfaces.slice(0, 2)) {
+		if (actions.length >= maxActions) {
+			break;
+		}
+		actions.push(buildSurfaceAction(surface));
+	}
+	for (const rule of rankedRules.slice(0, 2)) {
+		if (actions.length >= maxActions) {
+			break;
+		}
+		actions.push(buildLogicAction(rule));
+	}
+	for (const action of buildFreshExplorationActions(
+		logicMap,
+		surfaceMap,
+		workspaceGraph,
+		confirmedFindingCoverage,
+		maxActions - actions.length,
+	)) {
+		if (actions.length >= maxActions) {
+			break;
+		}
+		actions.push(action);
+	}
+	if (savedPlanStep && actions.length < maxActions) {
+		actions.push(ensureSentence(`Resume the saved plan with ${savedPlanStep}`));
+	}
+	if (noteKeys.length > 0 && actions.length < maxActions) {
+		actions.push(
+			ensureSentence(
+				`Refresh notebook context from ${formatList(noteKeys.slice(0, 3).map((key) => `"${key}"`))} before the next mutation`,
+			),
+		);
+	}
+	if (actions.length === 0) {
+		return undefined;
+	}
+
+	return actions.map((action, index) => `${formatOptionLabel(index)}. ${action}`).join("\n");
+}
+
 export interface SecurityAgentRuntimeOptions {
 	cwd: string;
 	workspaceRoot?: string;
 	stateDir?: string;
+	sessionDir?: string;
 	model: Model<Api>;
 	thinkingLevel: ThinkingLevel;
 	debugSpecPath?: string;
@@ -67,6 +591,7 @@ export class SecurityAgentRuntime {
 	readonly validationSpec?: ValidationSpec;
 	readonly validationState?: ValidationSessionState;
 	readonly agent: Agent;
+	private sessionManager: SessionManager;
 	private readonly proofRepairAttempts: number;
 	private workspacePrepared = false;
 
@@ -84,6 +609,7 @@ export class SecurityAgentRuntime {
 		this.validationSpec = options.validationSpecPath ? loadValidationSpec(options.validationSpecPath) : undefined;
 		this.validationState = this.validationSpec ? { attempts: 0, history: [] } : undefined;
 		this.proofRepairAttempts = options.proofRepairAttempts ?? (this.validationSpec ? 2 : 0);
+		this.sessionManager = SessionManager.create(this.cwd, options.sessionDir);
 
 		this.agent = new Agent({
 			initialState: {
@@ -108,13 +634,32 @@ export class SecurityAgentRuntime {
 			getApiKey: (provider) => getConfiguredApiKey(provider),
 			transformContext: async (messages) => this.injectContext(messages),
 		});
+
+		this.agent.subscribe((event) => {
+			this.persistSessionEvent(event);
+		});
+
+		const existingSession = this.sessionManager.buildSessionContext();
+		if (existingSession.messages.length > 0) {
+			this.applySessionContext(existingSession);
+			if (!this.sessionManager.hasEntryType("thinking_level_change")) {
+				this.sessionManager.appendThinkingLevelChange(this.agent.state.thinkingLevel);
+			}
+			if (!this.sessionManager.hasEntryType("model_change")) {
+				this.sessionManager.appendModelChange(this.agent.state.model.provider, this.agent.state.model.id);
+			}
+		} else {
+			this.persistCurrentSessionSettings();
+		}
 	}
 
 	private async injectContext(messages: AgentMessage[]): Promise<AgentMessage[]> {
 		await this.ensureWorkspacePrepared(messages);
+		const recommendedActionsText = this.getStartupRecommendedActions();
 		const injectedContext = formatInjectedContext({
 			cwd: this.cwd,
 			contextFiles: this.contextFiles,
+			recommendedActionsText,
 			notebookText: this.notebook.formatForPrompt(),
 			surfaceMapText: this.surfaceMap.formatForPrompt(),
 			logicMapText: this.logicMap.formatForPrompt(),
@@ -147,7 +692,6 @@ export class SecurityAgentRuntime {
 
 	private async refreshLiveTargetPriors(messages: AgentMessage[]): Promise<void> {
 		const textSources = [
-			...this.contextFiles.map((file) => ({ text: file.content, source: file.path })),
 			...messages
 				.filter((message) => message.role === "user")
 				.map((message, index) => ({
@@ -182,15 +726,63 @@ export class SecurityAgentRuntime {
 		return this.agent.state;
 	}
 
+	get sessionId(): string {
+		return this.sessionManager.getSessionId();
+	}
+
+	get sessionFile(): string | undefined {
+		return this.sessionManager.getSessionFile();
+	}
+
+	get conversationMessages(): readonly AgentMessage[] {
+		return this.agent.state.messages;
+	}
+
+	get sessionInfo(): SessionInfo | undefined {
+		const sessionFile = this.sessionFile;
+		return sessionFile ? readSessionInfo(sessionFile) : undefined;
+	}
+
+	getStartupRecommendedActions(maxActions = 4): string | undefined {
+		return buildRecommendedActions(
+			this.notebook.read(),
+			this.logicMap.read(),
+			this.surfaceMap.read(),
+			this.workspaceGraph.read(),
+			maxActions,
+		);
+	}
+
+	async exportResearchGraphHtml(): Promise<ResearchGraphHtmlResult> {
+		return writeResearchGraphHtml({
+			workspaceRoot: this.workspaceRoot,
+			workspaceGraph: this.workspaceGraph.read(),
+			surfaceMap: this.surfaceMap.read(),
+			logicMap: this.logicMap.read(),
+			notebook: this.notebook.read(),
+		});
+	}
+
 	setModel(model: Model<Api>): ThinkingLevel {
+		const previousModel = this.agent.state.model;
+		const modelChanged = previousModel.provider !== model.provider || previousModel.id !== model.id;
 		this.agent.state.model = model;
+		if (modelChanged) {
+			this.sessionManager.appendModelChange(model.provider, model.id);
+		}
 		const clampedThinkingLevel = clampThinkingLevel(model, this.agent.state.thinkingLevel);
+		if (clampedThinkingLevel !== this.agent.state.thinkingLevel) {
+			this.sessionManager.appendThinkingLevelChange(clampedThinkingLevel);
+		}
 		this.agent.state.thinkingLevel = clampedThinkingLevel;
 		return clampedThinkingLevel;
 	}
 
 	setThinkingLevel(thinkingLevel: ThinkingLevel): ThinkingLevel {
 		const clampedThinkingLevel = clampThinkingLevel(this.agent.state.model, thinkingLevel);
+		if (clampedThinkingLevel !== this.agent.state.thinkingLevel) {
+			this.sessionManager.appendThinkingLevelChange(clampedThinkingLevel);
+		}
 		this.agent.state.thinkingLevel = clampedThinkingLevel;
 		return clampedThinkingLevel;
 	}
@@ -203,6 +795,56 @@ export class SecurityAgentRuntime {
 			this.validationState.lastResult = undefined;
 			this.validationState.history = [];
 		}
+	}
+
+	startNewConversation(): string | undefined {
+		const parentSession = this.sessionManager.getSessionFile();
+		this.sessionManager.newSession({ parentSession });
+		this.reset();
+		this.persistCurrentSessionSettings();
+		return this.sessionManager.getSessionFile();
+	}
+
+	listStoredConversations(): SessionInfo[] {
+		return listSessions(this.cwd, this.sessionManager.getSessionDir());
+	}
+
+	resolveStoredConversation(sessionArg: string): SessionInfo | undefined {
+		const trimmed = sessionArg.trim();
+		if (trimmed.length === 0) {
+			return undefined;
+		}
+
+		if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.endsWith(".jsonl")) {
+			const resolvedPath = resolve(trimmed);
+			return readSessionInfo(resolvedPath);
+		}
+
+		return this.listStoredConversations().find((session) => session.id.startsWith(trimmed));
+	}
+
+	resumeStoredConversation(sessionPath: string): SessionInfo {
+		const nextSessionManager = SessionManager.open(sessionPath, this.sessionManager.getSessionDir());
+		if (nextSessionManager.getCwd() !== this.cwd) {
+			throw new Error(
+				`Session cwd ${nextSessionManager.getCwd()} does not match the current workspace cwd ${this.cwd}.`,
+			);
+		}
+
+		this.sessionManager = nextSessionManager;
+		this.applySessionContext(this.sessionManager.buildSessionContext());
+		if (!this.sessionManager.hasEntryType("thinking_level_change")) {
+			this.sessionManager.appendThinkingLevelChange(this.agent.state.thinkingLevel);
+		}
+		if (!this.sessionManager.hasEntryType("model_change")) {
+			this.sessionManager.appendModelChange(this.agent.state.model.provider, this.agent.state.model.id);
+		}
+
+		const sessionInfo = readSessionInfo(sessionPath);
+		if (!sessionInfo) {
+			throw new Error(`Failed to read session metadata from ${sessionPath}.`);
+		}
+		return sessionInfo;
 	}
 
 	async prompt(prompt: string): Promise<void> {
@@ -223,6 +865,34 @@ export class SecurityAgentRuntime {
 
 	waitForIdle(): Promise<void> {
 		return this.agent.waitForIdle();
+	}
+
+	private persistCurrentSessionSettings(): void {
+		this.sessionManager.appendModelChange(this.agent.state.model.provider, this.agent.state.model.id);
+		this.sessionManager.appendThinkingLevelChange(this.agent.state.thinkingLevel);
+	}
+
+	private applySessionContext(sessionContext: SessionContext): void {
+		this.reset();
+		if (sessionContext.model) {
+			try {
+				this.agent.state.model = resolveModel(sessionContext.model);
+			} catch {
+				// Keep the active model when a stored model is no longer available.
+			}
+		}
+		this.agent.state.thinkingLevel = clampThinkingLevel(this.agent.state.model, sessionContext.thinkingLevel);
+		this.agent.state.messages = sessionContext.messages;
+	}
+
+	private persistSessionEvent(event: AgentEvent): void {
+		if (event.type !== "message_end") {
+			return;
+		}
+
+		if (event.message.role === "user" || event.message.role === "assistant" || event.message.role === "toolResult") {
+			this.sessionManager.appendMessage(event.message);
+		}
 	}
 
 	private async runProofRepairLoop(startingAttempts: number): Promise<void> {

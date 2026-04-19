@@ -1,5 +1,5 @@
-import { createWriteStream, existsSync, mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { createWriteStream, existsSync, mkdirSync, type WriteStream } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { stderr, stdin, stdout } from "node:process";
 import { createInterface } from "node:readline/promises";
 import type { ThinkingLevel } from "@mariozechner/pi-agent-core";
@@ -35,7 +35,7 @@ Options:
   --provider <name>        Provider name
   --model <id>             Model id
   --thinking <level>       Thinking level: off, minimal, low, medium, high, xhigh
-  --session-dir <dir>      Directory for event logs
+  --session-dir <dir>      Directory for stored conversations and event logs
   --workspace-root <dir>   Bound workspace context and graph indexing to this root
   --debug-spec <path>      JSON spec describing an external debug command
   --validation-spec <path> JSON spec describing an external validation command
@@ -112,16 +112,35 @@ async function readStdinPrompt(): Promise<string | undefined> {
 	return text.length > 0 ? text : undefined;
 }
 
-function attachEventLogSink(runtime: SecurityAgentRuntime, sessionDir: string | undefined): () => void {
-	if (sessionDir && !existsSync(sessionDir)) {
-		mkdirSync(sessionDir, { recursive: true });
-	}
+function attachEventLogSink(runtime: SecurityAgentRuntime): () => void {
+	let activeLogPath: string | undefined;
+	let eventStream: WriteStream | undefined;
 
-	const eventStream = sessionDir ? createWriteStream(join(sessionDir, "events.jsonl"), { flags: "a" }) : undefined;
-	const unsubscribe = runtime.subscribe((event) => {
-		if (eventStream) {
-			eventStream.write(`${JSON.stringify(event)}\n`);
+	const ensureStream = (): void => {
+		const sessionFile = runtime.sessionFile;
+		const nextLogPath = sessionFile ? sessionFile.replace(/\.jsonl$/u, ".events.jsonl") : undefined;
+		if (nextLogPath === activeLogPath) {
+			return;
 		}
+
+		eventStream?.end();
+		eventStream = undefined;
+		activeLogPath = nextLogPath;
+
+		if (!nextLogPath) {
+			return;
+		}
+
+		const logDir = dirname(nextLogPath);
+		if (!existsSync(logDir)) {
+			mkdirSync(logDir, { recursive: true });
+		}
+		eventStream = createWriteStream(nextLogPath, { flags: "a" });
+	};
+
+	const unsubscribe = runtime.subscribe((event) => {
+		ensureStream();
+		eventStream?.write(`${JSON.stringify(event)}\n`);
 	});
 
 	return () => {
@@ -207,13 +226,14 @@ export async function runCli(argv: string[]): Promise<number> {
 		cwd: process.cwd(),
 		workspaceRoot: args.workspaceRoot,
 		stateDir: args.sessionDir ?? process.cwd(),
+		sessionDir: args.sessionDir,
 		model,
 		thinkingLevel: resolveThinking(args.thinkingLevel, model),
 		debugSpecPath: args.debugSpecPath,
 		validationSpecPath: args.validationSpecPath,
 		proofRepairAttempts: args.proofRepairAttempts,
 	});
-	const detachEventLog = attachEventLogSink(runtime, args.sessionDir);
+	const detachEventLog = attachEventLogSink(runtime);
 
 	try {
 		if (prompts.length > 0) {
