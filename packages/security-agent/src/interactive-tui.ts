@@ -1378,7 +1378,7 @@ class SecurityConsoleApp implements Component, Focusable {
 			const statsLabel = `${result.nodeCount} nodes | ${result.edgeCount} edges`;
 			this.pushNotice(
 				"graph",
-				`Research graph exported to ${hyperlink(result.url, result.url)} (${statsLabel}).`,
+				`Research graph exported to ${hyperlink(result.displayPath, result.url)} (${statsLabel}).`,
 				result.nodeCount === 0 ? "warning" : "success",
 			);
 		} catch (error: unknown) {

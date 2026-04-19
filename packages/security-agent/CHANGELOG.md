@@ -15,6 +15,7 @@
 - Added startup `Recommended Actions` cards that summarize next steps from saved notebook, logic-map, and surface-map research when a workspace already has prior security-agent state.
 
 ### Changed
+- Made `/graph` export links WSL-aware so displayed file paths and clickable file URLs translate `/mnt/<drive>` paths to Windows drive paths and native WSL paths to `wsl.localhost` UNC URLs.
 - Compact the interactive plan panel by removing `[output truncated]` labels from snapshot summaries, collapsing plan step whitespace, and using `Shift+Up`/`Shift+Down` for plan scrolling plus `Shift+Left`/`Shift+Right` for surfaces scrolling.
 - Simplified the plan panel to raw terminal lines with no card background, padding, title row, or timestamp row, and fixed it to render every step in each visible phase instead of only the first step.
 - Restyled the raw plan panel so phase names render in white, steps render in subdued grey, and both phases and steps use green/grey block markers for derived completion state.

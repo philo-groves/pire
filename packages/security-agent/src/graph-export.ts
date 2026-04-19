@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { release, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { LogicMapData, LogicRecord } from "./logic-map/store.js";
@@ -87,8 +87,89 @@ export interface WriteResearchGraphHtmlOptions {
 export interface ResearchGraphHtmlResult {
 	path: string;
 	url: string;
+	displayPath: string;
 	nodeCount: number;
 	edgeCount: number;
+}
+
+function isWsl(env: NodeJS.ProcessEnv = process.env): boolean {
+	if (env.WSL_DISTRO_NAME || env.WSLENV || env.WSL_INTEROP) {
+		return true;
+	}
+	try {
+		return /microsoft|wsl/i.test(release());
+	} catch {
+		return false;
+	}
+}
+
+function encodePathSegments(path: string): string {
+	return path
+		.split("/")
+		.map((segment) => encodeURIComponent(segment))
+		.join("/");
+}
+
+function toWindowsDrivePath(filePath: string): string | undefined {
+	const match = /^\/mnt\/([a-zA-Z])(?:\/(.*))?$/.exec(filePath);
+	if (!match) {
+		return undefined;
+	}
+
+	const driveLetter = match[1]!.toUpperCase();
+	const remainder = (match[2] ?? "").replaceAll("/", "\\");
+	return remainder.length > 0 ? `${driveLetter}:\\${remainder}` : `${driveLetter}:\\`;
+}
+
+function toWindowsDriveFileUrl(filePath: string): string | undefined {
+	const match = /^\/mnt\/([a-zA-Z])(?:\/(.*))?$/.exec(filePath);
+	if (!match) {
+		return undefined;
+	}
+
+	const driveLetter = match[1]!.toUpperCase();
+	const remainder = match[2] ?? "";
+	const encodedRemainder = remainder
+		.split("/")
+		.filter((segment) => segment.length > 0)
+		.map((segment) => encodeURIComponent(segment))
+		.join("/");
+	return encodedRemainder.length > 0 ? `file:///${driveLetter}:/${encodedRemainder}` : `file:///${driveLetter}:/`;
+}
+
+function toWslUncDisplayPath(filePath: string, distroName: string): string {
+	const uncPath = filePath.replaceAll("/", "\\");
+	return `\\\\wsl.localhost\\${distroName}${uncPath}`;
+}
+
+function toWslUncFileUrl(filePath: string, distroName: string): string {
+	const encodedDistro = encodeURIComponent(distroName);
+	const normalizedPath = filePath.startsWith("/") ? filePath : `/${filePath}`;
+	return `file://wsl.localhost/${encodedDistro}${encodePathSegments(normalizedPath)}`;
+}
+
+function formatGraphFileLocation(filePath: string): { url: string; displayPath: string } {
+	if (!isWsl()) {
+		return {
+			url: pathToFileURL(filePath).toString(),
+			displayPath: filePath,
+		};
+	}
+
+	const windowsDrivePath = toWindowsDrivePath(filePath);
+	const windowsDriveUrl = toWindowsDriveFileUrl(filePath);
+	if (windowsDrivePath && windowsDriveUrl) {
+		return {
+			url: windowsDriveUrl,
+			displayPath: windowsDrivePath,
+		};
+	}
+
+	const distroName = process.env.WSL_DISTRO_NAME?.trim() || "Ubuntu";
+	return {
+		url: toWslUncFileUrl(filePath, distroName),
+		displayPath: toWslUncDisplayPath(filePath, distroName),
+	};
 }
 
 function clampText(text: string | undefined, maxLength = 360): string | undefined {
@@ -1353,9 +1434,11 @@ export async function writeResearchGraphHtml(options: WriteResearchGraphHtmlOpti
 	await mkdir(outputDir, { recursive: true });
 	const filePath = join(outputDir, createGraphFileName(options.workspaceRoot));
 	await writeFile(filePath, renderResearchGraphHtml(document), "utf-8");
+	const location = formatGraphFileLocation(filePath);
 	return {
 		path: filePath,
-		url: pathToFileURL(filePath).toString(),
+		url: location.url,
+		displayPath: location.displayPath,
 		nodeCount: document.stats.totalNodes,
 		edgeCount: document.stats.totalEdges,
 	};
