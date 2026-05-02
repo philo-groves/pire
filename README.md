@@ -1,3 +1,5 @@
+**This project has been superceded by [Beale](https://github.com/philo-groves/Beale). This repository will stay available, but will not be maintained. Feel free use Beale or fork this repository.**
+
 <p align="center">
   <a href="https://shittycodingagent.ai">
     <img src="https://shittycodingagent.ai/logo.svg" alt="pi logo" width="128">
